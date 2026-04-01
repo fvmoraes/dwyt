@@ -255,29 +255,94 @@ select_tools() {
   clear
 }
 
-# ─── Dialog: selecionar repositório ──────────────────────────────────────────
+# ─── Dialog: navegador de diretórios interativo ──────────────────────────────
 select_repo() {
-  local dirs=()
-  while IFS= read -r d; do
-    dirs+=("$d" "$(basename "$d")")
-  done < <(find "$HOME" -maxdepth 3 -type d \
-    ! -path "*/.dwyt*" ! -path "*/.claude*" ! -path "*/\.*" \
-    ! -path "*/node_modules/*" ! -path "*/__pycache__/*" ! -path "*/vendor/*" \
-    2>/dev/null | sort | head -80)
+  local current_dir="$HOME"
+  CHOSEN_REPO=""
 
-  [[ ${#dirs[@]} -eq 0 ]] && { error "Nenhum diretório encontrado."; exit 1; }
+  while true; do
+    # Lista subdiretórios visíveis no diretório atual
+    local subdirs=()
+    while IFS= read -r d; do
+      subdirs+=("$d")
+    done < <(find "$current_dir" -mindepth 1 -maxdepth 1 -type d \
+      ! -name ".*" \
+      ! -name "node_modules" \
+      ! -name "__pycache__" \
+      ! -name "vendor" \
+      ! -name ".dwyt" \
+      2>/dev/null | sort)
 
-  CHOSEN_REPO=$(dialog \
-    --backtitle "dwyt — Don't Waste Your Tokens" \
-    --title "Selecione o projeto para integrar as ferramentas" \
-    --menu "Setas para navegar | ENTER para confirmar:" 25 72 18 \
-    "${dirs[@]}" \
-    3>&1 1>&2 2>&3) || {
-      clear; warn "Sem repositório — pulando integração."; CHOSEN_REPO=""; return
-    }
-  clear
-  success "Projeto selecionado: $CHOSEN_REPO"
+    # Monta itens do menu dialog
+    local items=()
+    items+=("." "[ ✓  SELECIONAR ESTE DIRETÓRIO ]")
+    if [[ "$current_dir" != "/" ]]; then
+      items+=(".." "[ ←  VOLTAR ]  → $(dirname "$current_dir")")
+    fi
+
+    for d in "${subdirs[@]}"; do
+      local name
+      name="$(basename "$d")"
+      local n
+      n=$(find "$d" -mindepth 1 -maxdepth 1 -type d ! -name ".*" 2>/dev/null | wc -l | tr -d " \t")
+      if [[ "$n" -gt 0 ]]; then
+        items+=("$name" "${name}/   ▶  ($n subdir)")
+      else
+        items+=("$name" "${name}/")
+      fi
+    done
+
+    # Linha de título mostrando caminho atual
+    local title_line
+    title_line="$(printf '📂  %s' "$current_dir")"
+
+    local choice
+    choice=$(dialog \
+      --backtitle "dwyt — Don't Waste Your Tokens" \
+      --title " Navegador de Projetos " \
+      --extra-button --extra-label "Ir para /" \
+      --ok-label "Confirmar" \
+      --cancel-label "Cancelar" \
+      --menu "$title_line\n\nSetas = navegar  |  Selecione [✓] para usar este diretório" \
+      28 78 18 \
+      "${items[@]}" \
+      3>&1 1>&2 2>&3)
+    local code=$?
+    clear
+
+    # Botão extra: ir para raiz
+    if [[ $code -eq 3 ]]; then
+      current_dir="/"
+      continue
+    fi
+
+    # Cancelar
+    if [[ $code -ne 0 ]]; then
+      warn "Seleção cancelada — pulando integração de projeto."
+      CHOSEN_REPO=""
+      return
+    fi
+
+    case "$choice" in
+      ".")
+        # Seleciona o diretório atual
+        CHOSEN_REPO="$current_dir"
+        success "Projeto selecionado: $CHOSEN_REPO"
+        return
+        ;;
+      "..")
+        # Sobe um nível
+        current_dir="$(dirname "$current_dir")"
+        ;;
+      *)
+        # Entra no subdiretório
+        local next="${current_dir%/}/${choice}"
+        [[ -d "$next" ]] && current_dir="$next"
+        ;;
+    esac
+  done
 }
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # [1] codebase-memory-mcp  (binário + UI)
@@ -370,31 +435,78 @@ install_headroom() {
 
   if [[ -x "$WRAPPER" ]] && "$WRAPPER" --help &>/dev/null 2>&1; then
     success "Headroom já instalado"
-  else
-    local PY_VER
-    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-
-    # Limpa venv corrompido de tentativa anterior
-    [[ -d "$HEADROOM_VENV" ]] && rm -rf "$HEADROOM_VENV"
-
-    info "Criando virtualenv Python $PY_VER em $HEADROOM_VENV ..."
-    python3 -m venv "$HEADROOM_VENV" || {
-      error "Falha no venv. Rode: sudo apt install python${PY_VER}-venv && ./dwyt.sh"
-      return 1
-    }
-
-    info "Instalando headroom-ai[proxy]..."
-    "$HEADROOM_VENV/bin/pip" install --quiet --upgrade pip
-    "$HEADROOM_VENV/bin/pip" install --quiet "headroom-ai[proxy]"
-
-    # Cria wrapper em ~/.dwyt/bin/
-    cat > "$WRAPPER" << EOF
-#!/usr/bin/env bash
-exec "${HEADROOM_VENV}/bin/headroom" "\$@"
-EOF
-    chmod +x "$WRAPPER"
-    success "Headroom instalado e wrapper criado em $WRAPPER"
+    append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "headroom"
+    export PATH="${DWYT_BIN}:$PATH"
+    return
   fi
+
+  # headroom-ai exige Python >= 3.10
+  local PYTHON_BIN="python3"
+  local PY_MINOR
+  PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+  local PY_VER
+  PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+
+  if [[ "$PY_MINOR" -lt 10 ]]; then
+    warn "Python $PY_VER detectado — headroom-ai requer >= 3.10. Procurando versão compatível..."
+    local found=""
+    for v in 3.13 3.12 3.11 3.10; do
+      if command -v "python$v" &>/dev/null; then
+        PYTHON_BIN="python$v"
+        PY_VER="$v"
+        found="$v"
+        success "Encontrado: Python $v"
+        break
+      fi
+    done
+
+    if [[ -z "$found" ]]; then
+      if [[ "$OS" == "macos" ]] && command -v brew &>/dev/null; then
+        info "Instalando Python 3.12 via Homebrew..."
+        brew install python@3.12
+        PYTHON_BIN="$(brew --prefix python@3.12)/bin/python3.12"
+        PY_VER="3.12"
+      elif [[ "$OS" == "debian" ]]; then
+        info "Instalando Python 3.12 via apt..."
+        sudo apt-get install -y python3.12 python3.12-venv 2>/dev/null \
+          || sudo apt-get install -y python3.11 python3.11-venv 2>/dev/null
+        command -v python3.12 &>/dev/null && PYTHON_BIN="python3.12" && PY_VER="3.12" \
+          || { command -v python3.11 &>/dev/null && PYTHON_BIN="python3.11" && PY_VER="3.11"; }
+      else
+        error "Python >= 3.10 não encontrado."
+        error "No macOS instale com: brew install python@3.12"
+        error "Depois rode: ./dwyt.sh"
+        return 1
+      fi
+    fi
+  fi
+
+  info "Usando Python $PY_VER para o Headroom"
+
+  # Limpa venv corrompido de tentativa anterior
+  [[ -d "$HEADROOM_VENV" ]] && rm -rf "$HEADROOM_VENV"
+
+  info "Criando virtualenv em $HEADROOM_VENV ..."
+  "$PYTHON_BIN" -m venv "$HEADROOM_VENV" || {
+    error "Falha ao criar venv com $PYTHON_BIN"
+    return 1
+  }
+
+  info "Instalando headroom-ai[proxy]..."
+  "$HEADROOM_VENV/bin/pip" install --quiet --upgrade pip
+  "$HEADROOM_VENV/bin/pip" install --quiet "headroom-ai[proxy]" || {
+    error "Falha ao instalar headroom-ai."
+    return 1
+  }
+
+  cat > "$WRAPPER" << 'WEOF'
+#!/usr/bin/env bash
+exec "VENV_PLACEHOLDER/bin/headroom" "$@"
+WEOF
+  # Substitui o placeholder pelo caminho real
+  sed -i.bak "s|VENV_PLACEHOLDER|${HEADROOM_VENV}|g" "$WRAPPER" && rm -f "${WRAPPER}.bak"
+  chmod +x "$WRAPPER"
+  success "Headroom instalado com Python $PY_VER — wrapper em $WRAPPER"
 
   append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "headroom"
   export PATH="${DWYT_BIN}:$PATH"
@@ -829,7 +941,7 @@ start_ui() {
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 main() {
-  handle_args "${@}"
+  handle_args "${@:-}"
 
   clear
   echo -e "${BOLD}${BLUE}"
@@ -862,4 +974,4 @@ main() {
   show_summary
 }
 
-main "$@"
+main "${@:-}"
