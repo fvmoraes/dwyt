@@ -80,7 +80,7 @@ uninstall() {
   • Hook RTK global (~/.claude/hooks/rtk-rewrite.sh)
   • Banco do codebase-memory-mcp (~/.cache/codebase-memory-mcp/)
 
-Não remove arquivos dos seus projetos (.mcp.json, CLAUDE.md, .claude/).
+Não remove arquivos dos seus projetos (.claude/.mcp.json, .claude/CLAUDE.md, .claude/).
 
 Deseja continuar?"     18 65 || { clear; info "Desinstalação cancelada."; exit 0; }
   clear
@@ -551,10 +551,24 @@ integrate_project() {
   local hooks_dir="${claude_dir}/hooks"
   local rules_dir="${claude_dir}/rules"
   local settings_file="${claude_dir}/settings.json"
-  local mcp_file="${CHOSEN_REPO}/.mcp.json"
-  local claude_md="${CHOSEN_REPO}/CLAUDE.md"
+  local mcp_file="${claude_dir}/.mcp.json"
+  local claude_md="${claude_dir}/CLAUDE.md"
 
   mkdir -p "$hooks_dir" "$rules_dir" "${claude_dir}/memory"
+
+  # ── .gitignore — ignora a pasta .claude/ ──────────────────────────────────
+  local gitignore="${CHOSEN_REPO}/.gitignore"
+  if [[ -f "$gitignore" ]]; then
+    if ! grep -qxF ".claude/" "$gitignore"; then
+      printf '\n# dwyt\n.claude/\n' >> "$gitignore"
+      success ".gitignore → adicionado .claude/"
+    else
+      info ".gitignore já ignora .claude/"
+    fi
+  else
+    printf '# dwyt\n.claude/\n' > "$gitignore"
+    success ".gitignore criado com .claude/"
+  fi
 
   # ── .mcp.json ──────────────────────────────────────────────────────────────
   if [[ "$TOOLS" == *cbmcp* ]]; then
@@ -773,7 +787,9 @@ start_ui() {
   for BIN in "${DWYT_BIN}/codebase-memory-mcp-ui" "${DWYT_BIN}/codebase-memory-mcp"; do
     if [[ -x "$BIN" ]]; then
       echo "Iniciando UI na porta $UI_PORT..."
-      if "$BIN" --help 2>&1 | grep -q "serve"; then
+      if "$BIN" --help 2>&1 | grep -q "\-\-ui="; then
+        "$BIN" --ui=true --port="$UI_PORT" &>/dev/null &
+      elif "$BIN" --help 2>&1 | grep -q "serve"; then
         "$BIN" serve --port "$UI_PORT" &>/dev/null &
       else
         "$BIN" --port "$UI_PORT" &>/dev/null &
@@ -913,8 +929,10 @@ start_ui() {
 
     info "Subindo UI do codebase-memory-mcp na porta $UI_PORT..."
 
-    # Detecta argumento correto de porta
-    if "$BIN" --help 2>&1 | grep -qw "serve"; then
+    # Ativa UI HTTP (flag persistida) e inicia o servidor
+    if "$BIN" --help 2>&1 | grep -q "\-\-ui="; then
+      "$BIN" --ui=true --port="$UI_PORT" &>/dev/null &
+    elif "$BIN" --help 2>&1 | grep -qw "serve"; then
       "$BIN" serve --port "$UI_PORT" &>/dev/null &
     else
       "$BIN" --port "$UI_PORT" &>/dev/null &
