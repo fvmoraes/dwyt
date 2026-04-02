@@ -229,6 +229,75 @@ append_env() {
   eval "$line" 2>/dev/null || true
 }
 
+configure_codex_cli() {
+  [[ "$CLIENTS" != *codex* ]] && return
+
+  local codex_home="${HOME}/.codex"
+  local codex_config="${codex_home}/config.toml"
+
+  mkdir -p "$codex_home"
+  [[ -f "$codex_config" ]] || touch "$codex_config"
+
+  python3 - "$codex_config" "${DWYT_BIN}/codebase-memory-mcp" "$TOOLS" << 'PYCODEX'
+import re
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+mcp_command = sys.argv[2]
+tools = sys.argv[3]
+text = config_path.read_text() if config_path.exists() else ""
+
+
+def upsert_root_key(src: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+    line = f'{key} = "{value}"'
+    if pattern.search(src):
+        return pattern.sub(line, src, count=1)
+    if src and not src.endswith("\n"):
+        src += "\n"
+    return src + line + "\n"
+
+
+def upsert_section_value(src: str, section: str, key: str, value: str) -> str:
+    section_header = f"[{section}]"
+    line = f'{key} = "{value}"'
+    pattern = re.compile(rf"(?ms)^\[{re.escape(section)}\]\n(.*?)(?=^\[|\Z)")
+    match = pattern.search(src)
+    if match:
+      body = match.group(1)
+      key_pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+      if key_pattern.search(body):
+          new_body = key_pattern.sub(line, body, count=1)
+      else:
+          if body and not body.endswith("\n"):
+              body += "\n"
+          new_body = body + line + "\n"
+      return src[:match.start(1)] + new_body + src[match.end(1):]
+
+    if src and not src.endswith("\n"):
+        src += "\n"
+    if src and not src.endswith("\n\n"):
+        src += "\n"
+    return src + section_header + "\n" + line + "\n"
+
+
+text = upsert_section_value(
+    text,
+    "mcp_servers.codebase-memory-mcp",
+    "command",
+    mcp_command,
+)
+
+if "headroom" in tools:
+    text = upsert_root_key(text, "openai_base_url", "http://localhost:8787")
+
+config_path.write_text(text)
+PYCODEX
+
+  success "Codex CLI configurado em $codex_config"
+}
+
 # ─── Dependências base ────────────────────────────────────────────────────────
 check_deps() {
   header "Verificando dependências base"
@@ -1384,6 +1453,7 @@ main() {
 
   integrate_project
   finalize_env
+  configure_codex_cli
   start_ui        # sobe UI do codebase-memory-mcp em background
   show_summary
 }
