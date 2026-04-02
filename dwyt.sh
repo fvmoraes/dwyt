@@ -80,7 +80,7 @@ uninstall() {
   • Hook RTK global (~/.claude/hooks/rtk-rewrite.sh)
   • Banco do codebase-memory-mcp (~/.cache/codebase-memory-mcp/)
 
-Não remove arquivos dos seus projetos (.claude/.mcp.json, .claude/CLAUDE.md, .claude/).
+Não remove arquivos dos seus projetos (.mcp.json, .claude/CLAUDE.md, .claude/).
 
 Deseja continuar?"     18 65 || { clear; info "Desinstalação cancelada."; exit 0; }
   clear
@@ -551,7 +551,7 @@ integrate_project() {
   local hooks_dir="${claude_dir}/hooks"
   local rules_dir="${claude_dir}/rules"
   local settings_file="${claude_dir}/settings.json"
-  local mcp_file="${claude_dir}/.mcp.json"
+  local mcp_file="${CHOSEN_REPO}/.mcp.json"
   local claude_md="${claude_dir}/CLAUDE.md"
 
   mkdir -p "$hooks_dir" "$rules_dir" "${claude_dir}/memory"
@@ -560,13 +560,13 @@ integrate_project() {
   local gitignore="${CHOSEN_REPO}/.gitignore"
   if [[ -f "$gitignore" ]]; then
     if ! grep -qxF ".claude/" "$gitignore"; then
-      printf '\n# dwyt\n.claude/\n' >> "$gitignore"
-      success ".gitignore → adicionado .claude/"
+      printf '\n# dwyt\n.claude/\n.mcp.json\n' >> "$gitignore"
+      success ".gitignore → adicionado .claude/ e .mcp.json"
     else
       info ".gitignore já ignora .claude/"
     fi
   else
-    printf '# dwyt\n.claude/\n' > "$gitignore"
+    printf '# dwyt\n.claude/\n.mcp.json\n' > "$gitignore"
     success ".gitignore criado com .claude/"
   fi
 
