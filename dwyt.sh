@@ -646,6 +646,11 @@ integrate_project() {
     success ".gitignore → integração local do Codex marcada"
   fi
 
+  if [[ "$CLIENTS" == *copilot* ]]; then
+    grep -qxF ".github/copilot-instructions.md" "$gitignore" || printf '.github/copilot-instructions.md\n' >> "$gitignore"
+    success ".gitignore → instrução local do Copilot marcada"
+  fi
+
   if [[ "$CLIENTS" == *cursor* ]]; then
     grep -qxF ".cursor/" "$gitignore" || printf '.cursor/\n' >> "$gitignore"
     success ".gitignore → diretório .cursor/ marcado como local"
