@@ -138,6 +138,9 @@ headroom learn --apply             # salva aprendizados no CLAUDE.md
 # MemStack (via chat no LLM)
 /memstack-search <query>           # busca nas memórias persistidas
 /memstack-headroom                 # status do proxy Headroom
+memstack help                     # lista os comandos disponíveis
+memstack start                    # inicia o proxy Headroom do MemStack
+memstack stop                     # para o proxy Headroom do MemStack
 memstack stats                    # estatísticas do banco MemStack
 memstack search "<query>"         # busca direta no banco
 memstack get-sessions <project>   # últimas sessões de um projeto

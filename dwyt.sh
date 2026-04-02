@@ -601,7 +601,104 @@ install_memstack() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec python3 "${HOME}/.dwyt/memstack/db/memstack-db.py" "$@"
+MEMSTACK_HOME="${HOME}/.dwyt/memstack"
+MEMSTACK_DB="${MEMSTACK_HOME}/db/memstack-db.py"
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+HEADROOM_HEALTH_URL="http://127.0.0.1:${HEADROOM_PORT}/health"
+HEADROOM_PID_FILE="${HOME}/.dwyt/.memstack-headroom.pid"
+
+show_help() {
+  cat <<'HELP'
+Uso: memstack <comando> [args]
+
+Controle:
+  memstack start                    inicia o proxy Headroom do MemStack
+  memstack stop                     para o proxy Headroom iniciado pelo wrapper
+  memstack help                     mostra esta ajuda
+
+Memória:
+  memstack stats
+  memstack search "<query>"
+  memstack get-sessions <project> --limit 5
+  memstack get-insights <project>
+  memstack get-context <project>
+  memstack get-plan <project>
+  memstack export-md <project>
+HELP
+}
+
+is_headroom_healthy() {
+  curl -fsS "$HEADROOM_HEALTH_URL" >/dev/null 2>&1
+}
+
+start_headroom() {
+  if is_headroom_healthy; then
+    echo "Headroom já está rodando em ${HEADROOM_HEALTH_URL}"
+    exit 0
+  fi
+
+  nohup headroom proxy --port "$HEADROOM_PORT" --llmlingua-device cpu >/dev/null 2>&1 &
+  echo $! > "$HEADROOM_PID_FILE"
+  sleep 2
+
+  if is_headroom_healthy; then
+    echo "Headroom iniciado em ${HEADROOM_HEALTH_URL}"
+  else
+    echo "Falha ao iniciar o Headroom" >&2
+    exit 1
+  fi
+}
+
+stop_headroom() {
+  local stopped=0
+
+  if [[ -f "$HEADROOM_PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$HEADROOM_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      stopped=1
+    fi
+    rm -f "$HEADROOM_PID_FILE"
+  fi
+
+  if [[ "$stopped" -eq 0 ]] && command -v pgrep >/dev/null 2>&1; then
+    local pids
+    pids="$(pgrep -f "headroom proxy --port ${HEADROOM_PORT}" || true)"
+    if [[ -n "${pids:-}" ]]; then
+      kill $pids 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+
+  if is_headroom_healthy; then
+    echo "Headroom ainda responde em ${HEADROOM_HEALTH_URL}" >&2
+    exit 1
+  fi
+
+  if [[ "$stopped" -eq 1 ]]; then
+    echo "Headroom parado"
+  else
+    echo "Headroom já estava parado"
+  fi
+}
+
+case "${1:-help}" in
+  start)
+    shift
+    start_headroom "$@"
+    ;;
+  stop)
+    shift
+    stop_headroom "$@"
+    ;;
+  help|-h|--help)
+    show_help
+    ;;
+  *)
+    exec python3 "$MEMSTACK_DB" "$@"
+    ;;
+esac
 EOF
   chmod +x "${DWYT_BIN}/memstack"
   append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "memstack"
@@ -865,8 +962,11 @@ Se o MemStack estiver instalado e disponível no cliente atual, use-o.
 Se não estiver disponível, continue sem memória persistente.
 Integração automática disponível hoje apenas no Claude Code.
 Comandos de ajuda no terminal:
+- memstack help
+- memstack start
+- memstack stop
 - memstack stats
-- memstack search "<query>"
+- memstack search \"<query>\"
 - memstack get-sessions <project> --limit 5
 - memstack get-insights <project>
 - memstack get-context <project>
@@ -881,8 +981,11 @@ Integração automática disponível no Claude Code quando a integração estive
 - Se não estiver, continue normalmente
 - Buscar memórias anteriores: \`/memstack-search <query>\` (no chat do LLM)
 - Status do Headroom: \`/memstack-headroom\`
+- Ajuda no terminal: memstack help
+- Iniciar proxy no terminal: memstack start
+- Parar proxy no terminal: memstack stop
 - Ajuda no terminal: memstack stats
-- Busca no terminal: memstack search "<query>"
+- Busca no terminal: memstack search \"<query>\"
 - Sessões no terminal: memstack get-sessions <project> --limit 5
 - Insights no terminal: memstack get-insights <project>
 - Contexto no terminal: memstack get-context <project>
@@ -1161,6 +1264,12 @@ show_summary() {
     echo -e "${BOLD}  MemStack — automático no Claude Code:${NC}"
     echo -e "  ${CYAN}/memstack-search <termo>${NC}      → busca nas memórias (no chat do LLM)"
     echo -e "  ${CYAN}/memstack-headroom${NC}            → status do proxy Headroom"
+    echo -e "  ${CYAN}memstack help${NC}"
+    echo -e "                                   → lista comandos disponíveis"
+    echo -e "  ${CYAN}memstack start${NC}"
+    echo -e "                                   → inicia o proxy Headroom do MemStack"
+    echo -e "  ${CYAN}memstack stop${NC}"
+    echo -e "                                   → para o proxy Headroom do MemStack"
     echo -e "  ${CYAN}memstack stats${NC}"
     echo -e "                                   → estatísticas do banco MemStack"
     echo -e "  ${CYAN}memstack search \"<termo>\"${NC}"
