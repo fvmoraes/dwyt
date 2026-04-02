@@ -55,6 +55,7 @@ HEADROOM_VENV="${DWYT_HOME}/headroom-venv"
 MEMSTACK_DIR="${DWYT_HOME}/memstack"
 DWYT_ENV_FILE="${DWYT_HOME}/env.sh"   # exportado pelo shell rc
 SHELL_RC=""
+SHELL_LOGIN_RC=""
 OS=""
 TOOLS=""
 CLIENTS=""
@@ -172,8 +173,14 @@ detect_env() {
 
   if [[ "$SHELL" == */zsh ]] || [[ -n "${ZSH_VERSION:-}" ]]; then
     SHELL_RC="${HOME}/.zshrc"
+    SHELL_LOGIN_RC="${HOME}/.zprofile"
   else
     SHELL_RC="${HOME}/.bashrc"
+    if [[ -f "${HOME}/.bash_profile" ]]; then
+      SHELL_LOGIN_RC="${HOME}/.bash_profile"
+    else
+      SHELL_LOGIN_RC="${HOME}/.profile"
+    fi
   fi
 }
 
@@ -200,6 +207,15 @@ $marker
 [[ -f "${DWYT_ENV_FILE}" ]] && source "${DWYT_ENV_FILE}"
 EOF
     info "Source do dwyt/env.sh adicionado a $SHELL_RC"
+  fi
+
+  if [[ -n "$SHELL_LOGIN_RC" ]] && ! grep -qF "$marker" "$SHELL_LOGIN_RC" 2>/dev/null; then
+    cat >> "$SHELL_LOGIN_RC" << EOF
+
+$marker
+[[ -f "${DWYT_ENV_FILE}" ]] && source "${DWYT_ENV_FILE}"
+EOF
+    info "Source do dwyt/env.sh adicionado a $SHELL_LOGIN_RC"
   fi
 }
 
@@ -849,13 +865,13 @@ Se o MemStack estiver instalado e disponível no cliente atual, use-o.
 Se não estiver disponível, continue sem memória persistente.
 Integração automática disponível hoje apenas no Claude Code.
 Comandos de ajuda no terminal:
-- \`memstack stats\`
-- \`memstack search "<query>"\`
-- \`memstack get-sessions <project> --limit 5\`
-- \`memstack get-insights <project>\`
-- \`memstack get-context <project>\`
-- \`memstack get-plan <project>\`
-- \`memstack export-md <project>\`
+- memstack stats
+- memstack search "<query>"
+- memstack get-sessions <project> --limit 5
+- memstack get-insights <project>
+- memstack get-context <project>
+- memstack get-plan <project>
+- memstack export-md <project>
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -865,13 +881,13 @@ Integração automática disponível no Claude Code quando a integração estive
 - Se não estiver, continue normalmente
 - Buscar memórias anteriores: \`/memstack-search <query>\` (no chat do LLM)
 - Status do Headroom: \`/memstack-headroom\`
-- Ajuda no terminal: \`memstack stats\`
-- Busca no terminal: \`memstack search "<query>"\`
-- Sessões no terminal: \`memstack get-sessions <project> --limit 5\`
-- Insights no terminal: \`memstack get-insights <project>\`
-- Contexto no terminal: \`memstack get-context <project>\`
-- Plano no terminal: \`memstack get-plan <project>\`
-- Exportar memória: \`memstack export-md <project>\`
+- Ajuda no terminal: memstack stats
+- Busca no terminal: memstack search "<query>"
+- Sessões no terminal: memstack get-sessions <project> --limit 5
+- Insights no terminal: memstack get-insights <project>
+- Contexto no terminal: memstack get-context <project>
+- Plano no terminal: memstack get-plan <project>
+- Exportar memória: memstack export-md <project>
 - Diário de sessão: skill \`Diary\` ativa automaticamente
 - Planejamento de tarefas: skill \`Work\` ativa com gatilhos como \"plan\", \"task\", \"implement\"
 "
@@ -1174,7 +1190,11 @@ show_summary() {
   echo -e "${BOLD}  Para reinstalar tudo do zero:${NC}"
   echo -e "  ${CYAN}./dwyt.sh --reinstall${NC}"
   echo ""
-  echo -e "  ${BOLD}${YELLOW}Recarregue o shell agora:${NC}  ${CYAN}source ${SHELL_RC}${NC}"
+  if [[ -n "$SHELL_LOGIN_RC" ]]; then
+    echo -e "  ${BOLD}${YELLOW}Recarregue o shell agora:${NC}  ${CYAN}source ${SHELL_RC}${NC}  ${NC}ou${CYAN} source ${SHELL_LOGIN_RC}${NC}"
+  else
+    echo -e "  ${BOLD}${YELLOW}Recarregue o shell agora:${NC}  ${CYAN}source ${SHELL_RC}${NC}"
+  fi
   echo -e "${BOLD}${GREEN}
   🚀 Bom uso — Don't Waste Your Tokens!${NC}\n"
 }
