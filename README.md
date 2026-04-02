@@ -138,6 +138,13 @@ headroom learn --apply             # salva aprendizados no CLAUDE.md
 # MemStack (via chat no LLM)
 /memstack-search <query>           # busca nas memórias persistidas
 /memstack-headroom                 # status do proxy Headroom
+memstack stats                    # estatísticas do banco MemStack
+memstack search "<query>"         # busca direta no banco
+memstack get-sessions <project>   # últimas sessões de um projeto
+memstack get-insights <project>   # insights salvos do projeto
+memstack get-context <project>    # contexto salvo do projeto
+memstack get-plan <project>       # tarefas/planejamento do projeto
+memstack export-md <project>      # exporta a memória do projeto em markdown
 ```
 
 ## Clientes suportados

@@ -581,7 +581,18 @@ install_memstack() {
       || warn "Deps opcionais não instaladas — busca semântica indisponível"
   fi
 
+  cat > "${DWYT_BIN}/memstack" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec python3 "${HOME}/.dwyt/memstack/db/memstack-db.py" "$@"
+EOF
+  chmod +x "${DWYT_BIN}/memstack"
+  append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "memstack"
+  export PATH="${DWYT_BIN}:$PATH"
+
   success "MemStack pronto em $MEMSTACK_DIR"
+  success "Comando curto disponível: memstack"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -728,7 +739,29 @@ EOF
   # ── MemStack: rules + skills symlink ──────────────────────────────────────
   if [[ "$TOOLS" == *memstack* ]] && [[ "$CLIENTS" == *claude* ]] && [[ -d "$MEMSTACK_DIR" ]]; then
     for f in "$MEMSTACK_DIR"/.claude/rules/*.md; do
-      [[ -f "$f" ]] && cp "$f" "$rules_dir/" && success "Rule: $(basename "$f")"
+      if [[ -f "$f" ]]; then
+        local dest="${rules_dir}/$(basename "$f")"
+        cp "$f" "$dest"
+        python3 - "$dest" << 'PYRULES'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+replacements = [
+    ("python C:/Projects/memstack", "memstack"),
+    ("python C:\\Projects\\memstack", "memstack"),
+    ("C:/Projects/memstack/memory/sessions/", "~/.dwyt/memstack/memory/sessions/"),
+    ("C:\\Projects\\memstack\\memory\\sessions\\", "~/.dwyt/memstack/memory/sessions/"),
+    ("C:/Projects/memstack", "~/.dwyt/memstack"),
+    ("C:\\Projects\\memstack", "~/.dwyt/memstack"),
+]
+for old, new in replacements:
+    text = text.replace(old, new)
+path.write_text(text)
+PYRULES
+        success "Rule: $(basename "$f")"
+      fi
     done
     local skills_link="${claude_dir}/skills"
     if [[ ! -e "$skills_link" ]]; then
@@ -810,6 +843,14 @@ Não configure \`ANTHROPIC_BASE_URL\` fixo no projeto.
 Se o MemStack estiver instalado e disponível no cliente atual, use-o.
 Se não estiver disponível, continue sem memória persistente.
 Integração automática disponível hoje apenas no Claude Code.
+Comandos de ajuda no terminal:
+- \`memstack stats\`
+- \`memstack search "<query>"\`
+- \`memstack get-sessions <project> --limit 5\`
+- \`memstack get-insights <project>\`
+- \`memstack get-context <project>\`
+- \`memstack get-plan <project>\`
+- \`memstack export-md <project>\`
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -819,6 +860,13 @@ Integração automática disponível no Claude Code quando a integração estive
 - Se não estiver, continue normalmente
 - Buscar memórias anteriores: \`/memstack-search <query>\` (no chat do LLM)
 - Status do Headroom: \`/memstack-headroom\`
+- Ajuda no terminal: \`memstack stats\`
+- Busca no terminal: \`memstack search "<query>"\`
+- Sessões no terminal: \`memstack get-sessions <project> --limit 5\`
+- Insights no terminal: \`memstack get-insights <project>\`
+- Contexto no terminal: \`memstack get-context <project>\`
+- Plano no terminal: \`memstack get-plan <project>\`
+- Exportar memória: \`memstack export-md <project>\`
 - Diário de sessão: skill \`Diary\` ativa automaticamente
 - Planejamento de tarefas: skill \`Work\` ativa com gatilhos como \"plan\", \"task\", \"implement\"
 "
@@ -1092,6 +1140,14 @@ show_summary() {
     echo -e "${BOLD}  MemStack — automático no Claude Code:${NC}"
     echo -e "  ${CYAN}/memstack-search <termo>${NC}      → busca nas memórias (no chat do LLM)"
     echo -e "  ${CYAN}/memstack-headroom${NC}            → status do proxy Headroom"
+    echo -e "  ${CYAN}memstack stats${NC}"
+    echo -e "                                   → estatísticas do banco MemStack"
+    echo -e "  ${CYAN}memstack search \"<termo>\"${NC}"
+    echo -e "                                   → busca direta no banco"
+    echo -e "  ${CYAN}memstack get-sessions <projeto> --limit 5${NC}"
+    echo -e "                                   → últimas sessões do projeto"
+    echo -e "  ${CYAN}memstack get-context <projeto>${NC}"
+    echo -e "                                   → contexto salvo do projeto"
     echo ""
   fi
 
