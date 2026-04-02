@@ -1,12 +1,21 @@
 # DWYT — Don't Waste Your Tokens
 
-Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em qualquer LLM (Claude Code, Cursor, Aider, Copilot, Cline, etc).
+Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro e Cursor.
 
 ```bash
 chmod +x dwyt.sh && ./dwyt.sh
 ```
 
 ---
+
+## Regra geral
+
+Todas as integrações do DWYT são opcionais:
+
+- Se o Headroom estiver ativo via wrapper, use ele; se não estiver, não use
+- Se o codebase-memory-mcp estiver conectado e respondendo no cliente, use ele; se não estiver, faça fallback para busca manual
+- Se o RTK estiver instalado e funcionando, use ele; se não estiver, rode os comandos normalmente
+- Se o MemStack estiver disponível no cliente atual, use ele; se não estiver, siga sem memória persistente
 
 ## O problema
 
@@ -16,20 +25,22 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 
 | Ferramenta | O que faz | Redução |
 |---|---|---|
-| **codebase-memory-mcp** | Grafo do código com UI visual — respostas estruturais sem grep arquivo por arquivo | ~99% de tokens por consulta |
-| **RTK** | Comprime output de terminal antes de entrar no contexto | 60–98% por comando |
-| **Headroom** | Proxy que comprime chamadas à API em trânsito | ~34% por requisição |
-| **MemStack** | Memória persistente entre sessões — elimina reconstrução de contexto | variável |
+| **[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** | Grafo do código com UI visual — respostas estruturais sem grep arquivo por arquivo | ~99% de tokens por consulta |
+| **[RTK](https://github.com/rtk-ai/rtk)** | Comprime output de terminal antes de entrar no contexto | 60–98% por comando |
+| **[Headroom](https://github.com/chopratejas/headroom)** | Proxy que comprime chamadas à API em trânsito | ~34% por requisição |
+| **[MemStack](https://github.com/cwinvestments/memstack)** | Memória persistente entre sessões — elimina reconstrução de contexto | variável |
 
 ## O que o script faz
 
 1. Apresenta um **checklist** para escolher quais ferramentas instalar
-2. Abre um **menu de navegação** para selecionar o projeto a integrar
-3. Instala **tudo em `~/.dwyt/`** — nenhum arquivo fora dessa pasta
-4. Configura `.mcp.json`, `.claude/settings.json`, `CLAUDE.md` e hooks no projeto
-5. Indexa o projeto com codebase-memory-mcp
-6. **Sobe a UI visual do grafo automaticamente** em `http://localhost:9749`
-7. Mostra o resumo completo de uso
+2. Apresenta um **checklist** para escolher quais clientes LLM integrar
+3. Abre um **menu de navegação** para selecionar o projeto a integrar
+4. Instala **tudo em `~/.dwyt/`** — nenhum arquivo fora dessa pasta
+5. Configura `.mcp.json` e os arquivos corretos para cada cliente (`AGENTS.md`, `.codex/`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/`, `.kiro/steering/`)
+6. Adiciona ao `.gitignore` os diretórios gerados do tipo `.ferramenta/` e arquivos locais como `AGENTS.md`
+7. Indexa o projeto com codebase-memory-mcp
+8. **Sobe a UI visual do grafo automaticamente** em `http://localhost:9749`
+9. Mostra o resumo completo de uso
 
 ## Modos de execução
 
@@ -49,13 +60,24 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 ## Fluxo de trabalho
 
 ```bash
-# 1. Inicia o proxy de compressão + Claude Code
-headroom wrap claude      # ou: headroom wrap aider / headroom proxy --port 8787
+# 1. Se quiser usar Headroom em um cliente compatível, suba o proxy e abra com wrapper
+headroom proxy --port 8787
+headroom wrap claude      # usa Headroom no Claude Code
+headroom wrap codex       # usa Headroom no Codex
+headroom wrap cursor      # usa Headroom no Cursor
 
-# 2. No chat do LLM, indexe o projeto
-"Index this project"
+# Se não abrir com wrapper, siga normalmente sem Headroom
 
-# 3. Trabalhe normalmente — RTK e MemStack são automáticos
+# 2. No chat do LLM, se o MCP estiver conectado, valide e use os comandos principais
+/mcp                              # valida se o servidor MCP está conectado no cliente
+"Index this project"              # dispara a tool index_repository
+"Quem chama a função X?"          # usa trace_call_path para rastrear chamadores
+
+# Se o MCP não estiver disponível no cliente, faça busca manual normalmente
+
+# 3. Trabalhe normalmente
+#    Claude Code pode usar hooks automáticos de RTK e MemStack quando disponíveis
+#    Codex, Copilot, Kiro e Cursor usam instruções de projeto e MCP quando disponíveis
 
 # 4. UI visual do grafo já está rodando (subiu com o script)
 #    Acesse: http://localhost:9749
@@ -65,20 +87,35 @@ headroom wrap claude      # ou: headroom wrap aider / headroom proxy --port 8787
 rtk gain
 
 # 6. Ao final da sessão
-headroom learn --apply        # salva aprendizados no CLAUDE.md
+headroom learn --apply        # salva aprendizados no CLAUDE.md (Claude Code)
 curl localhost:8787/stats     # relatório de compressão
 ```
 
 ## Comandos de referência
 
+### codebase-memory-mcp
+
+| Tool | Purpose |
+|---|---|
+| `index_repository` | Indexa um projeto |
+| `index_status` | Verifica o progresso da indexação |
+| `detect_changes` | Encontra o que mudou desde a última indexação |
+| `search_graph` | Busca nós por padrão |
+| `search_code` | Faz busca textual no código-fonte |
+| `query_graph` | Executa consultas em Cypher |
+| `trace_call_path` | Percorre a cadeia de chamadas |
+| `get_code_snippet` | Lê o código-fonte de uma função |
+| `get_graph_schema` | Mostra o catálogo de tipos de nós e relações |
+| `get_architecture` | Gera um resumo de alto nível da arquitetura |
+| `list_projects` | Lista projetos indexados |
+| `delete_project` | Remove um projeto |
+| `manage_adr` | Gerencia registros de decisão arquitetural |
+| `ingest_traces` | Importa traces de runtime |
+
 ```bash
-# codebase-memory-mcp (via chat no LLM)
-"Index this project"               # indexa o grafo do código
-"Quem chama a função X?"           # rastreia chamadores
-"O que a função X chama?"          # rastreia dependências
-"Tem código morto no projeto?"     # funções sem callers
-"Quais são as rotas REST?"         # lista endpoints
-"Mostre chamadas HTTP entre serviços"
+# Validação rápida no cliente
+"/mcp"                            # valida se o servidor MCP está conectado no cliente
+"Index this project"               # dispara a tool index_repository
 
 # UI visual do grafo
 dwyt-ui                            # inicia/reinicia na porta 9749
@@ -92,6 +129,8 @@ rtk git status                     # uso manual com qualquer comando
 # Headroom
 headroom proxy --port 8787         # só o proxy
 headroom wrap claude               # proxy + Claude Code
+headroom wrap codex                # proxy + Codex
+headroom wrap cursor               # proxy + Cursor
 headroom wrap aider                # proxy + Aider
 curl http://localhost:8787/stats   # estatísticas em tempo real
 headroom learn --apply             # salva aprendizados no CLAUDE.md
@@ -100,6 +139,16 @@ headroom learn --apply             # salva aprendizados no CLAUDE.md
 /memstack-search <query>           # busca nas memórias persistidas
 /memstack-headroom                 # status do proxy Headroom
 ```
+
+## Clientes suportados
+
+| Cliente | Arquivos gerados | Observações |
+|---|---|---|
+| **Claude Code** | `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`, `.claude/rules/` | integração mais profunda hoje; `headroom wrap claude` é opcional; `.claude/` entra no ignore |
+| **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` | `AGENTS.md` é o arquivo que o Codex lê; `headroom wrap codex` é opcional; `.codex/` e `AGENTS.md` ficam locais |
+| **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md`, `.mcp.json` | usa instruções de repositório + contexto compartilhado com fallback quando integrações não estiverem disponíveis |
+| **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md`, `.mcp.json` | sem `wrap` oficial do Headroom; `.kiro/` entra no ignore |
+| **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md`, `.mcp.json` | `headroom wrap cursor` é opcional; `.cursor/` entra no ignore |
 
 ## Localização dos dados — tudo em `~/.dwyt/`
 
@@ -121,9 +170,21 @@ headroom learn --apply             # salva aprendizados no CLAUDE.md
 
 <projeto>/
 ├── .mcp.json                      # config do codebase-memory-mcp
-├── CLAUDE.md                      # instruções para qualquer LLM
+├── AGENTS.md                      # instruções universais para Codex, Cursor e Kiro (local, ignorado pelo git)
+├── CLAUDE.md                      # instruções específicas do Claude Code
+├── .codex/
+│   └── README.md                  # pasta auxiliar da integração do Codex (ignorada pelo git)
+├── .github/
+│   └── copilot-instructions.md    # instruções de repositório para GitHub Copilot
+├── .cursor/
+│   └── rules/
+│       └── dwyt.mdc               # regra alwaysApply do Cursor (ignorada pelo git)
+├── .kiro/
+│   └── steering/
+│       └── dwyt.md                # steering file do Kiro (ignorado pelo git)
 └── .claude/
-    ├── settings.json              # hooks RTK + ANTHROPIC_BASE_URL
+    ├── settings.json              # hooks/permissões locais do Claude Code (ignorado pelo git)
+    ├── settings.local.json        # opcional/local (ignorado pelo git)
     ├── hooks/
     │   └── rtk-rewrite.sh         # reescreve comandos automaticamente
     ├── rules/                     # regras do MemStack

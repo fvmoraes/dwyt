@@ -24,6 +24,27 @@ header()  { echo -e "\n${BOLD}${BLUE}══════════════�
             echo -e "${BOLD}${BLUE}══════════════════════════════════════════════${NC}\n"; }
 step()    { echo -e "\n${BOLD}${CYAN}  [$1] $2${NC}"; }
 
+run_with_timeout() {
+  local seconds="$1"
+  shift
+
+  if command -v timeout &>/dev/null; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
+require_brew() {
+  if ! command -v brew &>/dev/null; then
+    error "Homebrew não encontrado."
+    error "Instale em https://brew.sh e rode novamente: ./dwyt.sh"
+    exit 1
+  fi
+}
+
 # ─── Constantes — TUDO dentro de ~/.dwyt ─────────────────────────────────────
 DWYT_HOME="${HOME}/.dwyt"
 DWYT_BIN="${DWYT_HOME}/bin"
@@ -36,6 +57,7 @@ DWYT_ENV_FILE="${DWYT_HOME}/env.sh"   # exportado pelo shell rc
 SHELL_RC=""
 OS=""
 TOOLS=""
+CLIENTS=""
 CHOSEN_REPO=""
 
 # ─── Argumento --reinstall ────────────────────────────────────────────────────
@@ -80,7 +102,7 @@ uninstall() {
   • Hook RTK global (~/.claude/hooks/rtk-rewrite.sh)
   • Banco do codebase-memory-mcp (~/.cache/codebase-memory-mcp/)
 
-Não remove arquivos dos seus projetos (.mcp.json, .claude/CLAUDE.md, .claude/).
+Não remove arquivos dos seus projetos (.mcp.json, AGENTS.md, CLAUDE.md, .claude/, .cursor/, .kiro/, .github/).
 
 Deseja continuar?"     18 65 || { clear; info "Desinstalação cancelada."; exit 0; }
   clear
@@ -207,7 +229,9 @@ check_deps() {
   if [[ ${#missing[@]} -gt 0 ]]; then
     warn "Instalando: ${missing[*]}"
     case "$OS" in
-      macos)  brew install "${missing[@]}" ;;
+      macos)
+        require_brew
+        brew install "${missing[@]}" ;;
       debian) sudo apt-get update -qq && sudo apt-get install -y "${missing[@]}" ;;
       fedora) sudo dnf install -y "${missing[@]}" ;;
     esac
@@ -217,7 +241,9 @@ check_deps() {
   if ! command -v node &>/dev/null; then
     warn "Node.js não encontrado. Instalando..."
     case "$OS" in
-      macos)  brew install node ;;
+      macos)
+        require_brew
+        brew install node ;;
       debian)
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
         sudo apt-get install -y nodejs ;;
@@ -251,6 +277,23 @@ select_tools() {
     "memstack" "MemStack             (memória entre sessões)" ON \
     3>&1 1>&2 2>&3) || {
       clear; error "Nenhuma ferramenta selecionada. Abortando."; exit 1
+    }
+  clear
+}
+
+# ─── Dialog: selecionar clientes LLM ─────────────────────────────────────────
+select_clients() {
+  CLIENTS=$(dialog \
+    --backtitle "dwyt — Don't Waste Your Tokens" \
+    --title "Selecione os clientes LLM para integrar" \
+    --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 20 72 6 \
+    "claude"  "Claude Code        (.claude/CLAUDE.md, hooks)"         ON \
+    "codex"   "Codex              (AGENTS.md + .codex/)"            ON \
+    "copilot" "GitHub Copilot     (.github/copilot-instructions.md)" ON \
+    "kiro"    "Kiro               (.kiro/steering + AGENTS.md)"      ON \
+    "cursor"  "Cursor             (.cursor/rules + AGENTS.md)"       ON \
+    3>&1 1>&2 2>&3) || {
+      clear; error "Nenhum cliente selecionado. Abortando."; exit 1
     }
   clear
 }
@@ -419,7 +462,10 @@ install_rtk() {
     success "RTK pronto: $("$BIN" --version 2>/dev/null || echo 'ok')"
     info "Configurando hook global para Claude Code (não-interativo)..."
     # --yes evita prompts interativos; timeout garante que não trava
-    timeout 15 "$BIN" init -g --yes 2>/dev/null       || timeout 15 "$BIN" init --global --yes 2>/dev/null       || timeout 15 "$BIN" init -g 2>/dev/null < /dev/null       || warn "rtk init -g pulado — rode manualmente: rtk init -g"
+    run_with_timeout 15 "$BIN" init -g --yes 2>/dev/null \
+      || run_with_timeout 15 "$BIN" init --global --yes 2>/dev/null \
+      || run_with_timeout 15 "$BIN" init -g 2>/dev/null < /dev/null \
+      || warn "rtk init -g pulado — rode manualmente: rtk init -g"
   else
     warn "RTK não encontrado em $BIN"
   fi
@@ -551,42 +597,73 @@ integrate_project() {
   local hooks_dir="${claude_dir}/hooks"
   local rules_dir="${claude_dir}/rules"
   local settings_file="${claude_dir}/settings.json"
+  local claude_memory_dir="${claude_dir}/memory"
   local mcp_file="${CHOSEN_REPO}/.mcp.json"
-  local claude_md="${claude_dir}/CLAUDE.md"
+  local claude_md="${CHOSEN_REPO}/.claude/CLAUDE.md"
+  local agents_md="${CHOSEN_REPO}/AGENTS.md"
+  local codex_dir="${CHOSEN_REPO}/.codex"
+  local codex_readme="${codex_dir}/README.md"
+  local copilot_dir="${CHOSEN_REPO}/.github"
+  local copilot_md="${copilot_dir}/copilot-instructions.md"
+  local cursor_rules_dir="${CHOSEN_REPO}/.cursor/rules"
+  local cursor_rule_file="${cursor_rules_dir}/dwyt.mdc"
+  local kiro_steering_dir="${CHOSEN_REPO}/.kiro/steering"
+  local kiro_steering_file="${kiro_steering_dir}/dwyt.md"
 
-  mkdir -p "$hooks_dir" "$rules_dir" "${claude_dir}/memory"
+  [[ "$CLIENTS" == *claude*  ]] && mkdir -p "$hooks_dir" "$rules_dir" "$claude_memory_dir"
+  [[ "$CLIENTS" == *codex*   ]] && mkdir -p "$codex_dir"
+  [[ "$CLIENTS" == *copilot* ]] && mkdir -p "$copilot_dir"
+  [[ "$CLIENTS" == *cursor*  ]] && mkdir -p "$cursor_rules_dir"
+  [[ "$CLIENTS" == *kiro*    ]] && mkdir -p "$kiro_steering_dir"
 
-  # ── .gitignore — ignora a pasta .claude/ ──────────────────────────────────
+  # ── .gitignore — ignora artefatos locais e diretórios gerados ─────────────
   local gitignore="${CHOSEN_REPO}/.gitignore"
   if [[ -f "$gitignore" ]]; then
-    if ! grep -qxF ".claude/" "$gitignore"; then
-      printf '\n# dwyt\n.claude/\n.mcp.json\n' >> "$gitignore"
-      success ".gitignore → adicionado .claude/ e .mcp.json"
-    else
-      info ".gitignore já ignora .claude/"
-    fi
+    grep -qxF "# dwyt" "$gitignore" || printf '\n# dwyt\n' >> "$gitignore"
   else
-    printf '# dwyt\n.claude/\n.mcp.json\n' > "$gitignore"
-    success ".gitignore criado com .claude/"
+    printf '# dwyt\n' > "$gitignore"
+  fi
+
+  if [[ "$CLIENTS" == *claude* ]]; then
+    grep -qxF ".claude/" "$gitignore" || printf '.claude/\n' >> "$gitignore"
+    success ".gitignore → diretório .claude/ marcado como local"
+  fi
+
+  if [[ "$CLIENTS" == *codex* ]]; then
+    grep -qxF ".codex/" "$gitignore" || printf '.codex/\n' >> "$gitignore"
+    grep -qxF "AGENTS.md" "$gitignore" || printf 'AGENTS.md\n' >> "$gitignore"
+    success ".gitignore → integração local do Codex marcada"
+  fi
+
+  if [[ "$CLIENTS" == *cursor* ]]; then
+    grep -qxF ".cursor/" "$gitignore" || printf '.cursor/\n' >> "$gitignore"
+    success ".gitignore → diretório .cursor/ marcado como local"
+  fi
+
+  if [[ "$CLIENTS" == *kiro* ]]; then
+    grep -qxF ".kiro/" "$gitignore" || printf '.kiro/\n' >> "$gitignore"
+    success ".gitignore → diretório .kiro/ marcado como local"
   fi
 
   # ── .mcp.json ──────────────────────────────────────────────────────────────
   if [[ "$TOOLS" == *cbmcp* ]]; then
-    cat > "$mcp_file" << EOF
+    grep -qxF ".mcp.json" "$gitignore" || printf '.mcp.json\n' >> "$gitignore"
+    success ".gitignore → .mcp.json marcado como local"
+    cat > "$mcp_file" << 'EOF'
 {
   "mcpServers": {
     "codebase-memory-mcp": {
       "type": "stdio",
-      "command": "${DWYT_BIN}/codebase-memory-mcp"
+      "command": "codebase-memory-mcp"
     }
   }
 }
 EOF
-    success ".mcp.json → aponta para ${DWYT_BIN}/codebase-memory-mcp"
+    success ".mcp.json → usa 'codebase-memory-mcp' via PATH"
   fi
 
   # ── RTK hook ───────────────────────────────────────────────────────────────
-  if [[ "$TOOLS" == *rtk* ]]; then
+  if [[ "$TOOLS" == *rtk* ]] && [[ "$CLIENTS" == *claude* ]]; then
     local RTK_HOOK="${hooks_dir}/rtk-rewrite.sh"
 
     # Copia hook oficial se existir, senão cria um básico
@@ -648,23 +725,8 @@ EOF
     success "RTK hook → $RTK_HOOK"
   fi
 
-  # ── Headroom: ANTHROPIC_BASE_URL no settings.json ─────────────────────────
-  if [[ "$TOOLS" == *headroom* ]]; then
-    if [[ -f "$settings_file" ]]; then
-      python3 - "$settings_file" << 'PYENV'
-import sys, json
-with open(sys.argv[1]) as fp: data = json.load(fp)
-data.setdefault("env", {})["ANTHROPIC_BASE_URL"] = "http://localhost:8787"
-with open(sys.argv[1], "w") as fp: json.dump(data, fp, indent=2)
-PYENV
-    else
-      echo '{"env":{"ANTHROPIC_BASE_URL":"http://localhost:8787"}}' > "$settings_file"
-    fi
-    success "Headroom → ANTHROPIC_BASE_URL configurado"
-  fi
-
   # ── MemStack: rules + skills symlink ──────────────────────────────────────
-  if [[ "$TOOLS" == *memstack* ]] && [[ -d "$MEMSTACK_DIR" ]]; then
+  if [[ "$TOOLS" == *memstack* ]] && [[ "$CLIENTS" == *claude* ]] && [[ -d "$MEMSTACK_DIR" ]]; then
     for f in "$MEMSTACK_DIR"/.claude/rules/*.md; do
       [[ -f "$f" ]] && cp "$f" "$rules_dir/" && success "Rule: $(basename "$f")"
     done
@@ -675,13 +737,15 @@ PYENV
     fi
   fi
 
-  # ── CLAUDE.md / instrução universal (qualquer LLM) ────────────────────────
-  local sections=""
+  # ── Instruções universais para LLMs ───────────────────────────────────────
+  local universal_sections=""
+  local claude_sections=""
 
   if [[ "$TOOLS" == *cbmcp* ]]; then
-    sections+="
+    universal_sections+="
 ### codebase-memory-mcp — Grafo do código
-Antes de explorar arquivos manualmente, use as ferramentas do grafo:
+Se o MCP do codebase-memory-mcp estiver conectado e respondendo, prefira o grafo antes de explorar arquivos manualmente.
+Se o MCP não estiver disponível, faça fallback para busca manual sem bloquear o trabalho.
 - **Indexar projeto**: chame \`index_repository\` com o caminho do repositório
 - **Quem chama função X?**: \`trace_call_path(function_name=\"X\", direction=\"inbound\")\`
 - **O que X chama?**: \`trace_call_path(function_name=\"X\", direction=\"outbound\")\`
@@ -692,53 +756,194 @@ Antes de explorar arquivos manualmente, use as ferramentas do grafo:
 - **Query customizada**: \`query_graph(query=\"MATCH (f:Function)-[:CALLS]->(g) RETURN g.name LIMIT 20\")\`
 - **Ler código fonte**: \`get_code_snippet(qualified_name=\"pacote.Função\")\`
 "
+    claude_sections+="$universal_sections"
   fi
 
   if [[ "$TOOLS" == *rtk* ]]; then
-    sections+="
+    universal_sections+="
 ### RTK — Compressão de output de terminal
-Hook ativo — comandos são reescritos automaticamente. Nenhuma ação necessária.
+Se o comando \`rtk\` existir e estiver funcionando, use \`rtk <comando>\` quando fizer sentido.
+Se não estiver disponível, execute o comando normal sem bloquear o fluxo.
+Para ver quanto foi economizado: \`rtk gain\`
+Para ver oportunidades de economia: \`rtk discover\`
+"
+    if [[ "$CLIENTS" == *claude* ]]; then
+      claude_sections+="
+### RTK — Compressão de output de terminal
+Se o hook do RTK estiver instalado e funcionando, o Claude Code reescreve comandos Bash suportados automaticamente.
+Se o hook não estiver disponível, siga normalmente com Bash sem exigir RTK.
 Comandos comprimidos: \`git\`, \`cargo\`, \`npm\`, \`pnpm\`, \`docker\`, \`kubectl\`, \`pip\`, \`pytest\`
 Para ver quanto foi economizado: \`rtk gain\`
 Para ver oportunidades de economia: \`rtk discover\`
 "
+    fi
   fi
 
   if [[ "$TOOLS" == *headroom* ]]; then
-    sections+="
+    universal_sections+="
 ### Headroom — Compressão de chamadas à API
-O proxy deve estar rodando ANTES de iniciar qualquer sessão de LLM.
+Se a sessão atual tiver sido iniciada com wrapper do Headroom, use Headroom.
+Se não tiver wrapper ativo ou o proxy não estiver rodando, não use Headroom e siga com a API normal.
+Suporte oficial de wrapper: \`claude\`, \`codex\` e \`cursor\`.
+- Compatibilidade adicional depende do cliente aceitar proxy/base URL custom
+- Iniciar proxy: \`headroom proxy --port 8787\`
+- Ver economia em tempo real: \`curl http://localhost:8787/stats\`
+"
+    if [[ "$CLIENTS" == *claude* ]]; then
+      claude_sections+="
+### Headroom — Compressão de chamadas à API
+No Claude Code, use Headroom apenas quando a sessão for aberta com \`headroom wrap claude\`.
+Não configure \`ANTHROPIC_BASE_URL\` fixo no projeto.
+- Se abriu com wrapper, use o proxy
+- Se não abriu com wrapper, use a API normal
 - Iniciar proxy: \`headroom proxy --port 8787\`
 - Iniciar proxy + Claude Code: \`headroom wrap claude\`
 - Ver economia em tempo real: \`curl http://localhost:8787/stats\`
 - Salvar aprendizados no CLAUDE.md: \`headroom learn --apply\`
 "
+    fi
   fi
 
   if [[ "$TOOLS" == *memstack* ]]; then
-    sections+="
+    universal_sections+="
 ### MemStack — Memória persistente entre sessões
-Hooks disparam automaticamente ao iniciar/encerrar sessões.
+Se o MemStack estiver instalado e disponível no cliente atual, use-o.
+Se não estiver disponível, continue sem memória persistente.
+Integração automática disponível hoje apenas no Claude Code.
+"
+    if [[ "$CLIENTS" == *claude* ]]; then
+      claude_sections+="
+### MemStack — Memória persistente entre sessões
+Integração automática disponível no Claude Code quando a integração estiver presente.
+- Se o MemStack estiver disponível, use os comandos e skills abaixo
+- Se não estiver, continue normalmente
 - Buscar memórias anteriores: \`/memstack-search <query>\` (no chat do LLM)
 - Status do Headroom: \`/memstack-headroom\`
 - Diário de sessão: skill \`Diary\` ativa automaticamente
 - Planejamento de tarefas: skill \`Work\` ativa com gatilhos como \"plan\", \"task\", \"implement\"
 "
+    fi
   fi
 
-  local header_section="# DWYT — Don't Waste Your Tokens
+  local client_list=""
+  [[ "$CLIENTS" == *claude*  ]] && client_list+="- Claude Code
+"
+  [[ "$CLIENTS" == *codex*   ]] && client_list+="- Codex
+"
+  [[ "$CLIENTS" == *copilot* ]] && client_list+="- GitHub Copilot
+"
+  [[ "$CLIENTS" == *kiro*    ]] && client_list+="- Kiro
+"
+  [[ "$CLIENTS" == *cursor*  ]] && client_list+="- Cursor
+"
+
+  local universal_header="# DWYT — Don't Waste Your Tokens
 
 Este projeto usa um stack de ferramentas para reduzir consumo de tokens.
-Aplica-se a qualquer LLM (Claude Code, Cursor, Copilot, Aider, Cline, etc).
-${sections}"
+Clientes integrados neste repositório:
+${client_list}
+Todas as integrações deste projeto são opcionais.
+Regra geral:
+- Se Headroom estiver ativo via wrapper, use Headroom; se não estiver, não use
+- Se o MCP do codebase-memory-mcp estiver conectado e respondendo, use ele; se não estiver, faça fallback para busca manual
+- Se RTK existir e estiver funcionando, use RTK; se não, rode os comandos normalmente
+- Se MemStack estiver disponível no cliente atual, use ele; se não, siga sem memória persistente
+Prefira estas integrações, quando suportadas pelo cliente:
+- \`.mcp.json\` para expor ferramentas MCP, incluindo o codebase-memory-mcp
+- \`AGENTS.md\` para agentes compatíveis como Codex, Cursor e Kiro
+- \`.github/copilot-instructions.md\` para GitHub Copilot
+- \`.cursor/rules/\` para regras de projeto do Cursor
+- \`.kiro/steering/\` para steering files do Kiro
+${universal_sections}"
 
-  if [[ -f "$claude_md" ]]; then
-    warn "CLAUDE.md existente — adicionando seção DWYT ao final"
-    printf '\n---\n%s\n' "$header_section" >> "$claude_md"
+  local claude_header="# DWYT — Don't Waste Your Tokens
+
+Este projeto usa um stack de ferramentas para reduzir consumo de tokens.
+Instruções específicas para Claude Code:
+- O arquivo \`CLAUDE.md\` fica em \`.claude/CLAUDE.md\` (local, não commitado)
+- Hooks e permissões ficam em \`.claude/settings.json\`
+- Arquivos locais devem ir em \`.claude/settings.local.json\` e \`.claude/memory/\`
+- Consulte também o \`AGENTS.md\` na raiz para instruções universais
+- Regra geral: use integrações opcionais somente quando estiverem disponíveis e funcionando; caso contrário, faça fallback silencioso
+${claude_sections}"
+
+  if [[ -f "$agents_md" ]]; then
+    warn "AGENTS.md existente — adicionando seção DWYT ao final"
+    printf '\n---\n%s\n' "$universal_header" >> "$agents_md"
   else
-    printf '%s\n' "$header_section" > "$claude_md"
+    printf '%s\n' "$universal_header" > "$agents_md"
   fi
-  success "CLAUDE.md atualizado"
+  success "AGENTS.md atualizado"
+
+  if [[ "$CLIENTS" == *codex* ]]; then
+    cat > "$codex_readme" << 'EOF'
+# Codex Integration
+
+O Codex lê instruções do arquivo `AGENTS.md` na raiz do repositório.
+
+Esta pasta `.codex/` é apenas auxiliar para organização local do projeto DWYT.
+EOF
+    success ".codex/ criado como apoio para a integração do Codex"
+  fi
+
+  if [[ "$CLIENTS" == *claude* ]] && [[ -f "$claude_md" ]]; then
+    warn "CLAUDE.md existente — adicionando seção DWYT ao final"
+    printf '\n---\n%s\n' "$claude_header" >> "$claude_md"
+  elif [[ "$CLIENTS" == *claude* ]]; then
+    printf '%s\n' "$claude_header" > "$claude_md"
+  fi
+  [[ "$CLIENTS" == *claude* ]] && success "CLAUDE.md atualizado"
+
+  if [[ "$CLIENTS" == *copilot* ]]; then
+    cat > "$copilot_md" << EOF
+# DWYT — GitHub Copilot
+
+Siga as instruções compartilhadas do arquivo \`AGENTS.md\`.
+
+Ao trabalhar neste repositório:
+- Se o MCP descrito em \`.mcp.json\` estiver conectado e respondendo, prefira-o antes de busca manual por arquivos
+- Se o MCP não estiver disponível, faça fallback para busca manual
+- Se RTK existir e estiver funcionando, use output enxuto; se não, siga normalmente
+- Se MemStack ou Headroom não estiverem disponíveis no cliente atual, não trate isso como erro
+- Se precisar investigar por terminal, minimize output desnecessário
+- Se existir \`CLAUDE.md\`, trate-o apenas como referência complementar do stack DWYT
+EOF
+    success "GitHub Copilot → $copilot_md"
+  fi
+
+  if [[ "$CLIENTS" == *cursor* ]]; then
+    cat > "$cursor_rule_file" << 'EOF'
+---
+description: DWYT project guidance
+alwaysApply: true
+---
+
+Siga as instruções compartilhadas em `AGENTS.md`.
+
+Neste repositório:
+- Se as ferramentas MCP configuradas em `.mcp.json` estiverem disponíveis, prefira elas antes de buscas manuais
+- Se não estiverem disponíveis, faça fallback para busca manual
+- Se Headroom, RTK ou MemStack não estiverem disponíveis na sessão atual, siga normalmente
+- Use saída de terminal enxuta e só expanda quando necessário
+- Considere `CLAUDE.md` apenas como referência específica do Claude Code
+EOF
+    success "Cursor rule → $cursor_rule_file"
+  fi
+
+  if [[ "$CLIENTS" == *kiro* ]]; then
+    cat > "$kiro_steering_file" << 'EOF'
+# DWYT Steering
+
+Siga as instruções compartilhadas em `AGENTS.md`.
+
+Preferências deste projeto:
+- Se as ferramentas MCP configuradas em `.mcp.json` estiverem disponíveis, priorize elas
+- Se não estiverem disponíveis, use exploração manual sem bloquear a tarefa
+- Se Headroom, RTK ou MemStack não estiverem disponíveis na sessão atual, siga normalmente
+- Use `CLAUDE.md` apenas como contexto específico do Claude Code
+EOF
+    success "Kiro steering → $kiro_steering_file"
+  fi
 
   # ── Indexar projeto ────────────────────────────────────────────────────────
   if [[ "$TOOLS" == *cbmcp* ]] && [[ -x "${DWYT_BIN}/codebase-memory-mcp" ]]; then
@@ -746,7 +951,7 @@ ${sections}"
     printf '%s\n%s\n' \
       '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"dwyt","version":"2.0"}}}' \
       "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"index_repository\",\"arguments\":{\"repo_path\":\"${CHOSEN_REPO}\"}}}" \
-      | timeout 120 "${DWYT_BIN}/codebase-memory-mcp" 2>&1 | grep -v "^$" | tail -3 || true
+      | run_with_timeout 120 "${DWYT_BIN}/codebase-memory-mcp" 2>&1 | grep -v "^$" | tail -3 || true
     success "Indexação concluída"
   fi
 }
@@ -759,7 +964,7 @@ finalize_env() {
     append_env "$path_line" "dwyt bin dir"
   fi
 
-  # Headroom: ANTHROPIC_BASE_URL global (opcional — projeto já tem no settings.json)
+  # Headroom: exemplo opcional de ativação global via ambiente
   if [[ "$TOOLS" == *headroom* ]]; then
     append_env "# Descomente para ativar Headroom globalmente em todos os LLMs:" ""
     append_env "# export ANTHROPIC_BASE_URL=http://localhost:8787" ""
@@ -831,6 +1036,8 @@ UIWRAPPER
 # RESUMO FINAL
 # ═════════════════════════════════════════════════════════════════════════════
 show_summary() {
+  local clients_display="${CLIENTS//\"/}"
+
   clear
   echo -e "${BOLD}${GREEN}"
   echo "╔═══════════════════════════════════════════════════════════════════╗"
@@ -841,23 +1048,27 @@ show_summary() {
   [[ -n "$CHOSEN_REPO" ]] && \
     echo -e "  ${CYAN}Projeto integrado:${NC} ${BOLD}$CHOSEN_REPO${NC}\n"
 
-  echo -e "${BOLD}${YELLOW}  COMO USAR — válido para qualquer LLM${NC}\n"
+  echo -e "  ${CYAN}Clientes integrados:${NC} ${BOLD}${clients_display}${NC}\n"
+
+  echo -e "${BOLD}${YELLOW}  COMO USAR — com suporte universal + integrações específicas${NC}\n"
 
   if [[ "$TOOLS" == *headroom* ]]; then
-    echo -e "${BOLD}  PASSO 1 — Antes de abrir qualquer sessão de LLM:${NC}"
+    echo -e "${BOLD}  PASSO 1 — Antes de abrir clientes compatíveis com Headroom:${NC}"
     echo -e "  ${CYAN}headroom proxy --port 8787${NC}    → inicia o proxy de compressão"
-    echo -e "  ${CYAN}headroom wrap claude${NC}          → proxy + Claude Code (atalho)"
-    echo -e "  ${CYAN}headroom wrap aider${NC}           → proxy + Aider"
+    [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom wrap claude${NC}          → proxy + Claude Code (atalho)"
+    [[ "$CLIENTS" == *codex*  ]] && echo -e "  ${CYAN}headroom wrap codex${NC}           → proxy + Codex (atalho oficial)"
+    [[ "$CLIENTS" == *cursor* ]] && echo -e "  ${CYAN}headroom wrap cursor${NC}          → proxy + Cursor (atalho oficial)"
+    echo -e "  ${YELLOW}Copilot e Kiro só aproveitam isso se o cliente permitir customizar proxy/base URL.${NC}"
     echo ""
   fi
 
   if [[ "$TOOLS" == *cbmcp* ]]; then
-    echo -e "${BOLD}  PASSO 2 — No chat do LLM, indexe o projeto:${NC}"
-    echo -e "  ${CYAN}\"Index this project\"${NC}          → indexa o grafo do código"
-    echo -e "  ${CYAN}\"Quem chama a função X?\"${NC}      → rastreia chamadores"
-    echo -e "  ${CYAN}\"O que a função X chama?\"${NC}     → rastreia dependências"
-    echo -e "  ${CYAN}\"Tem código morto?\"${NC}           → funções sem callers"
-    echo -e "  ${CYAN}\"Quais são as rotas REST?\"${NC}    → lista endpoints"
+    echo -e "${BOLD}  PASSO 2 — No chat do LLM, valide se o MCP está conectado e use os 3 comandos principais:${NC}"
+    echo -e "  ${CYAN}/mcp${NC}                           → valida se o servidor MCP está conectado no cliente"
+    echo -e "  ${CYAN}\"Index this project\"${NC}          → dispara a tool index_repository"
+    echo -e "  ${CYAN}\"Quem chama a função X?\"${NC}      → usa trace_call_path para rastrear chamadores"
+    echo -e "  ${CYAN}\"O que a função X chama?\"${NC}     → usa trace_call_path para rastrear dependências"
+    echo -e "  ${CYAN}AGENTS.md${NC}                      → instruções universais para Codex, Cursor e Kiro"
     echo ""
     echo -e "${BOLD}  UI Visual do grafo (navegador):${NC}"
     if [[ -n "${DWYT_UI_URL:-}" ]]; then
@@ -870,15 +1081,15 @@ show_summary() {
   fi
 
   if [[ "$TOOLS" == *rtk* ]]; then
-    echo -e "${BOLD}  RTK — automático (hook ativo no Claude Code):${NC}"
+    echo -e "${BOLD}  RTK — automático no Claude Code, manual nos demais clientes:${NC}"
     echo -e "  ${CYAN}rtk gain${NC}                      → tokens economizados total"
     echo -e "  ${CYAN}rtk discover${NC}                  → oportunidades ainda não capturadas"
     echo -e "  ${CYAN}rtk git status${NC}                → uso manual com qualquer comando"
     echo ""
   fi
 
-  if [[ "$TOOLS" == *memstack* ]]; then
-    echo -e "${BOLD}  MemStack — automático (hooks disparam ao iniciar sessão):${NC}"
+  if [[ "$TOOLS" == *memstack* ]] && [[ "$CLIENTS" == *claude* ]]; then
+    echo -e "${BOLD}  MemStack — automático no Claude Code:${NC}"
     echo -e "  ${CYAN}/memstack-search <termo>${NC}      → busca nas memórias (no chat do LLM)"
     echo -e "  ${CYAN}/memstack-headroom${NC}            → status do proxy Headroom"
     echo ""
@@ -886,7 +1097,7 @@ show_summary() {
 
   if [[ "$TOOLS" == *headroom* ]]; then
     echo -e "${BOLD}  Ao final de cada sessão:${NC}"
-    echo -e "  ${CYAN}headroom learn --apply${NC}        → salva aprendizados no CLAUDE.md"
+    [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom learn --apply${NC}        → salva aprendizados no CLAUDE.md"
     echo -e "  ${CYAN}curl localhost:8787/stats${NC}     → relatório de compressão da sessão"
     echo ""
   fi
@@ -979,6 +1190,7 @@ main() {
   check_deps
   init_env_file
   select_tools
+  select_clients
   select_repo
 
   [[ "$TOOLS" == *cbmcp*    ]] && install_cbmcp
