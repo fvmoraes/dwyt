@@ -45,6 +45,290 @@ require_brew() {
   fi
 }
 
+patch_headroom_codex_ws() {
+  local server_py=""
+
+  if [[ ! -d "$HEADROOM_VENV" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r candidate; do
+    server_py="$candidate"
+    break
+  done < <(find "$HEADROOM_VENV"/lib -path '*/site-packages/headroom/proxy/server.py' 2>/dev/null | sort)
+
+  if [[ -z "$server_py" ]]; then
+    warn "Patch do Headroom: server.py não encontrado; pulando ajuste do Codex"
+    return 0
+  fi
+
+  if python3 - "$server_py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "DWYT patch: bridge local Codex WebSocket traffic to upstream OpenAI SSE."
+
+if marker in text:
+    raise SystemExit(0)
+
+start = "    async def handle_openai_responses_ws(self, websocket: WebSocket) -> None:\n"
+end = "    async def handle_gemini_generate_content(\n"
+
+start_idx = text.find(start)
+end_idx = text.find(end, start_idx)
+
+if start_idx == -1 or end_idx == -1:
+    raise SystemExit(1)
+
+replacement = '''    async def handle_openai_responses_ws(self, websocket: WebSocket) -> None:
+        """DWYT patch: bridge local Codex WebSocket traffic to upstream OpenAI SSE.
+
+        OpenAI's public Responses API streams over HTTP/SSE. Newer Codex clients
+        speak WebSocket locally, so the proxy terminates the local socket and
+        relays upstream SSE events as JSON frames.
+        """
+        request_id = await self._next_request_id()
+        start_time = time.time()
+        tokens_saved = 0
+        body: dict[str, Any] | None = None
+
+        ws_headers = dict(websocket.headers)
+
+        client_subprotocols: list[str] = []
+        raw_protocol = ws_headers.get("sec-websocket-protocol", "")
+        if raw_protocol:
+            client_subprotocols = [p.strip() for p in raw_protocol.split(",") if p.strip()]
+
+        if client_subprotocols:
+            await websocket.accept(subprotocol=client_subprotocols[0])
+        else:
+            await websocket.accept()
+
+        _skip_headers = frozenset(
+            {
+                "host",
+                "connection",
+                "upgrade",
+                "sec-websocket-key",
+                "sec-websocket-version",
+                "sec-websocket-extensions",
+                "sec-websocket-accept",
+                "sec-websocket-protocol",
+                "content-length",
+                "transfer-encoding",
+            }
+        )
+        upstream_headers: dict[str, str] = {}
+        for k, v in ws_headers.items():
+            if k.lower() not in _skip_headers:
+                upstream_headers[k] = v
+
+        _has_auth = "authorization" in {k.lower() for k in upstream_headers}
+        if not _has_auth:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                upstream_headers["Authorization"] = f"Bearer {api_key}"
+                logger.debug(f"[{request_id}] WS bridge: injected Authorization from OPENAI_API_KEY")
+            else:
+                logger.warning(
+                    f"[{request_id}] WS bridge: no Authorization header from client and "
+                    f"OPENAI_API_KEY not set"
+                )
+
+        if "openai-beta" not in {k.lower() for k in upstream_headers}:
+            upstream_headers["OpenAI-Beta"] = "responses-api=v1"
+
+        upstream_headers["Accept"] = "text/event-stream"
+        upstream_headers["Content-Type"] = "application/json"
+
+        try:
+            first_msg_raw = await websocket.receive_text()
+
+            try:
+                body = json.loads(first_msg_raw)
+            except json.JSONDecodeError as e:
+                logger.error(f"[{request_id}] WS bridge: invalid initial payload: {e}")
+                await websocket.close(code=1003, reason="Invalid JSON payload")
+                return
+
+            if not isinstance(body, dict):
+                logger.error(f"[{request_id}] WS bridge: unexpected initial payload type")
+                await websocket.close(code=1003, reason="Unexpected payload type")
+                return
+
+            try:
+                input_data = body.get("input")
+                should_compress = (
+                    self.config.optimize
+                    and isinstance(input_data, list)
+                    and len(input_data) > 1
+                    and not body.get("previous_response_id")
+                )
+                if should_compress:
+                    from headroom.proxy.responses_converter import (
+                        messages_to_responses_items,
+                        responses_items_to_messages,
+                    )
+
+                    model = body.get("model", "gpt-4o")
+                    converted, preserved = responses_items_to_messages(input_data)
+
+                    messages: list[dict[str, Any]] = []
+                    instructions = body.get("instructions")
+                    if instructions:
+                        messages.append({"role": "system", "content": instructions})
+                    messages.extend(converted)
+
+                    tokenizer = get_tokenizer(model)
+                    original_tokens = tokenizer.count_messages(messages)
+
+                    context_limit = self.openai_provider.get_context_limit(model)
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda: self.openai_pipeline.apply(
+                                messages=messages,
+                                model=model,
+                                model_limit=context_limit,
+                                context=extract_user_query(messages),
+                            )
+                        ),
+                        timeout=COMPRESSION_TIMEOUT_SECONDS,
+                    )
+
+                    if result.messages != messages:
+                        opt = result.messages
+                        if instructions and opt and opt[0].get("role") == "system":
+                            body["instructions"] = opt[0]["content"]
+                            opt = opt[1:]
+                        body["input"] = messages_to_responses_items(opt, input_data, preserved)
+                        tokens_saved = max(0, original_tokens - result.tokens_after)
+                        logger.info(
+                            f"[{request_id}] WS /v1/responses compressed via SSE bridge: "
+                            f"saved {tokens_saved} tokens"
+                        )
+            except Exception as e:
+                logger.warning(f"[{request_id}] WS bridge compression failed: {e}")
+
+            body["stream"] = True
+
+            assert self.http_client is not None, "http_client must be initialized before WS bridge"
+
+            upstream_url = f"{self.OPENAI_API_URL}/v1/responses"
+            upstream_request = self.http_client.build_request(
+                "POST",
+                upstream_url,
+                json=body,
+                headers=upstream_headers,
+            )
+            upstream_response = await self.http_client.send(upstream_request, stream=True)
+
+            if upstream_response.is_error:
+                error_bytes = await upstream_response.aread()
+                error_text = error_bytes[:500].decode("utf-8", errors="replace").strip()
+                logger.error(
+                    f"[{request_id}] WS bridge upstream HTTP {upstream_response.status_code}: "
+                    f"{error_text or 'empty body'}"
+                )
+                error_event = {
+                    "type": "error",
+                    "error": {
+                        "type": "upstream_error",
+                        "message": error_text or f"Unexpected upstream status {upstream_response.status_code}",
+                    },
+                }
+                with contextlib.suppress(Exception):
+                    await websocket.send_text(json.dumps(error_event))
+                with contextlib.suppress(Exception):
+                    await websocket.close(
+                        code=1011,
+                        reason=f"upstream {upstream_response.status_code}",
+                    )
+                return
+
+            stream_state: dict[str, Any] = {
+                "input_tokens": None,
+                "output_tokens": None,
+                "cache_read_input_tokens": 0,
+                "sse_buffer": "",
+            }
+            event_buffer = ""
+
+            async with contextlib.aclosing(upstream_response) as response:
+                async for chunk in response.aiter_bytes():
+                    chunk_text = chunk.decode("utf-8", errors="ignore")
+                    event_buffer += chunk_text
+                    stream_state["sse_buffer"] += chunk_text
+
+                    if len(event_buffer) > MAX_SSE_BUFFER_SIZE:
+                        event_buffer = event_buffer[-MAX_SSE_BUFFER_SIZE // 2 :]
+                    if len(stream_state["sse_buffer"]) > MAX_SSE_BUFFER_SIZE:
+                        stream_state["sse_buffer"] = stream_state["sse_buffer"][
+                            -MAX_SSE_BUFFER_SIZE // 2 :
+                        ]
+
+                    usage = self._parse_sse_usage_from_buffer(stream_state, "openai")
+                    if usage:
+                        if "input_tokens" in usage:
+                            stream_state["input_tokens"] = usage["input_tokens"]
+                        if "output_tokens" in usage:
+                            stream_state["output_tokens"] = usage["output_tokens"]
+                        if "cache_read_input_tokens" in usage:
+                            stream_state["cache_read_input_tokens"] = usage[
+                                "cache_read_input_tokens"
+                            ]
+
+                    while "\\n\\n" in event_buffer:
+                        event_end = event_buffer.index("\\n\\n")
+                        event_text = event_buffer[: event_end + 2]
+                        event_buffer = event_buffer[event_end + 2 :]
+
+                        for line in event_text.split("\\n"):
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:].strip()
+                            if not data_str or data_str == "[DONE]":
+                                continue
+                            await websocket.send_text(data_str)
+
+            total_latency = (time.time() - start_time) * 1000
+            model_name = body.get("model", "unknown")
+            await self.metrics.record_request(
+                provider="openai",
+                model=model_name,
+                input_tokens=stream_state["input_tokens"] or 0,
+                output_tokens=stream_state["output_tokens"] or 0,
+                tokens_saved=tokens_saved,
+                latency_ms=total_latency,
+            )
+
+            with contextlib.suppress(Exception):
+                await websocket.close()
+
+        except Exception as e:
+            if "WebSocketDisconnect" not in type(e).__name__:
+                logger.error(f"[{request_id}] WS SSE bridge error: {e}")
+                error_event = {
+                    "type": "error",
+                    "error": {"type": "proxy_error", "message": str(e)},
+                }
+                with contextlib.suppress(Exception):
+                    await websocket.send_text(json.dumps(error_event))
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason=str(e)[:120])
+'''
+
+text = text[:start_idx] + replacement + "\n\n" + text[end_idx:]
+path.write_text(text)
+PY
+  then
+    success "Headroom ajustado para Codex via bridge WS->SSE"
+  else
+    warn "Patch do Headroom para Codex não pôde ser aplicado automaticamente"
+  fi
+}
+
 # ─── Constantes — TUDO dentro de ~/.dwyt ─────────────────────────────────────
 DWYT_HOME="${HOME}/.dwyt"
 DWYT_BIN="${DWYT_HOME}/bin"
@@ -725,6 +1009,7 @@ install_headroom() {
 
   if [[ -x "$WRAPPER" ]] && "$WRAPPER" --help &>/dev/null 2>&1; then
     success "Headroom já instalado"
+    patch_headroom_codex_ws
     append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "headroom"
     export PATH="${DWYT_BIN}:$PATH"
     return
@@ -797,6 +1082,8 @@ WEOF
   sed -i.bak "s|VENV_PLACEHOLDER|${HEADROOM_VENV}|g" "$WRAPPER" && rm -f "${WRAPPER}.bak"
   chmod +x "$WRAPPER"
   success "Headroom instalado com Python $PY_VER — wrapper em $WRAPPER"
+
+  patch_headroom_codex_ws
 
   append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "headroom"
   export PATH="${DWYT_BIN}:$PATH"
