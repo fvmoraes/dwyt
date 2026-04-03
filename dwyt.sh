@@ -662,43 +662,14 @@ configure_codex_cli() {
   mkdir -p "$codex_home"
   [[ -f "$codex_config" ]] || touch "$codex_config"
 
-  python3 - "$codex_config" "${DWYT_BIN}/codebase-memory-mcp" "$TOOLS" << 'PYCODEX'
+  python3 - "$codex_config" "${DWYT_BIN}/codebase-memory-mcp" << 'PYCODEX'
 import re
 import sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
 mcp_command = sys.argv[2]
-tools = sys.argv[3]
 text = config_path.read_text() if config_path.exists() else ""
-
-
-def strip_key_from_sections(src: str, key: str) -> str:
-    """Remove a key from inside any [section] block, leaving root-level alone."""
-    lines = src.split("\n")
-    result = []
-    in_section = False
-    for line in lines:
-        if re.match(r"^\[", line):
-            in_section = True
-        if in_section and re.match(rf"^{re.escape(key)}\s*=", line):
-            continue
-        result.append(line)
-    return "\n".join(result)
-
-
-def upsert_root_key(src: str, key: str, value: str) -> str:
-    # Only match the key at root level (before any section header)
-    first_section = re.search(r"(?m)^\[", src)
-    root_part = src[:first_section.start()] if first_section else src
-    rest_part = src[first_section.start():] if first_section else ""
-    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
-    line = f'{key} = "{value}"'
-    if pattern.search(root_part):
-        return pattern.sub(line, root_part, count=1) + rest_part
-    if root_part and not root_part.endswith("\n"):
-        root_part += "\n"
-    return root_part + line + "\n" + rest_part
 
 
 def upsert_section_value(src: str, section: str, key: str, value: str) -> str:
@@ -730,10 +701,6 @@ text = upsert_section_value(
     "command",
     mcp_command,
 )
-
-if "headroom" in tools:
-    text = strip_key_from_sections(text, "openai_base_url")
-    text = upsert_root_key(text, "openai_base_url", "http://127.0.0.1:8787/v1")
 
 config_path.write_text(text)
 PYCODEX

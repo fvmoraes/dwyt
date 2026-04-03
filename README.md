@@ -146,6 +146,7 @@ curl http://localhost:8787/stats   # estatísticas em tempo real
 headroom learn --apply             # salva aprendizados no CLAUDE.md
 # Se configurar o Codex manualmente, use:
 # openai_base_url = "http://127.0.0.1:8787/v1"
+# o instalador do DWYT não escreve mais essa chave automaticamente
 # e não http://localhost:8787, para evitar 404 em /responses
 
 # MemStack (via chat no LLM)
