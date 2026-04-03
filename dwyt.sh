@@ -249,14 +249,32 @@ tools = sys.argv[3]
 text = config_path.read_text() if config_path.exists() else ""
 
 
+def strip_key_from_sections(src: str, key: str) -> str:
+    """Remove a key from inside any [section] block, leaving root-level alone."""
+    lines = src.split("\n")
+    result = []
+    in_section = False
+    for line in lines:
+        if re.match(r"^\[", line):
+            in_section = True
+        if in_section and re.match(rf"^{re.escape(key)}\s*=", line):
+            continue
+        result.append(line)
+    return "\n".join(result)
+
+
 def upsert_root_key(src: str, key: str, value: str) -> str:
+    # Only match the key at root level (before any section header)
+    first_section = re.search(r"(?m)^\[", src)
+    root_part = src[:first_section.start()] if first_section else src
+    rest_part = src[first_section.start():] if first_section else ""
     pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
     line = f'{key} = "{value}"'
-    if pattern.search(src):
-        return pattern.sub(line, src, count=1)
-    if src and not src.endswith("\n"):
-        src += "\n"
-    return src + line + "\n"
+    if pattern.search(root_part):
+        return pattern.sub(line, root_part, count=1) + rest_part
+    if root_part and not root_part.endswith("\n"):
+        root_part += "\n"
+    return root_part + line + "\n" + rest_part
 
 
 def upsert_section_value(src: str, section: str, key: str, value: str) -> str:
@@ -290,6 +308,7 @@ text = upsert_section_value(
 )
 
 if "headroom" in tools:
+    text = strip_key_from_sections(text, "openai_base_url")
     text = upsert_root_key(text, "openai_base_url", "http://localhost:8787")
 
 config_path.write_text(text)
@@ -693,6 +712,10 @@ Memória:
   memstack get-context <project>
   memstack get-plan <project>
   memstack export-md <project>
+
+Sessões salvas:
+  memstack save-session <name> <project>   salva snapshot da memória do projeto
+  memstack use-session [<name>]            carrega sessão salva (sem nome: lista todas)
 HELP
 }
 
@@ -752,6 +775,42 @@ stop_headroom() {
   fi
 }
 
+save_session() {
+  local name="${1:-}"
+  local project="${2:-}"
+  if [[ -z "$name" ]] || [[ -z "$project" ]]; then
+    echo "Uso: memstack save-session <name> <project>" >&2
+    exit 1
+  fi
+  local save_dir="${MEMSTACK_HOME}/saved"
+  mkdir -p "$save_dir"
+  local save_file="${save_dir}/${name}.md"
+  python3 "$MEMSTACK_DB" export-md "$project" > "$save_file"
+  echo "Sessão '${name}' salva em: ${save_file}"
+}
+
+use_session() {
+  local name="${1:-}"
+  local save_dir="${MEMSTACK_HOME}/saved"
+  if [[ -z "$name" ]]; then
+    if [[ -d "$save_dir" ]] && ls "$save_dir"/*.md &>/dev/null 2>&1; then
+      echo "Sessões salvas:"
+      for f in "$save_dir"/*.md; do
+        echo "  - $(basename "$f" .md)"
+      done
+    else
+      echo "Nenhuma sessão salva encontrada."
+    fi
+    exit 0
+  fi
+  local save_file="${save_dir}/${name}.md"
+  if [[ ! -f "$save_file" ]]; then
+    echo "Sessão '${name}' não encontrada." >&2
+    exit 1
+  fi
+  cat "$save_file"
+}
+
 case "${1:-help}" in
   start)
     shift
@@ -760,6 +819,14 @@ case "${1:-help}" in
   stop)
     shift
     stop_headroom "$@"
+    ;;
+  save-session)
+    shift
+    save_session "$@"
+    ;;
+  use-session)
+    shift
+    use_session "$@"
     ;;
   help|-h|--help)
     show_help
@@ -1041,6 +1108,8 @@ Comandos de ajuda no terminal:
 - memstack get-context <project>
 - memstack get-plan <project>
 - memstack export-md <project>
+- memstack save-session <name> <project>
+- memstack use-session [<name>]
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -1060,6 +1129,8 @@ Integração automática disponível no Claude Code quando a integração estive
 - Contexto no terminal: memstack get-context <project>
 - Plano no terminal: memstack get-plan <project>
 - Exportar memória: memstack export-md <project>
+- Salvar sessão: memstack save-session <name> <project>
+- Usar sessão salva: memstack use-session [<name>]
 - Diário de sessão: skill \`Diary\` ativa automaticamente
 - Planejamento de tarefas: skill \`Work\` ativa com gatilhos como \"plan\", \"task\", \"implement\"
 "
@@ -1341,6 +1412,8 @@ show_summary() {
     echo -e "  ${CYAN}memstack get-sessions <projeto> --limit 5${NC}"
     echo -e "                               últimas sessões"
     echo -e "  ${CYAN}memstack get-context <projeto>${NC}  contexto salvo"
+    echo -e "  ${CYAN}memstack save-session <nome> <projeto>${NC}  salva snapshot"
+    echo -e "  ${CYAN}memstack use-session [<nome>]${NC}    carrega sessão salva"
     echo ""
   fi
 
