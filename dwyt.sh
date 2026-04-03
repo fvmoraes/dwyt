@@ -346,6 +346,8 @@ CLIENTS=""
 CHOSEN_REPO=""
 DWYT_MODE="install"
 DIRECT_REPO_PATH=""
+HEADROOM_PROXY_URL="http://127.0.0.1:8787/v1"
+CODEX_AUTH_MODE="unknown"
 
 # ─── Argumento --reinstall ────────────────────────────────────────────────────
 handle_args() {
@@ -373,6 +375,214 @@ handle_args() {
       exit 0
       ;;
   esac
+}
+
+detect_codex_auth_mode() {
+  CODEX_AUTH_MODE="unknown"
+
+  if [[ "$CLIENTS" != *codex* ]]; then
+    return 0
+  fi
+
+  if ! command -v codex &>/dev/null; then
+    CODEX_AUTH_MODE="missing"
+    return 0
+  fi
+
+  local status_output=""
+  status_output="$(run_with_timeout 10 codex login status 2>&1 || true)"
+
+  if printf '%s\n' "$status_output" | grep -q "Logged in using ChatGPT"; then
+    CODEX_AUTH_MODE="chatgpt"
+  elif printf '%s\n' "$status_output" | grep -q "Logged in using API key"; then
+    CODEX_AUTH_MODE="api_key"
+  elif printf '%s\n' "$status_output" | grep -qi "not logged in"; then
+    CODEX_AUTH_MODE="logged_out"
+  fi
+}
+
+sync_codex_openai_base_url() {
+  local codex_config="$1"
+  local action="$2"
+  local base_url="${3:-}"
+
+  python3 - "$codex_config" "$action" "$base_url" <<'PYCODBASE'
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+action = sys.argv[2]
+base_url = sys.argv[3]
+text = config_path.read_text() if config_path.exists() else ""
+
+
+def split_top_level(src: str) -> tuple[list[str], list[str]]:
+    lines = src.splitlines()
+    insert_at = len(lines)
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("["):
+            insert_at = i
+            break
+    return lines[:insert_at], lines[insert_at:]
+
+
+def set_top_level_key(src: str, key: str, value: str) -> str:
+    top_level, rest = split_top_level(src)
+    line = f'{key} = "{value}"'
+
+    for idx, existing in enumerate(top_level):
+        if existing.startswith(f"{key} "):
+            top_level[idx] = line
+            break
+    else:
+        if top_level and top_level[-1] != "":
+            top_level.append("")
+        top_level.append(line)
+        top_level.append("")
+
+    out = top_level + rest
+    return "\n".join(out).rstrip() + "\n"
+
+
+def unset_top_level_key(src: str, key: str) -> str:
+    top_level, rest = split_top_level(src)
+    filtered = [line for line in top_level if not line.startswith(f"{key} ")]
+
+    while filtered and filtered[-1] == "":
+        filtered.pop()
+
+    out = filtered + ([""] if filtered and rest else []) + rest
+    return "\n".join(out).rstrip() + ("\n" if out else "")
+
+
+if action == "set":
+    text = set_top_level_key(text, "openai_base_url", base_url)
+elif action == "unset":
+    text = unset_top_level_key(text, "openai_base_url")
+else:
+    raise SystemExit(f"unsupported action: {action}")
+
+config_path.write_text(text)
+PYCODBASE
+}
+
+write_headroom_wrapper() {
+  local wrapper_path="$1"
+
+  cat > "$wrapper_path" <<'WEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+extract_headroom_port() {
+  local port="8787"
+  local args=("$@")
+  local i=0
+
+  while [[ $i -lt ${#args[@]} ]]; do
+    case "${args[$i]}" in
+      -p|--port)
+        if [[ $((i + 1)) -lt ${#args[@]} ]]; then
+          port="${args[$((i + 1))]}"
+        fi
+        i=$((i + 2))
+        continue
+        ;;
+      --port=*)
+        port="${args[$i]#--port=}"
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  printf '%s\n' "$port"
+}
+
+sync_codex_config_for_headroom() {
+  local port="$1"
+
+  if ! command -v codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local status_output=""
+  status_output="$(codex login status 2>&1 || true)"
+
+  local action="unset"
+  if printf '%s\n' "$status_output" | grep -q "Logged in using API key"; then
+    action="set"
+  fi
+
+  local config_path="${HOME}/.codex/config.toml"
+  mkdir -p "$(dirname "$config_path")"
+  [[ -f "$config_path" ]] || touch "$config_path"
+
+  "VENV_PLACEHOLDER/bin/python" - "$config_path" "$action" "http://127.0.0.1:${port}/v1" <<'PYCODBASE'
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+action = sys.argv[2]
+base_url = sys.argv[3]
+text = config_path.read_text() if config_path.exists() else ""
+
+
+def split_top_level(src: str):
+    lines = src.splitlines()
+    insert_at = len(lines)
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("["):
+            insert_at = i
+            break
+    return lines[:insert_at], lines[insert_at:]
+
+
+def set_top_level_key(src: str, key: str, value: str) -> str:
+    top_level, rest = split_top_level(src)
+    line = f'{key} = "{value}"'
+
+    for idx, existing in enumerate(top_level):
+        if existing.startswith(f"{key} "):
+            top_level[idx] = line
+            break
+    else:
+        if top_level and top_level[-1] != "":
+            top_level.append("")
+        top_level.append(line)
+        top_level.append("")
+
+    out = top_level + rest
+    return "\n".join(out).rstrip() + "\n"
+
+
+def unset_top_level_key(src: str, key: str) -> str:
+    top_level, rest = split_top_level(src)
+    filtered = [line for line in top_level if not line.startswith(f"{key} ")]
+
+    while filtered and filtered[-1] == "":
+        filtered.pop()
+
+    out = filtered + ([""] if filtered and rest else []) + rest
+    return "\n".join(out).rstrip() + ("\n" if out else "")
+
+
+if action == "set":
+    text = set_top_level_key(text, "openai_base_url", base_url)
+else:
+    text = unset_top_level_key(text, "openai_base_url")
+
+config_path.write_text(text)
+PYCODBASE
+}
+
+if [[ "${1:-}" == "wrap" && "${2:-}" == "codex" ]]; then
+  sync_codex_config_for_headroom "$(extract_headroom_port "${@:3}")"
+fi
+
+exec "VENV_PLACEHOLDER/bin/headroom" "$@"
+WEOF
+
+  sed -i.bak "s|VENV_PLACEHOLDER|${HEADROOM_VENV}|g" "$wrapper_path" && rm -f "${wrapper_path}.bak"
+  chmod +x "$wrapper_path"
 }
 
 quick_integrate_repo() {
@@ -705,6 +915,21 @@ text = upsert_section_value(
 config_path.write_text(text)
 PYCODEX
 
+  detect_codex_auth_mode
+
+  if [[ "$TOOLS" == *headroom* ]]; then
+    case "$CODEX_AUTH_MODE" in
+      api_key)
+        sync_codex_openai_base_url "$codex_config" set "$HEADROOM_PROXY_URL"
+        info "Codex com API key detectado — openai_base_url configurado para Headroom"
+        ;;
+      *)
+        sync_codex_openai_base_url "$codex_config" unset
+        info "Codex sem API key detectada — openai_base_url removido do config.toml"
+        ;;
+    esac
+  fi
+
   success "Codex CLI configurado em $codex_config"
 }
 
@@ -976,6 +1201,7 @@ install_headroom() {
 
   if [[ -x "$WRAPPER" ]] && "$WRAPPER" --help &>/dev/null 2>&1; then
     success "Headroom já instalado"
+    write_headroom_wrapper "$WRAPPER"
     patch_headroom_codex_ws
     append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "headroom"
     export PATH="${DWYT_BIN}:$PATH"
@@ -1041,13 +1267,7 @@ install_headroom() {
     return 1
   }
 
-  cat > "$WRAPPER" << 'WEOF'
-#!/usr/bin/env bash
-exec "VENV_PLACEHOLDER/bin/headroom" "$@"
-WEOF
-  # Substitui o placeholder pelo caminho real
-  sed -i.bak "s|VENV_PLACEHOLDER|${HEADROOM_VENV}|g" "$WRAPPER" && rm -f "${WRAPPER}.bak"
-  chmod +x "$WRAPPER"
+  write_headroom_wrapper "$WRAPPER"
   success "Headroom instalado com Python $PY_VER — wrapper em $WRAPPER"
 
   patch_headroom_codex_ws
@@ -1764,6 +1984,13 @@ show_summary() {
     [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom wrap claude${NC}          → proxy + Claude Code (atalho)"
     [[ "$CLIENTS" == *codex*  ]] && echo -e "  ${CYAN}headroom wrap codex${NC}           → proxy + Codex (atalho oficial)"
     [[ "$CLIENTS" == *cursor* ]] && echo -e "  ${CYAN}headroom wrap cursor${NC}          → proxy + Cursor (atalho oficial)"
+    if [[ "$CLIENTS" == *codex* ]]; then
+      if [[ "$CODEX_AUTH_MODE" == "api_key" ]]; then
+        echo -e "  ${GREEN}Codex com API key:${NC} \`openai_base_url\` será gravado em \`~/.codex/config.toml\` no wrap"
+      else
+        echo -e "  ${YELLOW}Codex sem API key:${NC} o wrap não grava \`openai_base_url\` em \`~/.codex/config.toml\`"
+      fi
+    fi
     echo -e "  ${YELLOW}Copilot e Kiro só aproveitam isso se o cliente permitir customizar proxy/base URL.${NC}"
     echo ""
   fi
