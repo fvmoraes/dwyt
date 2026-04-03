@@ -309,7 +309,7 @@ text = upsert_section_value(
 
 if "headroom" in tools:
     text = strip_key_from_sections(text, "openai_base_url")
-    text = upsert_root_key(text, "openai_base_url", "http://localhost:8787")
+    text = upsert_root_key(text, "openai_base_url", "http://127.0.0.1:8787/v1")
 
 config_path.write_text(text)
 PYCODEX
@@ -1336,6 +1336,153 @@ UIWRAPPER
   chmod +x "${DWYT_BIN}/dwyt-ui"
   success "Comando dwyt-ui criado → use: dwyt-ui / dwyt-ui stop"
 
+  # Cria helper para adicionar novos repositórios ao Codebase Memory / Codex
+  cat > "${DWYT_BIN}/dwyt-repo" << 'REPOWRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+DWYT_HOME="${HOME}/.dwyt"
+DWYT_BIN="${DWYT_HOME}/bin"
+CODEBASE_BIN="${DWYT_BIN}/codebase-memory-mcp"
+CODEX_HOME="${HOME}/.codex"
+CODEX_CONFIG="${CODEX_HOME}/config.toml"
+
+usage() {
+  cat <<'HELP'
+Uso: dwyt-repo [caminho-do-repo]
+
+Se nenhum caminho for informado, usa o diretório atual.
+
+O comando:
+- garante .mcp.json apontando para codebase-memory-mcp
+- adiciona .mcp.json ao .gitignore local
+- registra o repositório como trusted no ~/.codex/config.toml
+- dispara index_repository no codebase-memory-mcp
+HELP
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+REPO_PATH="${1:-$PWD}"
+REPO_PATH="$(cd "$REPO_PATH" 2>/dev/null && pwd)" || {
+  echo "Erro: caminho inválido: ${1:-$PWD}" >&2
+  exit 1
+}
+
+if [[ ! -d "$REPO_PATH" ]]; then
+  echo "Erro: repositório não encontrado: $REPO_PATH" >&2
+  exit 1
+fi
+
+if [[ ! -x "$CODEBASE_BIN" ]]; then
+  echo "Erro: codebase-memory-mcp não encontrado em $CODEBASE_BIN" >&2
+  echo "Rode ./dwyt.sh ao menos uma vez para instalar as ferramentas base." >&2
+  exit 1
+fi
+
+mkdir -p "$CODEX_HOME"
+[[ -f "$CODEX_CONFIG" ]] || touch "$CODEX_CONFIG"
+
+GITIGNORE_FILE="${REPO_PATH}/.gitignore"
+MCP_FILE="${REPO_PATH}/.mcp.json"
+
+if [[ -f "$GITIGNORE_FILE" ]]; then
+  grep -qxF "# dwyt" "$GITIGNORE_FILE" || printf '\n# dwyt\n' >> "$GITIGNORE_FILE"
+else
+  printf '# dwyt\n' > "$GITIGNORE_FILE"
+fi
+grep -qxF ".mcp.json" "$GITIGNORE_FILE" || printf '.mcp.json\n' >> "$GITIGNORE_FILE"
+
+cat > "$MCP_FILE" <<'EOF'
+{
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp"
+    }
+  }
+}
+EOF
+
+python3 - "$CODEX_CONFIG" "$CODEBASE_BIN" "$REPO_PATH" << 'PYREPO'
+import re
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+mcp_command = sys.argv[2]
+repo_path = sys.argv[3]
+text = config_path.read_text() if config_path.exists() else ""
+
+
+def upsert_root_key(src: str, key: str, value: str) -> str:
+    first_section = re.search(r"(?m)^\[", src)
+    root_part = src[:first_section.start()] if first_section else src
+    rest_part = src[first_section.start():] if first_section else ""
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+    line = f'{key} = "{value}"'
+    if pattern.search(root_part):
+        return pattern.sub(line, root_part, count=1) + rest_part
+    if root_part and not root_part.endswith("\n"):
+        root_part += "\n"
+    return root_part + line + "\n" + rest_part
+
+
+def upsert_section_value(src: str, section: str, key: str, value: str) -> str:
+    section_header = f"[{section}]"
+    line = f'{key} = "{value}"'
+    pattern = re.compile(rf"(?ms)^\[{re.escape(section)}\]\n(.*?)(?=^\[|\Z)")
+    match = pattern.search(src)
+    if match:
+        body = match.group(1)
+        key_pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+        if key_pattern.search(body):
+            new_body = key_pattern.sub(line, body, count=1)
+        else:
+            if body and not body.endswith("\n"):
+                body += "\n"
+            new_body = body + line + "\n"
+        return src[:match.start(1)] + new_body + src[match.end(1):]
+
+    if src and not src.endswith("\n"):
+        src += "\n"
+    if src and not src.endswith("\n\n"):
+        src += "\n"
+    return src + section_header + "\n" + line + "\n"
+
+
+text = upsert_section_value(
+    text,
+    "mcp_servers.codebase-memory-mcp",
+    "command",
+    mcp_command,
+)
+text = upsert_section_value(
+    text,
+    f'projects."{repo_path}"',
+    "trust_level",
+    "trusted",
+)
+
+config_path.write_text(text)
+PYREPO
+
+printf '%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"dwyt-repo","version":"2.0"}}}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"index_repository\",\"arguments\":{\"repo_path\":\"${REPO_PATH}\"}}}" \
+  | "$CODEBASE_BIN" 2>&1 | grep -v "^$" | tail -3 || true
+
+echo "✓ Repositório preparado: ${REPO_PATH}"
+echo "  - .mcp.json criado/atualizado"
+echo "  - ~/.codex/config.toml atualizado"
+echo "  - index_repository disparado"
+REPOWRAPPER
+  chmod +x "${DWYT_BIN}/dwyt-repo"
+  success "Comando dwyt-repo criado → use: dwyt-repo /caminho/do/repo"
+
   success "~/.dwyt/env.sh atualizado"
 
   # Aplica PATH e exports na sessão atual sem dar source no rc inteiro
@@ -1378,6 +1525,7 @@ show_summary() {
     echo -e "${BOLD}  PASSO 2 — No chat do LLM, valide se o MCP está conectado e use os 3 comandos principais:${NC}"
     echo -e "  ${CYAN}/mcp${NC}                           → valida se o servidor MCP está conectado no cliente"
     echo -e "  ${CYAN}\"Index this project\"${NC}          → dispara a tool index_repository"
+    echo -e "  ${CYAN}dwyt-repo /caminho/do/repo${NC}     → integra e indexa um novo repositório sem reinstalar"
     echo -e "  ${CYAN}\"Quem chama a função X?\"${NC}      → usa trace_call_path para rastrear chamadores"
     echo -e "  ${CYAN}\"O que a função X chama?\"${NC}     → usa trace_call_path para rastrear dependências"
     echo -e "  ${CYAN}AGENTS.md${NC}                      → instruções universais para Codex, Cursor e Kiro"
