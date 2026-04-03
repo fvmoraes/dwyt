@@ -6,6 +6,12 @@ Um script que instala e integra quatro ferramentas open source para reduzir dras
 chmod +x dwyt.sh && ./dwyt.sh
 ```
 
+Para integrar um novo repositório depois da instalação inicial:
+
+```bash
+./dwyt.sh --repo /caminho/do/repo
+```
+
 ---
 
 ## Regra geral
@@ -46,6 +52,7 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 
 ```bash
 ./dwyt.sh               # instalação interativa (checklist + menu)
+./dwyt.sh --repo path   # integra e indexa um repositório sem reinstalar tudo
 ./dwyt.sh --reinstall   # apaga ~/.dwyt e reinstala tudo do zero
 ./dwyt.sh --uninstall   # remove todas as ferramentas instaladas
 ./dwyt.sh --help        # mostra os modos disponíveis
@@ -72,6 +79,9 @@ headroom wrap cursor      # usa Headroom no Cursor
 /mcp                              # valida se o servidor MCP está conectado no cliente
 "Index this project"              # dispara a tool index_repository
 "Quem chama a função X?"          # usa trace_call_path para rastrear chamadores
+
+# 2.1 Para plugar outro repositório depois, sem reinstalar tudo
+./dwyt.sh --repo /caminho/do/outro-repo
 
 # Se o MCP não estiver disponível no cliente, faça busca manual normalmente
 
@@ -134,6 +144,9 @@ headroom wrap cursor               # proxy + Cursor
 headroom wrap aider                # proxy + Aider
 curl http://localhost:8787/stats   # estatísticas em tempo real
 headroom learn --apply             # salva aprendizados no CLAUDE.md
+# Se configurar o Codex manualmente, use:
+# openai_base_url = "http://127.0.0.1:8787/v1"
+# e não http://localhost:8787, para evitar 404 em /responses
 
 # MemStack (via chat no LLM)
 /memstack-search <query>           # busca nas memórias persistidas
