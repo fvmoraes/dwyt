@@ -2,7 +2,7 @@
 # =============================================================================
 #  dwyt.sh — Don't Waste Your Tokens v2.0
 #  Instala: codebase-memory-mcp + RTK + Headroom + MemStack
-#  Tudo em ~/.dwyt/ — Linux (Ubuntu/Debian) + macOS
+#  Tudo em ~/.dwyt/ — Linux (Ubuntu/Debian/Fedora) + macOS
 #
 #  Uso:
 #    ./dwyt.sh            — instalação normal (com checklist)
@@ -1137,6 +1137,23 @@ install_headroom() {
         brew install python@3.12
         PYTHON_BIN="$(brew --prefix python@3.12)/bin/python3.12"
         PY_VER="3.12"
+      elif [[ "$OS" == "fedora" ]]; then
+        info "Instalando Python compatível via dnf..."
+        sudo dnf install -y python3.12 python3-pip 2>/dev/null \
+          || sudo dnf install -y python3.11 python3-pip 2>/dev/null
+        if command -v python3.12 &>/dev/null; then
+          PYTHON_BIN="python3.12"
+          PY_VER="3.12"
+          found="$PY_VER"
+        elif command -v python3.11 &>/dev/null; then
+          PYTHON_BIN="python3.11"
+          PY_VER="3.11"
+          found="$PY_VER"
+        elif python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+          PYTHON_BIN="python3"
+          PY_VER="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+          found="$PY_VER"
+        fi
       elif [[ "$OS" == "debian" ]]; then
         info "Instalando Python 3.12 via apt..."
         sudo apt-get install -y python3.12 python3.12-venv 2>/dev/null \
@@ -1146,6 +1163,7 @@ install_headroom() {
       else
         error "Python >= 3.10 não encontrado."
         error "No macOS instale com: brew install python@3.12"
+        error "No Fedora instale com: sudo dnf install python3.12 python3-pip"
         error "Depois rode: ./dwyt.sh"
         return 1
       fi
@@ -2066,7 +2084,7 @@ main() {
   echo "  ╔══════════════════════════════════════════════════════════╗"
   echo "  ║   🚀  DWYT — Don't Waste Your Tokens  v2.0              ║"
   echo "  ║   codebase-memory-mcp + RTK + Headroom + MemStack       ║"
-  echo "  ║   Linux (Ubuntu/Debian) + macOS                         ║"
+  echo "  ║   Linux (Ubuntu/Debian/Fedora) + macOS                 ║"
   echo "  ║                                                          ║"
   echo "  ║   Uso: ./dwyt.sh [--repo path|--reinstall|--uninstall] ║"
   echo "  ╚══════════════════════════════════════════════════════════╝"
