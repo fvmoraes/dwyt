@@ -2,7 +2,7 @@
 # =============================================================================
 #  dwyt.sh — Don't Waste Your Tokens v2.0
 #  Instala: codebase-memory-mcp + RTK + Headroom + MemStack
-#  Tudo em ~/.dwyt/ — Linux (Ubuntu/Debian/Fedora) + macOS
+#  Tudo em ~/.dwyt/ — Linux (Ubuntu/Debian/Fedora), macOS e Windows (Git Bash)
 #
 #  Uso:
 #    ./dwyt.sh            — instalação normal (com checklist)
@@ -14,6 +14,7 @@ set -euo pipefail
 # ─── Cores & helpers ─────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+SYSTEM_PYTHON=""
 
 info()    { echo -e "${CYAN}  →  $*${NC}"; }
 success() { echo -e "${GREEN}  ✓  $*${NC}"; }
@@ -45,24 +46,225 @@ require_brew() {
   fi
 }
 
+can_use_dialog() {
+  command -v dialog &>/dev/null && [[ -t 0 ]] && [[ -t 1 ]]
+}
+
+confirm_yes_no() {
+  local prompt="$1"
+  local default="${2:-y}"
+  local hint="[Y/n]"
+
+  [[ "$default" == "n" ]] && hint="[y/N]"
+
+  while true; do
+    local reply=""
+    read -r -p "${prompt} ${hint} " reply || reply=""
+    reply="${reply:-$default}"
+    case "${reply,,}" in
+      y|yes|s|sim) return 0 ;;
+      n|no|nao|não) return 1 ;;
+    esac
+    warn "Responda com y/n."
+  done
+}
+
+resolve_system_python() {
+  local candidate=""
+
+  if [[ -n "$SYSTEM_PYTHON" ]] && [[ -x "$SYSTEM_PYTHON" || -f "$SYSTEM_PYTHON" ]]; then
+    printf '%s\n' "$SYSTEM_PYTHON"
+    return 0
+  fi
+
+  for candidate in python3 python py py.exe; do
+    if command -v "$candidate" &>/dev/null; then
+      local resolved
+      resolved="$(command -v "$candidate")"
+      if "$resolved" -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' &>/dev/null; then
+        SYSTEM_PYTHON="$resolved"
+        printf '%s\n' "$SYSTEM_PYTHON"
+        return 0
+      fi
+    fi
+  done
+
+  return 1
+}
+
+venv_python_path() {
+  local venv_dir="$1"
+  local candidates=(
+    "${venv_dir}/Scripts/python.exe"
+    "${venv_dir}/Scripts/python"
+    "${venv_dir}/bin/python3"
+    "${venv_dir}/bin/python"
+  )
+  local candidate=""
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" || -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+venv_pip_path() {
+  local venv_dir="$1"
+  local candidates=(
+    "${venv_dir}/Scripts/pip.exe"
+    "${venv_dir}/Scripts/pip"
+    "${venv_dir}/bin/pip3"
+    "${venv_dir}/bin/pip"
+  )
+  local candidate=""
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" || -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+venv_headroom_path() {
+  local venv_dir="$1"
+  local candidates=(
+    "${venv_dir}/Scripts/headroom.exe"
+    "${venv_dir}/Scripts/headroom"
+    "${venv_dir}/bin/headroom"
+  )
+  local candidate=""
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" || -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+find_windows_package_manager() {
+  local candidate=""
+
+  for candidate in winget winget.exe choco choco.exe scoop scoop.cmd; do
+    if command -v "$candidate" &>/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+install_windows_dependency() {
+  local dep="$1"
+  local pkg_manager=""
+
+  pkg_manager="$(find_windows_package_manager)" || return 1
+
+  case "$pkg_manager" in
+    winget|winget.exe)
+      case "$dep" in
+        git) "$pkg_manager" install --id Git.Git -e --accept-package-agreements --accept-source-agreements ;;
+        python3)
+          "$pkg_manager" install --id Python.Python.3.13 -e --accept-package-agreements --accept-source-agreements \
+            || "$pkg_manager" install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements \
+            || "$pkg_manager" install --id Python.Python.3.11 -e --accept-package-agreements --accept-source-agreements
+          ;;
+        node) "$pkg_manager" install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements ;;
+        *) return 1 ;;
+      esac
+      ;;
+    choco|choco.exe)
+      case "$dep" in
+        git) "$pkg_manager" install -y git ;;
+        python3) "$pkg_manager" install -y python ;;
+        node) "$pkg_manager" install -y nodejs-lts ;;
+        *) return 1 ;;
+      esac
+      ;;
+    scoop|scoop.cmd)
+      case "$dep" in
+        git) "$pkg_manager" install git ;;
+        python3) "$pkg_manager" install python ;;
+        node) "$pkg_manager" install nodejs-lts ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+link_or_copy_dir() {
+  local source_dir="$1"
+  local dest_path="$2"
+  local label="${3:-diretório}"
+
+  if ln -s "$source_dir" "$dest_path" 2>/dev/null; then
+    success "${label} → symlink em $dest_path"
+    return 0
+  fi
+
+  cp -R "$source_dir" "$dest_path"
+  success "${label} → cópia criada em $dest_path"
+}
+
+extract_zip_archive() {
+  local archive_path="$1"
+  local dest_dir="$2"
+
+  if command -v unzip &>/dev/null; then
+    unzip -q "$archive_path" -d "$dest_dir"
+    return 0
+  fi
+
+  if command -v powershell.exe &>/dev/null; then
+    powershell.exe -NoLogo -NoProfile -Command \
+      "Expand-Archive -LiteralPath '$archive_path' -DestinationPath '$dest_dir' -Force" \
+      >/dev/null
+    return 0
+  fi
+
+  return 1
+}
+
 patch_headroom_codex_ws() {
   local server_py=""
+  local patch_python=""
 
   if [[ ! -d "$HEADROOM_VENV" ]]; then
+    return 0
+  fi
+
+  patch_python="$(venv_python_path "$HEADROOM_VENV" || true)"
+  [[ -z "$patch_python" ]] && patch_python="$(resolve_system_python || true)"
+
+  if [[ -z "$patch_python" ]]; then
+    warn "Patch do Headroom: Python não encontrado; pulando ajuste do Codex"
     return 0
   fi
 
   while IFS= read -r candidate; do
     server_py="$candidate"
     break
-  done < <(find "$HEADROOM_VENV"/lib -path '*/site-packages/headroom/proxy/server.py' 2>/dev/null | sort)
+  done < <(find "$HEADROOM_VENV" -path '*/site-packages/headroom/proxy/server.py' 2>/dev/null | sort)
 
   if [[ -z "$server_py" ]]; then
     warn "Patch do Headroom: server.py não encontrado; pulando ajuste do Codex"
     return 0
   fi
 
-  if python3 - "$server_py" <<'PY'
+  if "$patch_python" - "$server_py" <<'PY'
 from pathlib import Path
 import sys
 
@@ -382,6 +584,36 @@ write_headroom_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+resolve_venv_exec() {
+  local base_dir="VENV_PLACEHOLDER"
+  local name="$1"
+  local candidates=(
+    "${base_dir}/Scripts/${name}.exe"
+    "${base_dir}/Scripts/${name}"
+    "${base_dir}/bin/${name}"
+  )
+
+  if [[ "$name" == "python" ]]; then
+    candidates=(
+      "${base_dir}/Scripts/python.exe"
+      "${base_dir}/Scripts/python"
+      "${base_dir}/bin/python3"
+      "${base_dir}/bin/python"
+    )
+  fi
+
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" || -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "Executável do virtualenv não encontrado para: ${name}" >&2
+  exit 1
+}
+
 extract_headroom_port() {
   local port="8787"
   local args=("$@")
@@ -425,7 +657,7 @@ sync_codex_config_for_headroom() {
   mkdir -p "$(dirname "$config_path")"
   [[ -f "$config_path" ]] || touch "$config_path"
 
-  "VENV_PLACEHOLDER/bin/python" - "$config_path" "$action" "http://127.0.0.1:${port}/v1" <<'PYCODBASE'
+  "$(resolve_venv_exec python)" - "$config_path" "$action" "http://127.0.0.1:${port}/v1" <<'PYCODBASE'
 import sys
 from pathlib import Path
 
@@ -487,7 +719,7 @@ if [[ "${1:-}" == "wrap" && "${2:-}" == "codex" ]]; then
   sync_codex_config_for_headroom "$(extract_headroom_port "${@:3}")"
 fi
 
-exec "VENV_PLACEHOLDER/bin/headroom" "$@"
+exec "$(resolve_venv_exec headroom)" "$@"
 WEOF
 
   sed -i.bak "s|VENV_PLACEHOLDER|${HEADROOM_VENV}|g" "$wrapper_path" && rm -f "${wrapper_path}.bak"
@@ -497,8 +729,15 @@ WEOF
 quick_integrate_repo() {
   local repo_input="${1:-$PWD}"
   local repo_path=""
+  local system_python=""
   repo_path="$(cd "$repo_input" 2>/dev/null && pwd)" || {
     error "Caminho inválido: $repo_input"
+    exit 1
+  }
+
+  system_python="$(resolve_system_python)" || {
+    error "Python 3 não encontrado."
+    error "Instale Python 3 e rode novamente: ./dwyt.sh --repo \"$repo_input\""
     exit 1
   }
 
@@ -530,6 +769,7 @@ quick_integrate_repo() {
   fi
   grep -qxF ".codex" "$gitignore_file" || printf '.codex\n' >> "$gitignore_file"
   grep -qxF ".mcp.json" "$gitignore_file" || printf '.mcp.json\n' >> "$gitignore_file"
+  grep -qxF "AGENTS.md" "$gitignore_file" || printf 'AGENTS.md\n' >> "$gitignore_file"
 
   cat > "$mcp_file" <<'EOF'
 {
@@ -564,7 +804,7 @@ EOF
     printf '%s\n' "$dwyt_agents_section" > "$agents_file"
   fi
 
-  python3 - "$codex_config" "$codebase_bin" "$repo_path" << 'PYREPO'
+  "$system_python" - "$codex_config" "$codebase_bin" "$repo_path" << 'PYREPO'
 import re
 import sys
 from pathlib import Path
@@ -639,8 +879,8 @@ uninstall() {
 
   detect_env
 
-  # Confirma via dialog
-  dialog     --backtitle "dwyt — Don't Waste Your Tokens"     --title "Confirmar desinstalação"     --yesno "Isso irá remover:
+  if can_use_dialog; then
+    dialog     --backtitle "dwyt — Don't Waste Your Tokens"     --title "Confirmar desinstalação"     --yesno "Isso irá remover:
 
   • ~/.dwyt/  (binários, venvs, memstack)
   • Linhas do dwyt em $SHELL_RC
@@ -650,6 +890,9 @@ uninstall() {
 Não remove arquivos dos seus projetos (.mcp.json, AGENTS.md, CLAUDE.md, .claude/, .cursor/, .kiro/, .github/).
 
 Deseja continuar?"     18 65 || { clear; info "Desinstalação cancelada."; exit 0; }
+  else
+    confirm_yes_no "Remover ~/.dwyt e os hooks globais do DWYT?" n || { info "Desinstalação cancelada."; exit 0; }
+  fi
   clear
 
   # ── Remove ~/.dwyt ────────────────────────────────────────────────────────
@@ -662,10 +905,15 @@ Deseja continuar?"     18 65 || { clear; info "Desinstalação cancelada."; exit
 
   # ── Remove banco do codebase-memory-mcp ──────────────────────────────────
   if [[ -d "${HOME}/.cache/codebase-memory-mcp" ]]; then
-    dialog       --backtitle "dwyt — Don't Waste Your Tokens"       --title "Banco de dados do grafo"       --yesno "Remover também o banco SQLite do codebase-memory-mcp?
+    if can_use_dialog; then
+      dialog       --backtitle "dwyt — Don't Waste Your Tokens"       --title "Banco de dados do grafo"       --yesno "Remover também o banco SQLite do codebase-memory-mcp?
 (~/.cache/codebase-memory-mcp/)
 
 Contém todos os índices dos seus projetos."       10 60 && rm -rf "${HOME}/.cache/codebase-memory-mcp" && success "Cache do codebase-memory-mcp removido"
+    elif confirm_yes_no "Remover também o cache ~/.cache/codebase-memory-mcp?" n; then
+      rm -rf "${HOME}/.cache/codebase-memory-mcp"
+      success "Cache do codebase-memory-mcp removido"
+    fi
     clear
   fi
 
@@ -688,10 +936,15 @@ Contém todos os índices dos seus projetos."       10 60 && rm -rf "${HOME}/.ca
   if command -v rtk &>/dev/null; then
     local RTK_PATH
     RTK_PATH=$(command -v rtk)
-    dialog       --backtitle "dwyt — Don't Waste Your Tokens"       --title "RTK global"       --yesno "Remover o binário RTK em:
+    if can_use_dialog; then
+      dialog       --backtitle "dwyt — Don't Waste Your Tokens"       --title "RTK global"       --yesno "Remover o binário RTK em:
 $RTK_PATH
 
 (instalado pelo install.sh do RTK)"       10 60 && rm -f "$RTK_PATH" && success "RTK removido de $RTK_PATH"
+    elif confirm_yes_no "Remover também o binário global do RTK em $RTK_PATH?" n; then
+      rm -f "$RTK_PATH"
+      success "RTK removido de $RTK_PATH"
+    fi
     clear
   fi
 
@@ -706,12 +959,14 @@ $RTK_PATH
 detect_env() {
   if [[ "$OSTYPE" == "darwin"* ]]; then
     OS="macos"
+  elif [[ "$OSTYPE" == msys* ]] || [[ "$OSTYPE" == cygwin* ]] || [[ "$OSTYPE" == win32* ]] || [[ "$OSTYPE" == mingw* ]] || [[ -n "${MSYSTEM:-}" ]]; then
+    OS="windows"
   elif [[ -f /etc/debian_version ]]; then
     OS="debian"
   elif [[ -f /etc/fedora-release ]] || [[ -f /etc/redhat-release ]]; then
     OS="fedora"
   else
-    error "Sistema não suportado (Linux Debian/Ubuntu, Fedora ou macOS)."
+    error "Sistema não suportado (Linux Debian/Ubuntu, Fedora, macOS ou Windows via Git Bash)."
     exit 1
   fi
 
@@ -782,7 +1037,7 @@ configure_codex_cli() {
   mkdir -p "$codex_home"
   [[ -f "$codex_config" ]] || touch "$codex_config"
 
-  python3 - "$codex_config" "${DWYT_BIN}/codebase-memory-mcp" << 'PYCODEX'
+  "$(resolve_system_python)" - "$codex_config" "${DWYT_BIN}/codebase-memory-mcp" << 'PYCODEX'
 import re
 import sys
 from pathlib import Path
@@ -840,8 +1095,9 @@ PYCODEX
 check_deps() {
   header "Verificando dependências base"
   local missing=()
+  local base_cmds=(curl git)
 
-  for cmd in curl git dialog python3; do
+  for cmd in "${base_cmds[@]}"; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     else
@@ -849,15 +1105,49 @@ check_deps() {
     fi
   done
 
+  if resolve_system_python &>/dev/null; then
+    success "python ok ($("$(resolve_system_python)" --version 2>&1))"
+  else
+    missing+=("python3")
+  fi
+
   if [[ ${#missing[@]} -gt 0 ]]; then
     warn "Instalando: ${missing[*]}"
     case "$OS" in
       macos)
+        local macos_missing=()
+        local dep=""
         require_brew
-        brew install "${missing[@]}" ;;
+        for dep in "${missing[@]}"; do
+          if [[ "$dep" == "python3" ]]; then
+            macos_missing+=("python")
+          else
+            macos_missing+=("$dep")
+          fi
+        done
+        brew install "${macos_missing[@]}" ;;
       debian) sudo apt-get update -qq && sudo apt-get install -y "${missing[@]}" ;;
       fedora) sudo dnf install -y "${missing[@]}" ;;
+      windows)
+        local dep=""
+        for dep in "${missing[@]}"; do
+          if install_windows_dependency "$dep"; then
+            success "$dep instalado via gerenciador do Windows"
+          else
+            error "Dependência ausente no Windows: $dep"
+            error "Use Git Bash com curl/git e instale Python 3 + Node.js via winget/choco/scoop."
+            exit 1
+          fi
+        done
+        hash -r
+        ;;
     esac
+  fi
+
+  if ! resolve_system_python &>/dev/null; then
+    error "Python 3 não foi encontrado após a instalação."
+    error "Abra um novo terminal e rode novamente: ./dwyt.sh"
+    exit 1
   fi
 
   # Node.js
@@ -871,58 +1161,125 @@ check_deps() {
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
         sudo apt-get install -y nodejs ;;
       fedora) sudo dnf install -y nodejs ;;
+      windows)
+        install_windows_dependency node || {
+          error "Não foi possível instalar Node.js automaticamente."
+          error "Instale Node.js LTS e rode novamente: ./dwyt.sh"
+          exit 1
+        }
+        hash -r
+        ;;
     esac
     success "Node.js instalado"
   else
     success "node ok ($(node --version))"
   fi
 
+  if ! command -v node &>/dev/null; then
+    error "Node.js não apareceu no PATH após a instalação."
+    error "Abra um novo terminal e rode novamente: ./dwyt.sh"
+    exit 1
+  fi
+
   # python3-venv — instalado incondicionalmente no Debian
   if [[ "$OS" == "debian" ]]; then
     local PY_VER
-    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PY_VER=$("$(resolve_system_python)" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     info "Garantindo python3-venv para Python $PY_VER..."
     sudo apt-get install -y python3-venv python3-pip "python${PY_VER}-venv" 2>/dev/null \
       || sudo apt-get install -y python3-venv python3-pip
     success "python3-venv ok"
   fi
+
+  if ! can_use_dialog; then
+    warn "dialog não disponível — usando prompts em texto."
+  fi
 }
 
 # ─── Dialog: selecionar ferramentas ──────────────────────────────────────────
 select_tools() {
-  TOOLS=$(dialog \
-    --backtitle "dwyt — Don't Waste Your Tokens" \
-    --title "Selecione as ferramentas para instalar" \
-    --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 18 65 4 \
-    "cbmcp"    "codebase-memory-mcp  (grafo + UI visual)"    ON \
-    "rtk"      "RTK                  (comprime output CLI)"   ON \
-    "headroom" "Headroom             (comprime chamadas API)" ON \
-    "memstack" "MemStack             (memória entre sessões)" ON \
-    3>&1 1>&2 2>&3) || {
-      clear; error "Nenhuma ferramenta selecionada. Abortando."; exit 1
-    }
+  if can_use_dialog; then
+    TOOLS=$(dialog \
+      --backtitle "dwyt — Don't Waste Your Tokens" \
+      --title "Selecione as ferramentas para instalar" \
+      --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 18 65 4 \
+      "cbmcp"    "codebase-memory-mcp  (grafo + UI visual)"    ON \
+      "rtk"      "RTK                  (comprime output CLI)"   ON \
+      "headroom" "Headroom             (comprime chamadas API)" ON \
+      "memstack" "MemStack             (memória entre sessões)" ON \
+      3>&1 1>&2 2>&3) || {
+        clear; error "Nenhuma ferramenta selecionada. Abortando."; exit 1
+      }
+  else
+    TOOLS=""
+    confirm_yes_no "Instalar codebase-memory-mcp (grafo + UI visual)?" y && TOOLS+=" cbmcp"
+    confirm_yes_no "Instalar RTK (compressão de output CLI)?" y && TOOLS+=" rtk"
+    confirm_yes_no "Instalar Headroom (compressão de chamadas API)?" y && TOOLS+=" headroom"
+    confirm_yes_no "Instalar MemStack (memória entre sessões)?" y && TOOLS+=" memstack"
+    TOOLS="${TOOLS# }"
+    [[ -n "$TOOLS" ]] || { error "Nenhuma ferramenta selecionada. Abortando."; exit 1; }
+  fi
   clear
 }
 
 # ─── Dialog: selecionar clientes LLM ─────────────────────────────────────────
 select_clients() {
-  CLIENTS=$(dialog \
-    --backtitle "dwyt — Don't Waste Your Tokens" \
-    --title "Selecione os clientes LLM para integrar" \
-    --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 20 72 6 \
-    "claude"  "Claude Code        (.claude/CLAUDE.md, hooks)"         ON \
-    "codex"   "Codex              (AGENTS.md + .codex/)"            ON \
-    "copilot" "GitHub Copilot     (.github/copilot-instructions.md)" ON \
-    "kiro"    "Kiro               (.kiro/steering + AGENTS.md)"      ON \
-    "cursor"  "Cursor             (.cursor/rules + AGENTS.md)"       ON \
-    3>&1 1>&2 2>&3) || {
-      clear; error "Nenhum cliente selecionado. Abortando."; exit 1
-    }
+  if can_use_dialog; then
+    CLIENTS=$(dialog \
+      --backtitle "dwyt — Don't Waste Your Tokens" \
+      --title "Selecione os clientes LLM para integrar" \
+      --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 20 72 6 \
+      "claude"  "Claude Code        (.claude/CLAUDE.md, hooks)"         ON \
+      "codex"   "Codex              (AGENTS.md + .codex/)"            ON \
+      "copilot" "GitHub Copilot     (.github/copilot-instructions.md)" ON \
+      "kiro"    "Kiro               (.kiro/steering + AGENTS.md)"      ON \
+      "cursor"  "Cursor             (.cursor/rules + AGENTS.md)"       ON \
+      3>&1 1>&2 2>&3) || {
+        clear; error "Nenhum cliente selecionado. Abortando."; exit 1
+      }
+  else
+    CLIENTS=""
+    confirm_yes_no "Integrar Claude Code?" y && CLIENTS+=" claude"
+    confirm_yes_no "Integrar Codex?" y && CLIENTS+=" codex"
+    confirm_yes_no "Integrar GitHub Copilot?" y && CLIENTS+=" copilot"
+    confirm_yes_no "Integrar Kiro?" y && CLIENTS+=" kiro"
+    confirm_yes_no "Integrar Cursor?" y && CLIENTS+=" cursor"
+    CLIENTS="${CLIENTS# }"
+    [[ -n "$CLIENTS" ]] || { error "Nenhum cliente selecionado. Abortando."; exit 1; }
+  fi
   clear
 }
 
 # ─── Dialog: navegador de diretórios interativo ──────────────────────────────
 select_repo() {
+  if ! can_use_dialog; then
+    local repo_input=""
+    while true; do
+      echo
+      info "Digite o caminho do projeto para integrar."
+      info "Enter vazio usa o diretório atual (${PWD}); digite 'skip' para pular."
+      read -r -p "> " repo_input || repo_input="skip"
+
+      case "${repo_input:-}" in
+        skip)
+          warn "Integração de projeto pulada."
+          CHOSEN_REPO=""
+          return
+          ;;
+        "")
+          repo_input="$PWD"
+          ;;
+      esac
+
+      if CHOSEN_REPO="$(cd "$repo_input" 2>/dev/null && pwd)"; then
+        success "Projeto selecionado: $CHOSEN_REPO"
+        return
+      fi
+
+      warn "Caminho inválido: $repo_input"
+    done
+  fi
+
   local current_dir="$HOME"
   CHOSEN_REPO=""
 
@@ -1018,31 +1375,116 @@ install_cbmcp() {
 
   local BIN="${DWYT_BIN}/codebase-memory-mcp"
   local UI_BIN="${DWYT_BIN}/codebase-memory-mcp-ui"
+  local WIN_BIN="${DWYT_BIN}/codebase-memory-mcp.exe"
+  local WIN_UI_BIN="${DWYT_BIN}/codebase-memory-mcp-ui.exe"
 
-  if [[ -x "$BIN" ]]; then
+  if [[ -x "$BIN" ]] && "$BIN" --version &>/dev/null 2>&1; then
     success "codebase-memory-mcp já instalado em $BIN"
   else
-    info "Instalando binário padrão direto em ${DWYT_BIN}..."
-    curl -fsSL \
-      "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" \
-      | bash -s -- --dir="${DWYT_BIN}" --skip-config
+    if [[ "$OS" == "windows" ]]; then
+      info "Baixando codebase-memory-mcp para Windows direto do release oficial..."
+      local arch
+      arch="$(uname -m)"
+      case "$arch" in
+        x86_64|amd64) ;;
+        *)
+          error "codebase-memory-mcp para Windows está disponível apenas para x86_64/amd64 no release atual."
+          return 1
+          ;;
+      esac
+
+      local tmp_dir archive_path extract_dir
+      tmp_dir="$(mktemp -d)"
+      archive_path="${tmp_dir}/codebase-memory-mcp-win.zip"
+      extract_dir="${tmp_dir}/extract"
+      mkdir -p "$extract_dir"
+
+      curl -fsSL \
+        "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/codebase-memory-mcp-windows-amd64.zip" \
+        -o "$archive_path" || {
+          rm -rf "$tmp_dir"
+          error "Falha ao baixar o codebase-memory-mcp para Windows."
+          return 1
+        }
+
+      extract_zip_archive "$archive_path" "$extract_dir" || {
+        rm -rf "$tmp_dir"
+        error "Falha ao extrair o codebase-memory-mcp para Windows."
+        error "É necessário ter 'unzip' ou 'powershell.exe' disponível no PATH."
+        return 1
+      }
+
+      if [[ ! -f "${extract_dir}/codebase-memory-mcp.exe" ]]; then
+        rm -rf "$tmp_dir"
+        error "Arquivo codebase-memory-mcp.exe não encontrado após a extração."
+        return 1
+      fi
+
+      cp "${extract_dir}/codebase-memory-mcp.exe" "$WIN_BIN"
+      chmod +x "$WIN_BIN"
+      cat > "$BIN" <<EOF
+#!/usr/bin/env bash
+exec "${WIN_BIN}" "\$@"
+EOF
+      chmod +x "$BIN"
+      rm -rf "$tmp_dir"
+      success "codebase-memory-mcp Windows instalado em $WIN_BIN"
+    else
+      info "Instalando binário padrão direto em ${DWYT_BIN}..."
+      curl -fsSL \
+        "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" \
+        | bash -s -- --dir="${DWYT_BIN}" --skip-config
+    fi
   fi
 
   # Instala variante UI direto em ~/.dwyt/bin/ usando tmp dir para renomear
-  if [[ ! -x "$UI_BIN" ]]; then
-    info "Instalando variante com UI visual em ${DWYT_BIN}..."
-    local TMP_UI="${DWYT_HOME}/.tmp-ui"
-    mkdir -p "$TMP_UI"
-    curl -fsSL \
-      "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" \
-      | bash -s -- --ui --dir="$TMP_UI" --skip-config 2>/dev/null && {
-        if [[ -x "${TMP_UI}/codebase-memory-mcp" ]]; then
-          mv "${TMP_UI}/codebase-memory-mcp" "$UI_BIN"
+  if [[ ! -x "$UI_BIN" ]] || ! "$UI_BIN" --help &>/dev/null 2>&1; then
+    if [[ "$OS" == "windows" ]]; then
+      info "Baixando variante UI para Windows em ${DWYT_BIN}..."
+      local tmp_dir archive_path extract_dir ui_download_ok=true
+      tmp_dir="$(mktemp -d)"
+      archive_path="${tmp_dir}/codebase-memory-mcp-ui-win.zip"
+      extract_dir="${tmp_dir}/extract"
+      mkdir -p "$extract_dir"
+
+      curl -fsSL \
+        "https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/codebase-memory-mcp-ui-windows-amd64.zip" \
+        -o "$archive_path" || {
+          rm -rf "$tmp_dir"
+          warn "UI não disponível nesta versão — somente binário padrão"
+          ui_download_ok=false
+        }
+
+      if [[ "$ui_download_ok" == true ]]; then
+        if extract_zip_archive "$archive_path" "$extract_dir" && [[ -f "${extract_dir}/codebase-memory-mcp.exe" ]]; then
+          cp "${extract_dir}/codebase-memory-mcp.exe" "$WIN_UI_BIN"
+          chmod +x "$WIN_UI_BIN"
+          cat > "$UI_BIN" <<EOF
+#!/usr/bin/env bash
+exec "${WIN_UI_BIN}" "\$@"
+EOF
           chmod +x "$UI_BIN"
-          success "UI instalada em $UI_BIN"
+          success "UI instalada em $WIN_UI_BIN"
+        else
+          warn "UI não disponível nesta versão — somente binário padrão"
         fi
-      } || warn "UI não disponível nesta versão — somente binário padrão"
-    rm -rf "$TMP_UI"
+      fi
+      rm -rf "$tmp_dir"
+    else
+      info "Instalando variante com UI visual em ${DWYT_BIN}..."
+      local TMP_UI="${DWYT_HOME}/.tmp-ui"
+      mkdir -p "$TMP_UI"
+      curl -fsSL \
+        "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh" \
+        | bash -s -- --ui --dir="$TMP_UI" --skip-config 2>/dev/null && {
+          if [[ -x "${TMP_UI}/codebase-memory-mcp" ]]; then
+            mv "${TMP_UI}/codebase-memory-mcp" "$UI_BIN"
+            chmod +x "$UI_BIN"
+            success "UI instalada em $UI_BIN"
+          fi
+        } || warn "UI não disponível nesta versão — somente binário padrão"
+      rm -rf "$TMP_UI"
+    fi
   fi
 
   append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "codebase-memory-mcp"
@@ -1059,23 +1501,73 @@ install_rtk() {
   step "2/4" "RTK — Rust Token Killer"
 
   local BIN="${DWYT_BIN}/rtk"
+  local WIN_BIN="${DWYT_BIN}/rtk.exe"
 
   if [[ -x "$BIN" ]] && "$BIN" gain &>/dev/null 2>&1; then
     success "RTK já instalado"
   else
-    info "Baixando RTK via install.sh oficial..."
-    # O install.sh do RTK vai para ~/.local/bin — depois copiamos
-    curl -fsSL \
-      "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh" \
-      | sh
+    if [[ "$OS" == "windows" ]]; then
+      info "Baixando RTK para Windows direto do release oficial..."
+      local arch
+      arch="$(uname -m)"
+      case "$arch" in
+        x86_64|amd64) ;;
+        *)
+          error "RTK para Windows está disponível apenas para x86_64/amd64 no release atual."
+          return 1
+          ;;
+      esac
 
-    for candidate in "$HOME/.local/bin/rtk" "/usr/local/bin/rtk"; do
-      if [[ -x "$candidate" ]]; then
-        cp "$candidate" "$BIN"
-        success "RTK copiado para $BIN"
-        break
+      local tmp_dir archive_url archive_path extract_dir
+      tmp_dir="$(mktemp -d)"
+      archive_url="https://github.com/rtk-ai/rtk/releases/latest/download/rtk-x86_64-pc-windows-msvc.zip"
+      archive_path="${tmp_dir}/rtk-win.zip"
+      extract_dir="${tmp_dir}/extract"
+      mkdir -p "$extract_dir"
+
+      curl -fsSL "$archive_url" -o "$archive_path" || {
+        rm -rf "$tmp_dir"
+        error "Falha ao baixar o RTK para Windows."
+        return 1
+      }
+
+      extract_zip_archive "$archive_path" "$extract_dir" || {
+        rm -rf "$tmp_dir"
+        error "Falha ao extrair o RTK para Windows."
+        error "É necessário ter 'unzip' ou 'powershell.exe' disponível no PATH."
+        return 1
+      }
+
+      if [[ ! -f "${extract_dir}/rtk.exe" ]]; then
+        rm -rf "$tmp_dir"
+        error "Arquivo rtk.exe não encontrado após a extração."
+        return 1
       fi
-    done
+
+      cp "${extract_dir}/rtk.exe" "$WIN_BIN"
+      chmod +x "$WIN_BIN"
+      cat > "$BIN" <<EOF
+#!/usr/bin/env bash
+exec "${WIN_BIN}" "\$@"
+EOF
+      chmod +x "$BIN"
+      rm -rf "$tmp_dir"
+      success "RTK Windows instalado em $WIN_BIN"
+    else
+      info "Baixando RTK via install.sh oficial..."
+      # O install.sh do RTK vai para ~/.local/bin — depois copiamos
+      curl -fsSL \
+        "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh" \
+        | sh
+
+      for candidate in "$HOME/.local/bin/rtk" "/usr/local/bin/rtk"; do
+        if [[ -x "$candidate" ]]; then
+          cp "$candidate" "$BIN"
+          success "RTK copiado para $BIN"
+          break
+        fi
+      done
+    fi
   fi
 
   append_env "export PATH=\"${DWYT_BIN}:\$PATH\"" "rtk"
@@ -1112,11 +1604,12 @@ install_headroom() {
   fi
 
   # headroom-ai exige Python >= 3.10
-  local PYTHON_BIN="python3"
+  local PYTHON_BIN=""
   local PY_MINOR
-  PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+  PYTHON_BIN="$(resolve_system_python)"
+  PY_MINOR=$("$PYTHON_BIN" -c "import sys; print(sys.version_info.minor)")
   local PY_VER
-  PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  PY_VER=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 
   if [[ "$PY_MINOR" -lt 10 ]]; then
     warn "Python $PY_VER detectado — headroom-ai requer >= 3.10. Procurando versão compatível..."
@@ -1149,9 +1642,8 @@ install_headroom() {
           PYTHON_BIN="python3.11"
           PY_VER="3.11"
           found="$PY_VER"
-        elif python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
-          PYTHON_BIN="python3"
-          PY_VER="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+        elif "$PYTHON_BIN" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+          PY_VER="$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
           found="$PY_VER"
         fi
       elif [[ "$OS" == "debian" ]]; then
@@ -1160,14 +1652,41 @@ install_headroom() {
           || sudo apt-get install -y python3.11 python3.11-venv 2>/dev/null
         command -v python3.12 &>/dev/null && PYTHON_BIN="python3.12" && PY_VER="3.12" \
           || { command -v python3.11 &>/dev/null && PYTHON_BIN="python3.11" && PY_VER="3.11"; }
+      elif [[ "$OS" == "windows" ]]; then
+        info "Tentando instalar Python compatível via gerenciador do Windows..."
+        install_windows_dependency python3 || {
+          error "Python >= 3.10 não encontrado."
+          error "Instale Python 3.10+ e abra um novo terminal Git Bash."
+          return 1
+        }
+        hash -r
+        for candidate in python3.13 python3.12 python3.11 python3.10 python3 python py py.exe; do
+          if command -v "$candidate" &>/dev/null; then
+            local resolved
+            resolved="$(command -v "$candidate")"
+            if "$resolved" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+              PYTHON_BIN="$resolved"
+              PY_VER="$("$resolved" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
+              found="$PY_VER"
+              break
+            fi
+          fi
+        done
       else
         error "Python >= 3.10 não encontrado."
         error "No macOS instale com: brew install python@3.12"
         error "No Fedora instale com: sudo dnf install python3.12 python3-pip"
+        error "No Windows, instale Python 3.10+ e abra um novo terminal Git Bash."
         error "Depois rode: ./dwyt.sh"
         return 1
       fi
     fi
+  fi
+
+  if ! "$PYTHON_BIN" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
+    error "Headroom requer Python >= 3.10."
+    error "Abra um novo terminal com Python 3.10+ disponível e rode novamente: ./dwyt.sh"
+    return 1
   fi
 
   info "Usando Python $PY_VER para o Headroom"
@@ -1182,8 +1701,13 @@ install_headroom() {
   }
 
   info "Instalando headroom-ai[proxy]..."
-  "$HEADROOM_VENV/bin/pip" install --quiet --upgrade pip
-  "$HEADROOM_VENV/bin/pip" install --quiet "headroom-ai[proxy]" || {
+  local VENV_PIP=""
+  VENV_PIP="$(venv_pip_path "$HEADROOM_VENV")" || {
+    error "pip não encontrado dentro do virtualenv do Headroom"
+    return 1
+  }
+  "$VENV_PIP" install --quiet --upgrade pip
+  "$VENV_PIP" install --quiet "headroom-ai[proxy]" || {
     error "Falha ao instalar headroom-ai."
     return 1
   }
@@ -1214,9 +1738,10 @@ install_memstack() {
   fi
 
   # Dependências Python opcionais (busca semântica)
-  if [[ -x "$HEADROOM_VENV/bin/pip" ]]; then
+  local VENV_PIP=""
+  if VENV_PIP="$(venv_pip_path "$HEADROOM_VENV" 2>/dev/null)"; then
     info "Instalando dependências opcionais (lancedb, sentence-transformers)..."
-    "$HEADROOM_VENV/bin/pip" install --quiet lancedb sentence-transformers 2>/dev/null \
+    "$VENV_PIP" install --quiet lancedb sentence-transformers 2>/dev/null \
       || warn "Deps opcionais não instaladas — busca semântica indisponível"
   fi
 
@@ -1229,6 +1754,14 @@ MEMSTACK_DB="${MEMSTACK_HOME}/db/memstack-db.py"
 HEADROOM_PORT="${HEADROOM_PORT:-8787}"
 HEADROOM_HEALTH_URL="http://127.0.0.1:${HEADROOM_PORT}/health"
 HEADROOM_PID_FILE="${HOME}/.dwyt/.memstack-headroom.pid"
+
+resolve_python() {
+  command -v python3 >/dev/null 2>&1 && { command -v python3; return 0; }
+  command -v python >/dev/null 2>&1 && { command -v python; return 0; }
+  command -v py >/dev/null 2>&1 && { command -v py; return 0; }
+  echo "Python 3 não encontrado" >&2
+  exit 1
+}
 
 show_help() {
   cat <<'HELP'
@@ -1320,7 +1853,7 @@ save_session() {
   local save_dir="${MEMSTACK_HOME}/saved"
   mkdir -p "$save_dir"
   local save_file="${save_dir}/${name}.md"
-  python3 "$MEMSTACK_DB" export-md "$project" > "$save_file"
+  "$(resolve_python)" "$MEMSTACK_DB" export-md "$project" > "$save_file"
   echo "Sessão '${name}' salva em: ${save_file}"
 }
 
@@ -1367,7 +1900,7 @@ case "${1:-help}" in
     show_help
     ;;
   *)
-    exec python3 "$MEMSTACK_DB" "$@"
+    exec "$(resolve_python)" "$MEMSTACK_DB" "$@"
     ;;
 esac
 EOF
@@ -1474,16 +2007,18 @@ EOF
 #!/usr/bin/env bash
 # RTK PreToolUse hook — reescreve comandos verbose automaticamente
 INPUT=\$(cat)
-TOOL=\$(echo "\$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+PYTHON_BIN=\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || command -v py 2>/dev/null || true)
+[[ -z "\$PYTHON_BIN" ]] && { echo "\$INPUT"; exit 0; }
+TOOL=\$(echo "\$INPUT" | "\$PYTHON_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
 [[ "\$TOOL" != "Bash" ]] && { echo "\$INPUT"; exit 0; }
-CMD=\$(echo "\$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null || echo "")
+CMD=\$(echo "\$INPUT" | "\$PYTHON_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null || echo "")
 RTK="${DWYT_BIN}/rtk"
 [[ ! -x "\$RTK" ]] && { echo "\$INPUT"; exit 0; }
 FIRST=\$(echo "\$CMD" | awk '{print \$1}')
 for c in git cargo npm pnpm yarn docker kubectl pip python pytest ruff mypy tsc; do
   if [[ "\$FIRST" == "\$c" ]]; then
     NEW="\$RTK \$CMD"
-    echo "\$INPUT" | python3 -c "
+    echo "\$INPUT" | "\$PYTHON_BIN" -c "
 import sys,json
 d=json.load(sys.stdin)
 d['tool_input']['command']='\$NEW'
@@ -1498,7 +2033,7 @@ RTKHOOK
 
     # settings.json — merge ou criação
     if [[ -f "$settings_file" ]]; then
-      python3 - "$settings_file" "$RTK_HOOK" << 'PYMERGE'
+      "$(resolve_system_python)" - "$settings_file" "$RTK_HOOK" << 'PYMERGE'
 import sys, json
 f, hook = sys.argv[1], sys.argv[2]
 with open(f) as fp: data = json.load(fp)
@@ -1531,7 +2066,7 @@ EOF
       if [[ -f "$f" ]]; then
         local dest="${rules_dir}/$(basename "$f")"
         cp "$f" "$dest"
-        python3 - "$dest" << 'PYRULES'
+        "$(resolve_system_python)" - "$dest" << 'PYRULES'
 import sys
 from pathlib import Path
 
@@ -1553,9 +2088,8 @@ PYRULES
       fi
     done
     local skills_link="${claude_dir}/skills"
-    if [[ ! -e "$skills_link" ]]; then
-      ln -s "${MEMSTACK_DIR}/skills" "$skills_link"
-      success "Skills MemStack → symlink em $skills_link"
+    if [[ ! -e "$skills_link" ]] && [[ ! -L "$skills_link" ]]; then
+      link_or_copy_dir "${MEMSTACK_DIR}/skills" "$skills_link" "Skills MemStack"
     fi
   fi
 
@@ -2084,7 +2618,7 @@ main() {
   echo "  ╔══════════════════════════════════════════════════════════╗"
   echo "  ║   🚀  DWYT — Don't Waste Your Tokens  v2.0              ║"
   echo "  ║   codebase-memory-mcp + RTK + Headroom + MemStack       ║"
-  echo "  ║   Linux (Ubuntu/Debian/Fedora) + macOS                 ║"
+  echo "  ║   Linux + macOS + Windows (Git Bash)                   ║"
   echo "  ║                                                          ║"
   echo "  ║   Uso: ./dwyt.sh [--repo path|--reinstall|--uninstall] ║"
   echo "  ╚══════════════════════════════════════════════════════════╝"

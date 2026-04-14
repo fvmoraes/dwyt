@@ -2,6 +2,8 @@
 
 Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro e Cursor.
 
+Suporte atual: Linux (Ubuntu/Debian/Fedora), macOS e Windows via Git Bash.
+
 ```bash
 chmod +x dwyt.sh && ./dwyt.sh
 ```
@@ -41,6 +43,7 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 1. Apresenta um **checklist** para escolher quais ferramentas instalar
 2. Apresenta um **checklist** para escolher quais clientes LLM integrar
 3. Abre um **menu de navegação** para selecionar o projeto a integrar
+   Se `dialog` não estiver disponível, cai automaticamente para prompts em texto
 4. Instala **tudo em `~/.dwyt/`** — nenhum arquivo fora dessa pasta
 5. Configura `.mcp.json` e os arquivos corretos para cada cliente (`AGENTS.md`, `.codex/`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/`, `.kiro/steering/`)
 6. Adiciona ao `.gitignore` os diretórios gerados do tipo `.ferramenta/` e arquivos locais como `AGENTS.md`
@@ -60,9 +63,12 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 
 ## Requisitos
 
-- `curl`, `git`, `python3`, `dialog`
-- Linux (Ubuntu/Debian/Fedora) ou macOS
-- O restante (Node.js, python3-venv, etc.) é instalado automaticamente
+- Linux (Ubuntu/Debian/Fedora), macOS ou Windows via Git Bash
+- `curl` e `git`
+- Python 3
+- `dialog` é opcional: quando não existir, o instalador usa prompts em texto
+- O restante (Node.js, `python3-venv`, etc.) é instalado automaticamente
+- No Windows, o script tenta usar `winget`, `choco` ou `scoop` quando precisar instalar dependências
 
 ## Fluxo de trabalho
 
@@ -212,7 +218,7 @@ memstack export-md <project>      # exporta a memória do projeto em markdown
     ├── hooks/
     │   └── rtk-rewrite.sh         # reescreve comandos automaticamente
     ├── rules/                     # regras do MemStack
-    ├── skills/                    # skills do MemStack (symlink → ~/.dwyt/memstack/skills)
+    ├── skills/                    # skills do MemStack (symlink ou cópia local de ~/.dwyt/memstack/skills)
     └── memory/                    # memórias persistentes entre sessões
 ```
 
