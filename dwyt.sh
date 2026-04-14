@@ -528,6 +528,7 @@ quick_integrate_repo() {
   else
     printf '# dwyt\n' > "$gitignore_file"
   fi
+  grep -qxF ".codex" "$gitignore_file" || printf '.codex\n' >> "$gitignore_file"
   grep -qxF ".mcp.json" "$gitignore_file" || printf '.mcp.json\n' >> "$gitignore_file"
 
   cat > "$mcp_file" <<'EOF'
@@ -1406,7 +1407,7 @@ integrate_project() {
   fi
 
   if [[ "$CLIENTS" == *codex* ]]; then
-    grep -qxF ".codex/" "$gitignore" || printf '.codex/\n' >> "$gitignore"
+    grep -qxF ".codex" "$gitignore" || printf '.codex\n' >> "$gitignore"
     grep -qxF "AGENTS.md" "$gitignore" || printf 'AGENTS.md\n' >> "$gitignore"
     success ".gitignore → integração local do Codex marcada"
   fi
