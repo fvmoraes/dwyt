@@ -346,8 +346,6 @@ CLIENTS=""
 CHOSEN_REPO=""
 DWYT_MODE="install"
 DIRECT_REPO_PATH=""
-HEADROOM_PROXY_URL="http://127.0.0.1:8787/v1"
-CODEX_AUTH_MODE="unknown"
 
 # ─── Argumento --reinstall ────────────────────────────────────────────────────
 handle_args() {
@@ -375,95 +373,6 @@ handle_args() {
       exit 0
       ;;
   esac
-}
-
-detect_codex_auth_mode() {
-  CODEX_AUTH_MODE="unknown"
-
-  if [[ "$CLIENTS" != *codex* ]]; then
-    return 0
-  fi
-
-  if ! command -v codex &>/dev/null; then
-    CODEX_AUTH_MODE="missing"
-    return 0
-  fi
-
-  local status_output=""
-  status_output="$(run_with_timeout 10 codex login status 2>&1 || true)"
-
-  if printf '%s\n' "$status_output" | grep -q "Logged in using ChatGPT"; then
-    CODEX_AUTH_MODE="chatgpt"
-  elif printf '%s\n' "$status_output" | grep -q "Logged in using API key"; then
-    CODEX_AUTH_MODE="api_key"
-  elif printf '%s\n' "$status_output" | grep -qi "not logged in"; then
-    CODEX_AUTH_MODE="logged_out"
-  fi
-}
-
-sync_codex_openai_base_url() {
-  local codex_config="$1"
-  local action="$2"
-  local base_url="${3:-}"
-
-  python3 - "$codex_config" "$action" "$base_url" <<'PYCODBASE'
-import sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-action = sys.argv[2]
-base_url = sys.argv[3]
-text = config_path.read_text() if config_path.exists() else ""
-
-
-def split_top_level(src: str) -> tuple[list[str], list[str]]:
-    lines = src.splitlines()
-    insert_at = len(lines)
-    for i, line in enumerate(lines):
-        if line.lstrip().startswith("["):
-            insert_at = i
-            break
-    return lines[:insert_at], lines[insert_at:]
-
-
-def set_top_level_key(src: str, key: str, value: str) -> str:
-    top_level, rest = split_top_level(src)
-    line = f'{key} = "{value}"'
-
-    for idx, existing in enumerate(top_level):
-        if existing.startswith(f"{key} "):
-            top_level[idx] = line
-            break
-    else:
-        if top_level and top_level[-1] != "":
-            top_level.append("")
-        top_level.append(line)
-        top_level.append("")
-
-    out = top_level + rest
-    return "\n".join(out).rstrip() + "\n"
-
-
-def unset_top_level_key(src: str, key: str) -> str:
-    top_level, rest = split_top_level(src)
-    filtered = [line for line in top_level if not line.startswith(f"{key} ")]
-
-    while filtered and filtered[-1] == "":
-        filtered.pop()
-
-    out = filtered + ([""] if filtered and rest else []) + rest
-    return "\n".join(out).rstrip() + ("\n" if out else "")
-
-
-if action == "set":
-    text = set_top_level_key(text, "openai_base_url", base_url)
-elif action == "unset":
-    text = unset_top_level_key(text, "openai_base_url")
-else:
-    raise SystemExit(f"unsupported action: {action}")
-
-config_path.write_text(text)
-PYCODBASE
 }
 
 write_headroom_wrapper() {
@@ -905,30 +814,23 @@ def upsert_section_value(src: str, section: str, key: str, value: str) -> str:
     return src + section_header + "\n" + line + "\n"
 
 
+def remove_key_everywhere(src: str, key: str) -> str:
+    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*\n?")
+    cleaned = pattern.sub("", src)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.lstrip("\n")
+
+
 text = upsert_section_value(
     text,
     "mcp_servers.codebase-memory-mcp",
     "command",
     mcp_command,
 )
+text = remove_key_everywhere(text, "openai_base_url")
 
 config_path.write_text(text)
 PYCODEX
-
-  detect_codex_auth_mode
-
-  if [[ "$TOOLS" == *headroom* ]]; then
-    case "$CODEX_AUTH_MODE" in
-      api_key)
-        sync_codex_openai_base_url "$codex_config" set "$HEADROOM_PROXY_URL"
-        info "Codex com API key detectado — openai_base_url configurado para Headroom"
-        ;;
-      *)
-        sync_codex_openai_base_url "$codex_config" unset
-        info "Codex sem API key detectada — openai_base_url removido do config.toml"
-        ;;
-    esac
-  fi
 
   success "Codex CLI configurado em $codex_config"
 }
@@ -1685,9 +1587,10 @@ Para ver oportunidades de economia: \`rtk discover\`
 ### Headroom — Compressão de chamadas à API
 Se a sessão atual tiver sido iniciada com wrapper do Headroom, use Headroom.
 Se não tiver wrapper ativo ou o proxy não estiver rodando, não use Headroom e siga com a API normal.
-Suporte oficial de wrapper: \`claude\`, \`codex\` e \`cursor\`.
+Use \`dwyt-codex\` para abrir o Codex com Headroom sem depender de \`OPENAI_BASE_URL\`.
 - Compatibilidade adicional depende do cliente aceitar proxy/base URL custom
 - Iniciar proxy: \`headroom proxy --port 8787\`
+- Iniciar proxy + Codex: \`dwyt-codex\`
 - Ver economia em tempo real: \`curl http://localhost:8787/stats\`
 "
     if [[ "$CLIENTS" == *claude* ]]; then
@@ -1896,6 +1799,46 @@ finalize_env() {
     append_env "# export ANTHROPIC_BASE_URL=http://localhost:8787" ""
   fi
 
+  if [[ "$TOOLS" == *headroom* ]] && [[ "$CLIENTS" == *codex* ]]; then
+    cat > "${DWYT_BIN}/dwyt-codex" << 'CODEXWRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+CODEX_BASE_URL="${HEADROOM_URL}/v1"
+HEADROOM_PID_FILE="${HOME}/.dwyt/.codex-headroom.pid"
+
+is_headroom_healthy() {
+  curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1
+}
+
+start_headroom() {
+  if is_headroom_healthy; then
+    return 0
+  fi
+
+  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  echo $! > "${HEADROOM_PID_FILE}"
+
+  for _ in {1..20}; do
+    if is_headroom_healthy; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2
+  exit 1
+}
+
+start_headroom
+exec codex -c "openai_base_url=\"${CODEX_BASE_URL}\"" "$@"
+CODEXWRAPPER
+    chmod +x "${DWYT_BIN}/dwyt-codex"
+    success "Launcher do Codex com Headroom criado → use: dwyt-codex"
+  fi
+
   # Cria wrapper dwyt-ui para iniciar/parar a UI facilmente
   cat > "${DWYT_BIN}/dwyt-ui" << 'UIWRAPPER'
 #!/usr/bin/env bash
@@ -1982,15 +1925,8 @@ show_summary() {
     echo -e "${BOLD}  PASSO 1 — Antes de abrir clientes compatíveis com Headroom:${NC}"
     echo -e "  ${CYAN}headroom proxy --port 8787${NC}    → inicia o proxy de compressão"
     [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom wrap claude${NC}          → proxy + Claude Code (atalho)"
-    [[ "$CLIENTS" == *codex*  ]] && echo -e "  ${CYAN}headroom wrap codex${NC}           → proxy + Codex (atalho oficial)"
+    [[ "$CLIENTS" == *codex*  ]] && echo -e "  ${CYAN}dwyt-codex${NC}                    → proxy + Codex sem OPENAI_BASE_URL"
     [[ "$CLIENTS" == *cursor* ]] && echo -e "  ${CYAN}headroom wrap cursor${NC}          → proxy + Cursor (atalho oficial)"
-    if [[ "$CLIENTS" == *codex* ]]; then
-      if [[ "$CODEX_AUTH_MODE" == "api_key" ]]; then
-        echo -e "  ${GREEN}Codex com API key:${NC} \`openai_base_url\` será gravado em \`~/.codex/config.toml\` no wrap"
-      else
-        echo -e "  ${YELLOW}Codex sem API key:${NC} o wrap não grava \`openai_base_url\` em \`~/.codex/config.toml\`"
-      fi
-    fi
     echo -e "  ${YELLOW}Copilot e Kiro só aproveitam isso se o cliente permitir customizar proxy/base URL.${NC}"
     echo ""
   fi

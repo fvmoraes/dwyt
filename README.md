@@ -70,7 +70,7 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 # 1. Se quiser usar Headroom em um cliente compatível, suba o proxy e abra com wrapper
 headroom proxy --port 8787
 headroom wrap claude      # usa Headroom no Claude Code
-headroom wrap codex       # usa Headroom no Codex
+dwyt-codex                # usa Headroom no Codex sem OPENAI_BASE_URL
 headroom wrap cursor      # usa Headroom no Cursor
 
 # Se não abrir com wrapper, siga normalmente sem Headroom
@@ -139,7 +139,7 @@ rtk git status                     # uso manual com qualquer comando
 # Headroom
 headroom proxy --port 8787         # só o proxy
 headroom wrap claude               # proxy + Claude Code
-headroom wrap codex                # proxy + Codex
+dwyt-codex                         # proxy + Codex sem OPENAI_BASE_URL
 headroom wrap cursor               # proxy + Cursor
 headroom wrap aider                # proxy + Aider
 curl http://localhost:8787/stats   # estatísticas em tempo real
@@ -169,7 +169,7 @@ memstack export-md <project>      # exporta a memória do projeto em markdown
 | Cliente | Arquivos gerados | Observações |
 |---|---|---|
 | **Claude Code** | `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`, `.claude/rules/` | integração mais profunda hoje; `headroom wrap claude` é opcional; `.claude/` entra no ignore |
-| **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` | `AGENTS.md` é o arquivo que o Codex lê; `headroom wrap codex` é opcional; `.codex/` e `AGENTS.md` ficam locais |
+| **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` | `AGENTS.md` é o arquivo que o Codex lê; `dwyt-codex` é o launcher opcional com Headroom; `.codex/` e `AGENTS.md` ficam locais |
 | **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md`, `.mcp.json` | usa instruções de repositório + contexto compartilhado com fallback quando integrações não estiverem disponíveis |
 | **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md`, `.mcp.json` | sem `wrap` oficial do Headroom; `.kiro/` entra no ignore |
 | **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md`, `.mcp.json` | `headroom wrap cursor` é opcional; `.cursor/` entra no ignore |
