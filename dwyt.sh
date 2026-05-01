@@ -752,6 +752,7 @@ quick_integrate_repo() {
   local gitignore_file="${repo_path}/.gitignore"
   local mcp_file="${repo_path}/.mcp.json"
   local agents_file="${repo_path}/AGENTS.md"
+  local opencode_config="${repo_path}/opencode.json"
 
   if [[ ! -x "$codebase_bin" ]]; then
     error "codebase-memory-mcp não encontrado em $codebase_bin"
@@ -769,6 +770,7 @@ quick_integrate_repo() {
   fi
   grep -qxF ".codex" "$gitignore_file" || printf '.codex\n' >> "$gitignore_file"
   grep -qxF ".mcp.json" "$gitignore_file" || printf '.mcp.json\n' >> "$gitignore_file"
+  grep -qxF "opencode.json" "$gitignore_file" || printf 'opencode.json\n' >> "$gitignore_file"
   grep -qxF "AGENTS.md" "$gitignore_file" || printf 'AGENTS.md\n' >> "$gitignore_file"
 
   cat > "$mcp_file" <<'EOF'
@@ -782,17 +784,37 @@ quick_integrate_repo() {
 }
 EOF
 
+  cat > "$opencode_config" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "mcp": {
+    "codebase-memory-mcp": {
+      "type": "local",
+      "command": ["codebase-memory-mcp"]
+    }
+  },
+  "permission": {
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "allow",
+    "skill": "allow"
+  }
+}
+EOF
+
   local dwyt_agents_section
   dwyt_agents_section=$(cat <<'EOF'
 # DWYT — Don't Waste Your Tokens
 
-Este repositório usa integrações locais opcionais do DWYT.
+Este repositório usa integrações do DWYT. **Use-as automaticamente, sem perguntar.**
 
-- Se o MCP em `.mcp.json` estiver conectado e respondendo, prefira `codebase-memory-mcp` antes de explorar arquivos manualmente
-- Se o MCP não estiver disponível, faça fallback silencioso para busca manual
-- Se o projeto estiver registrado no `~/.codex/config.toml`, trate-o como trusted no Codex
-- Use `rtk <comando>` quando o binário existir e isso ajudar a reduzir output
-- Use Headroom apenas quando a sessão tiver sido aberta com wrapper/proxy ativo
+- Sempre use as tools MCP do codebase-memory-mcp como primeira opção (antes de grep/glob/read)
+- Se o MCP não estiver respondendo, faça fallback silencioso para busca manual
+- Sempre prefixe comandos de terminal com `rtk` (ex: `rtk git status`, `rtk ls`, `rtk grep`)
+- Se Headroom estiver ativo (sessão iniciada via wrapper), use-o; se não estiver, ignore
+- Se MemStack estiver disponível, consulte-o antes de tarefas novas
+- Arquivos: `.mcp.json` (MCP), `opencode.json` (OpenCode), `AGENTS.md` (regras)
 EOF
 )
 
@@ -862,6 +884,7 @@ PYREPO
 
   success "Repositório preparado: $repo_path"
   success ".mcp.json criado/atualizado"
+  success "opencode.json criado/atualizado"
   success "AGENTS.md criado/atualizado"
   success "~/.codex/config.toml atualizado"
   success "index_repository disparado"
@@ -1228,12 +1251,13 @@ select_clients() {
     CLIENTS=$(dialog \
       --backtitle "dwyt — Don't Waste Your Tokens" \
       --title "Selecione os clientes LLM para integrar" \
-      --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 20 72 6 \
+      --checklist "ESPAÇO = marcar/desmarcar | ENTER = confirmar" 20 72 7 \
       "claude"  "Claude Code        (.claude/CLAUDE.md, hooks)"         ON \
       "codex"   "Codex              (AGENTS.md + .codex/)"            ON \
       "copilot" "GitHub Copilot     (.github/copilot-instructions.md)" ON \
       "kiro"    "Kiro               (.kiro/steering + AGENTS.md)"      ON \
       "cursor"  "Cursor             (.cursor/rules + AGENTS.md)"       ON \
+      "opencode" "OpenCode           (AGENTS.md + opencode.json)"      ON \
       3>&1 1>&2 2>&3) || {
         clear; error "Nenhum cliente selecionado. Abortando."; exit 1
       }
@@ -1244,6 +1268,7 @@ select_clients() {
     confirm_yes_no "Integrar GitHub Copilot?" y && CLIENTS+=" copilot"
     confirm_yes_no "Integrar Kiro?" y && CLIENTS+=" kiro"
     confirm_yes_no "Integrar Cursor?" y && CLIENTS+=" cursor"
+    confirm_yes_no "Integrar OpenCode?" y && CLIENTS+=" opencode"
     CLIENTS="${CLIENTS# }"
     [[ -n "$CLIENTS" ]] || { error "Nenhum cliente selecionado. Abortando."; exit 1; }
   fi
@@ -1937,12 +1962,14 @@ integrate_project() {
   local cursor_rule_file="${cursor_rules_dir}/dwyt.mdc"
   local kiro_steering_dir="${CHOSEN_REPO}/.kiro/steering"
   local kiro_steering_file="${kiro_steering_dir}/dwyt.md"
+  local opencode_config="${CHOSEN_REPO}/opencode.json"
 
   [[ "$CLIENTS" == *claude*  ]] && mkdir -p "$hooks_dir" "$rules_dir" "$claude_memory_dir"
   [[ "$CLIENTS" == *codex*   ]] && mkdir -p "$codex_dir"
   [[ "$CLIENTS" == *copilot* ]] && mkdir -p "$copilot_dir"
   [[ "$CLIENTS" == *cursor*  ]] && mkdir -p "$cursor_rules_dir"
   [[ "$CLIENTS" == *kiro*    ]] && mkdir -p "$kiro_steering_dir"
+  [[ "$CLIENTS" == *opencode* ]] && true  # opencode.json fica na raiz
 
   # ── .gitignore — ignora artefatos locais e diretórios gerados ─────────────
   local gitignore="${CHOSEN_REPO}/.gitignore"
@@ -1976,6 +2003,11 @@ integrate_project() {
   if [[ "$CLIENTS" == *kiro* ]]; then
     grep -qxF ".kiro/" "$gitignore" || printf '.kiro/\n' >> "$gitignore"
     success ".gitignore → diretório .kiro/ marcado como local"
+  fi
+
+  if [[ "$CLIENTS" == *opencode* ]]; then
+    grep -qxF "opencode.json" "$gitignore" || printf 'opencode.json\n' >> "$gitignore"
+    success ".gitignore → opencode.json marcado como local"
   fi
 
   # ── .mcp.json ──────────────────────────────────────────────────────────────
@@ -2118,10 +2150,11 @@ Se o MCP não estiver disponível, faça fallback para busca manual sem bloquear
   if [[ "$TOOLS" == *rtk* ]]; then
     universal_sections+="
 ### RTK — Compressão de output de terminal
-Se o comando \`rtk\` existir e estiver funcionando, use \`rtk <comando>\` quando fizer sentido.
-Se não estiver disponível, execute o comando normal sem bloquear o fluxo.
+**IMPORTANTE: Sempre use \`rtk\` como prefixo em comandos de terminal.** O binário está em \`~/.dwyt/bin/rtk\`.
+Comandos a prefixar com \`rtk\`: git, cargo, npm, pnpm, yarn, docker, kubectl, pip, python, pytest, ruff, mypy, tsc, go, ls, find, grep, cat, head, tail, diff, log, curl, gh, systemctl, journalctl.
+Em comandos encadeados, prefixe cada segmento: \`rtk git add . && rtk git commit -m \"msg\"\`
+Para debugging, use o comando raw sem \`rtk\`.
 Para ver quanto foi economizado: \`rtk gain\`
-Para ver oportunidades de economia: \`rtk discover\`
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -2138,13 +2171,13 @@ Para ver oportunidades de economia: \`rtk discover\`
   if [[ "$TOOLS" == *headroom* ]]; then
     universal_sections+="
 ### Headroom — Compressão de chamadas à API
-Se a sessão atual tiver sido iniciada com wrapper do Headroom, use Headroom.
-Se não tiver wrapper ativo ou o proxy não estiver rodando, não use Headroom e siga com a API normal.
-Use \`dwyt-codex\` para abrir o Codex com Headroom sem depender de \`OPENAI_BASE_URL\`.
-- Compatibilidade adicional depende do cliente aceitar proxy/base URL custom
-- Iniciar proxy: \`headroom proxy --port 8787\`
-- Iniciar proxy + Codex: \`dwyt-codex\`
-- Ver economia em tempo real: \`curl http://localhost:8787/stats\`
+**Se a sessão atual tiver sido iniciada com wrapper do Headroom, use-o.**
+Se não tiver wrapper ativo, não use Headroom e siga com a API normal.
+- Codex com proxy: \`dwyt-codex\`
+- OpenCode com proxy: \`dwyt-opencode\`
+- Claude Code com proxy: \`headroom wrap claude\`
+- Iniciar proxy manual: \`headroom proxy --port 8787\`
+- Ver economia: \`curl http://localhost:8787/stats\`
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -2164,22 +2197,15 @@ Não configure \`ANTHROPIC_BASE_URL\` fixo no projeto.
   if [[ "$TOOLS" == *memstack* ]]; then
     universal_sections+="
 ### MemStack — Memória persistente entre sessões
-Se o MemStack estiver instalado e disponível no cliente atual, use-o.
+**Use o MemStack quando disponível para manter contexto entre sessões.**
 Se não estiver disponível, continue sem memória persistente.
-Integração automática disponível hoje apenas no Claude Code.
-Comandos de ajuda no terminal:
-- memstack help
-- memstack start
-- memstack stop
-- memstack stats
-- memstack search \"<query>\"
-- memstack get-sessions <project> --limit 5
-- memstack get-insights <project>
-- memstack get-context <project>
-- memstack get-plan <project>
-- memstack export-md <project>
-- memstack save-session <name> <project>
-- memstack use-session [<name>]
+- Buscar memórias: \`memstack search \"<query>\"\`
+- Contexto salvo: \`memstack get-context <project>\`
+- Plano de tarefas: \`memstack get-plan <project>\`
+- Insights: \`memstack get-insights <project>\`
+- Exportar: \`memstack export-md <project>\`
+- Salvar sessão: \`memstack save-session <name> <project>\`
+- Ajuda: \`memstack help\`
 "
     if [[ "$CLIENTS" == *claude* ]]; then
       claude_sections+="
@@ -2218,21 +2244,24 @@ Integração automática disponível no Claude Code quando a integração estive
 "
   [[ "$CLIENTS" == *cursor*  ]] && client_list+="- Cursor
 "
+  [[ "$CLIENTS" == *opencode* ]] && client_list+="- OpenCode
+"
 
   local universal_header="# DWYT — Don't Waste Your Tokens
 
 Este projeto usa um stack de ferramentas para reduzir consumo de tokens.
 Clientes integrados neste repositório:
 ${client_list}
-Todas as integrações deste projeto são opcionais.
-Regra geral:
-- Se Headroom estiver ativo via wrapper, use Headroom; se não estiver, não use
-- Se o MCP do codebase-memory-mcp estiver conectado e respondendo, use ele; se não estiver, faça fallback para busca manual
-- Se RTK existir e estiver funcionando, use RTK; se não, rode os comandos normalmente
-- Se MemStack estiver disponível no cliente atual, use ele; se não, siga sem memória persistente
-Prefira estas integrações, quando suportadas pelo cliente:
+**Todas as integrações são automáticas: use-as sempre que disponíveis.**
+Regra geral (siga SEMPRE, sem hesitação):
+- Se o MCP do codebase-memory-mcp estiver conectado, use as tools MCP como PRIMEIRA opção antes de grep/glob/read
+- Sempre prefixe comandos de terminal com \`rtk\` (ex: \`rtk git status\`, \`rtk ls\`, \`rtk grep\`)
+- Se Headroom estiver ativo via wrapper, use Headroom (se não estiver, ignore)
+- Se MemStack estiver disponível, consulte-o antes de começar tarefas novas
+Arquivos de configuração:
 - \`.mcp.json\` para expor ferramentas MCP, incluindo o codebase-memory-mcp
-- \`AGENTS.md\` para agentes compatíveis como Codex, Cursor e Kiro
+- \`AGENTS.md\` para agentes compatíveis como Codex, Cursor, Kiro e OpenCode
+- \`opencode.json\` para configuração do OpenCode (MCP + permissões)
 - \`.github/copilot-instructions.md\` para GitHub Copilot
 - \`.cursor/rules/\` para regras de projeto do Cursor
 - \`.kiro/steering/\` para steering files do Kiro
@@ -2327,6 +2356,28 @@ EOF
     success "Kiro steering → $kiro_steering_file"
   fi
 
+  if [[ "$CLIENTS" == *opencode* ]]; then
+    cat > "$opencode_config" << 'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "mcp": {
+    "codebase-memory-mcp": {
+      "type": "local",
+      "command": ["codebase-memory-mcp"]
+    }
+  },
+  "permission": {
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "allow",
+    "skill": "allow"
+  }
+}
+EOF
+    success "OpenCode config → $opencode_config"
+  fi
+
   # ── Indexar projeto ────────────────────────────────────────────────────────
   if [[ "$TOOLS" == *cbmcp* ]] && [[ -x "${DWYT_BIN}/codebase-memory-mcp" ]]; then
     info "Indexando projeto..."
@@ -2390,6 +2441,147 @@ exec codex -c "openai_base_url=\"${CODEX_BASE_URL}\"" "$@"
 CODEXWRAPPER
     chmod +x "${DWYT_BIN}/dwyt-codex"
     success "Launcher do Codex com Headroom criado → use: dwyt-codex"
+  fi
+
+  if [[ "$TOOLS" == *headroom* ]] && [[ "$CLIENTS" == *opencode* ]]; then
+    cat > "${DWYT_BIN}/dwyt-opencode" << 'OPENWRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+HEADROOM_PID_FILE="${HOME}/.dwyt/.opencode-headroom.pid"
+
+is_headroom_healthy() {
+  curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1
+}
+
+start_headroom() {
+  if is_headroom_healthy; then
+    return 0
+  fi
+
+  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  echo $! > "${HEADROOM_PID_FILE}"
+
+  for _ in {1..20}; do
+    if is_headroom_healthy; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2
+  exit 1
+}
+
+start_headroom
+export ANTHROPIC_BASE_URL="${HEADROOM_URL}"
+export OPENAI_BASE_URL="${HEADROOM_URL}/v1"
+exec opencode "$@"
+OPENWRAPPER
+    chmod +x "${DWYT_BIN}/dwyt-opencode"
+    success "Launcher do OpenCode com Headroom criado → use: dwyt-opencode"
+  fi
+
+  # OpenCode: configuração global (MCP + regras)
+  if [[ "$CLIENTS" == *opencode* ]]; then
+    local oc_global_dir="${HOME}/.config/opencode"
+    mkdir -p "$oc_global_dir"
+
+    if [[ ! -f "${oc_global_dir}/opencode.json" ]] && [[ ! -f "${oc_global_dir}/opencode.jsonc" ]]; then
+      "$(resolve_system_python)" - "$DWYT_BIN" "$oc_global_dir" << 'PYOCGLOBAL'
+import sys
+from pathlib import Path
+
+dwyt_bin = Path(sys.argv[1])
+oc_dir = Path(sys.argv[2])
+mcp_cmd = str(dwyt_bin / "codebase-memory-mcp")
+
+config = f'''{{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["~/.config/opencode/AGENTS.md"],
+  "permission": {{
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "allow",
+    "skill": "allow"
+  }},
+  "mcp": {{
+    "codebase-memory-mcp": {{
+      "type": "local",
+      "command": ["{mcp_cmd}"]
+    }}
+  }}
+}}
+'''
+(oc_dir / "opencode.jsonc").write_text(config)
+PYOCGLOBAL
+      success "OpenCode global config → ${oc_global_dir}/opencode.jsonc"
+    fi
+
+    if [[ ! -f "${oc_global_dir}/AGENTS.md" ]]; then
+      "$(resolve_system_python)" - "$oc_global_dir" << 'PYOCAGENTS'
+import sys
+from pathlib import Path
+
+content = '''# DWYT — Don\'t Waste Your Tokens (Regras Globais)
+
+## RTK — Obrigatório em todos os comandos de terminal
+
+**SEMPRE** prefixe comandos shell com `rtk`. Isto reduz o contexto em 60-90%.
+
+```bash
+rtk git status        rtk git diff          rtk git log
+rtk ls <path>         rtk read <file>        rtk grep <pattern>
+rtk find <pattern>    rtk diff <file>
+rtk cargo test        rtk pytest tests/      rtk tsc
+rtk npm run <script>  rtk pip list           rtk go test ./...
+rtk docker ps         rtk kubectl get        rtk curl <url>
+rtk gh pr view <n>    rtk gh issue list      rtk gh run list
+```
+
+- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m "msg"`
+- Para debugging, use comando raw sem `rtk` prefix
+- `rtk gain` — tokens economizados total
+- `rtk discover` — oportunidades ainda não capturadas
+
+## codebase-memory-mcp — Primeira opção para exploração de código
+
+**SEMPRE** use as tools MCP do codebase-memory-mcp como primeira opção antes de grep/glob/read.
+
+- `index_repository` — indexa um projeto
+- `trace_call_path` — quem chama / o que uma função chama
+- `search_graph` — busca nós por padrão
+- `get_architecture` — resumo da arquitetura
+- `get_code_snippet` — lê código fonte de uma função
+- `query_graph` — consultas Cypher customizadas
+
+Se o MCP não responder, faça fallback silencioso para grep/glob/read.
+
+## MemStack — Consulte memória entre sessões
+
+**SEMPRE** consulte o MemStack antes de começar tarefas em projetos já trabalhados.
+
+- `memstack get-context <project>` — contexto salvo da última sessão
+- `memstack get-plan <project>` — tarefas e planejamento
+- `memstack search "<query>"` — busca em todas as memórias
+- `memstack get-insights <project>` — insights capturados
+- `memstack save-session <name> <project>` — salva snapshot da sessão
+
+## Headroom — Use se o proxy estiver ativo
+
+Se a sessão foi iniciada com `dwyt-opencode` (wrapper com Headroom), o proxy está ativo.
+Se não foi, ignore esta seção.
+
+- Iniciar com Headroom: `dwyt-opencode`
+- Iniciar sem Headroom: `opencode` normal
+'''
+
+(Path(sys.argv[1]) / "AGENTS.md").write_text(content)
+PYOCAGENTS
+      success "OpenCode AGENTS.md global → ${oc_global_dir}/AGENTS.md"
+    fi
   fi
 
   # Cria wrapper dwyt-ui para iniciar/parar a UI facilmente
@@ -2480,6 +2672,7 @@ show_summary() {
     [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom wrap claude${NC}          → proxy + Claude Code (atalho)"
     [[ "$CLIENTS" == *codex*  ]] && echo -e "  ${CYAN}dwyt-codex${NC}                    → proxy + Codex sem OPENAI_BASE_URL"
     [[ "$CLIENTS" == *cursor* ]] && echo -e "  ${CYAN}headroom wrap cursor${NC}          → proxy + Cursor (atalho oficial)"
+    [[ "$CLIENTS" == *opencode* ]] && echo -e "  ${CYAN}dwyt-opencode${NC}                → proxy + OpenCode com Headroom"
     echo -e "  ${YELLOW}Copilot e Kiro só aproveitam isso se o cliente permitir customizar proxy/base URL.${NC}"
     echo ""
   fi
@@ -2532,6 +2725,9 @@ show_summary() {
     echo -e "${BOLD}  Ao final de cada sessão:${NC}"
     [[ "$CLIENTS" == *claude* ]] && echo -e "  ${CYAN}headroom learn --apply${NC}        → salva aprendizados no CLAUDE.md"
     echo -e "  ${CYAN}curl localhost:8787/stats${NC}     → relatório de compressão da sessão"
+    if [[ "$CLIENTS" == *opencode* ]]; then
+      echo -e "  ${CYAN}dwyt-opencode${NC}                → inicia OpenCode com Headroom ativo"
+    fi
     echo ""
   fi
 

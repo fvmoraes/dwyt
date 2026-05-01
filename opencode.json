@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "mcp": {
+    "codebase-memory-mcp": {
+      "type": "local",
+      "command": ["codebase-memory-mcp"]
+    }
+  },
+  "permission": {
+    "bash": "allow",
+    "edit": "allow",
+    "webfetch": "allow",
+    "skill": "allow"
+  }
+}

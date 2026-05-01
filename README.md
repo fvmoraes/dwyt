@@ -1,6 +1,6 @@
 # DWYT — Don't Waste Your Tokens
 
-Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro e Cursor.
+Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro, Cursor e OpenCode.
 
 Suporte atual: Linux (Ubuntu/Debian/Fedora), macOS e Windows via Git Bash.
 
@@ -77,6 +77,7 @@ Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não e
 headroom proxy --port 8787
 headroom wrap claude      # usa Headroom no Claude Code
 dwyt-codex                # usa Headroom no Codex sem OPENAI_BASE_URL
+dwyt-opencode             # usa Headroom no OpenCode
 headroom wrap cursor      # usa Headroom no Cursor
 
 # Se não abrir com wrapper, siga normalmente sem Headroom
@@ -178,6 +179,7 @@ memstack export-md <project>      # exporta a memória do projeto em markdown
 | **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` | `AGENTS.md` é o arquivo que o Codex lê; `dwyt-codex` é o launcher opcional com Headroom; `.codex/` e `AGENTS.md` ficam locais |
 | **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md`, `.mcp.json` | usa instruções de repositório + contexto compartilhado com fallback quando integrações não estiverem disponíveis |
 | **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md`, `.mcp.json` | sem `wrap` oficial do Headroom; `.kiro/` entra no ignore |
+| **OpenCode** | `AGENTS.md`, `opencode.json`, `.mcp.json` | `dwyt-opencode` é o launcher opcional com Headroom; `opencode.json` fica local |
 | **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md`, `.mcp.json` | `headroom wrap cursor` é opcional; `.cursor/` entra no ignore |
 
 ## Localização dos dados — tudo em `~/.dwyt/`
@@ -200,7 +202,8 @@ memstack export-md <project>      # exporta a memória do projeto em markdown
 
 <projeto>/
 ├── .mcp.json                      # config do codebase-memory-mcp
-├── AGENTS.md                      # instruções universais para Codex, Cursor e Kiro (local, ignorado pelo git)
+├── opencode.json                  # config do OpenCode (local, ignorado pelo git)
+├── AGENTS.md                      # instruções universais para Codex, Cursor, Kiro e OpenCode (local, ignorado pelo git)
 ├── CLAUDE.md                      # instruções específicas do Claude Code
 ├── .codex/
 │   └── README.md                  # pasta auxiliar da integração do Codex (ignorada pelo git)
