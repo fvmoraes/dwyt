@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DWYT — Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="header">
+  <h1>DWYT Dashboard</h1>
+  <div>
+    <span class="tag ok" id="tag-status">polling</span>
+    <span style="margin-left:12px;font-size:11px;color:var(--muted)">:2737</span>
+  </div>
+</div>
+<div class="grid">
+  <div class="card" id="card-cbmcp">
+    <div class="card-header">
+      <span class="card-title blue">Codebase (MCP)</span>
+      <span class="status-dot" id="dot-cbmcp"></span>
+    </div>
+    <div class="metric" id="cbmcp-status">--</div>
+    <div class="metric-label">Status</div>
+    <div class="row">
+      <input type="text" id="index-path" placeholder="/path/to/repo..." style="flex:1;margin-right:8px">
+      <button class="primary" onclick="indexRepo()">Indexar</button>
+    </div>
+    <button onclick="window.open('http://localhost:9749')">Abrir Grafo</button>
+  </div>
+  <div class="card" id="card-rtk">
+    <div class="card-header">
+      <span class="card-title green">RTK</span>
+      <span class="status-dot" id="dot-rtk"></span>
+    </div>
+    <div class="metric" id="rtk-tokens">--</div>
+    <div class="metric-label">Tokens economizados</div>
+    <div class="bar"><div class="bar-fill" id="rtk-bar" style="width:0%"></div></div>
+    <div class="row" style="margin-top:4px">
+      <span class="quick-cmd" id="rtk-pct">--</span>
+      <button onclick="fetch('/api/rtk/gain').then(r=>r.json()).then(updateRTK)">Atualizar</button>
+    </div>
+  </div>
+  <div class="card" id="card-headroom">
+    <div class="card-header">
+      <span class="card-title cyan">Headroom</span>
+      <span class="status-dot" id="dot-headroom"></span>
+    </div>
+    <div class="metric" id="hr-status">--</div>
+    <div class="metric-label">Proxy status</div>
+    <div class="row">
+      <span class="quick-cmd" id="hr-port">port 8787</span>
+      <div>
+        <button class="primary" onclick="fetch('/api/headroom/start',{method:'POST'}).then(poll)">Iniciar</button>
+        <button class="danger" onclick="fetch('/api/headroom/stop',{method:'POST'}).then(poll)">Parar</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" id="card-memstack">
+    <div class="card-header">
+      <span class="card-title yellow">MemStack</span>
+      <span class="status-dot" id="dot-memstack"></span>
+    </div>
+    <div class="metric" id="ms-status">--</div>
+    <div class="metric-label">Status</div>
+    <div class="row">
+      <input type="text" id="ms-query" placeholder="Buscar..." style="flex:1;margin-right:8px">
+      <button onclick="searchMemstack()">Buscar</button>
+    </div>
+    <pre id="ms-results" style="font-size:10px;color:var(--muted);max-height:80px;overflow:auto"></pre>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
