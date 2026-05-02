@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,13 +16,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed dashboard/*
-var dashboardFS embed.FS
+//go:embed dashboard/dist
+var reactFS embed.FS
+
+type Config struct {
+	Configured  bool     `json:"configured"`
+	Tools       []string `json:"tools"`
+	Clients     []string `json:"clients"`
+	ProjectPath string   `json:"project_path"`
+	LastSetup   string   `json:"last_setup"`
+}
+
+type FsNode struct {
+	Name     string   `json:"name"`
+	Path     string   `json:"path"`
+	IsDir    bool     `json:"is_dir"`
+	Children []FsNode `json:"children,omitempty"`
+}
 
 type DashboardServer struct {
-	Port     int
-	DwytBin  string
-	DwytHome string
+	Port       int
+	DwytBin    string
+	DwytHome   string
 	sseClients map[chan string]bool
 	sseMu      sync.Mutex
 }
@@ -39,10 +56,34 @@ func (ds *DashboardServer) Start() error {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	sub, _ := fs.Sub(dashboardFS, "dashboard")
-	r.StaticFS("/static", http.FS(sub))
-	r.GET("/", func(c *gin.Context) {
-		c.FileFromFS("/", http.FS(sub))
+	sub, _ := fs.Sub(reactFS, "dashboard/dist")
+	// React SPA — serve index.html for all non-api routes
+	r.Use(func(c *gin.Context) {
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.Next()
+			return
+		}
+		// try serving static files first
+		if data, err := fs.ReadFile(sub, c.Request.URL.Path[1:]); err == nil {
+			ct := "application/octet-stream"
+			if len(c.Request.URL.Path) > 3 && c.Request.URL.Path[len(c.Request.URL.Path)-3:] == ".js" {
+				ct = "application/javascript"
+			} else if len(c.Request.URL.Path) > 4 && c.Request.URL.Path[len(c.Request.URL.Path)-4:] == ".css" {
+				ct = "text/css"
+			} else if len(c.Request.URL.Path) > 4 && c.Request.URL.Path[len(c.Request.URL.Path)-4:] == ".svg" {
+				ct = "image/svg+xml"
+			}
+			c.Data(200, ct, data)
+			c.Abort()
+			return
+		}
+		// fallback to index.html for SPA routing
+		if data, err := fs.ReadFile(sub, "index.html"); err == nil {
+			c.Data(200, "text/html; charset=utf-8", data)
+			c.Abort()
+			return
+		}
+		c.Next()
 	})
 
 	api := r.Group("/api")
@@ -55,14 +96,34 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/rtk/gain", ds.apiRTKGain)
 		api.POST("/codebase/index", ds.apiCodebaseIndex)
 		api.POST("/memstack/search", ds.apiMemstackSearch)
+		api.POST("/setup/save", ds.apiSetupSave)
+		api.GET("/setup/load", ds.apiSetupLoad)
+		api.GET("/setup/status", ds.apiSetupStatus)
+		api.GET("/fs/browse", ds.apiFsBrowse)
+		api.POST("/services/start-all", ds.apiServicesStartAll)
+		api.POST("/services/stop-all", ds.apiServicesStopAll)
+		api.GET("/services/status", ds.apiServicesStatus)
+		api.GET("/logs", ds.apiLogs)
 	}
 
 	go ds.broadcastLoop()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", ds.Port)
 	fmt.Printf("   Dashboard → http://%s\n", addr)
+
+	// auto-open browser
+	openBrowser(addr)
+
 	return r.Run(addr)
 }
+
+func openBrowser(url string) {
+	for _, cmd := range []string{"xdg-open", "open", "start"} {
+		exec.Command(cmd, "http://"+url).Start()
+	}
+}
+
+// ─── API handlers ───────────────────────────────────────────────────────────
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
 	c.JSON(200, status.PollAll(ds.DwytBin))
@@ -134,7 +195,8 @@ func (ds *DashboardServer) apiHeadroomStart(c *gin.Context) {
 
 func (ds *DashboardServer) apiHeadroomStop(c *gin.Context) {
 	out, _ := exec.Command("pkill", "-f", "headroom proxy --port 8787").CombinedOutput()
-	c.JSON(200, gin.H{"status": "stopped", "output": string(out)})
+	c.JSON(200, gin.H{"status": "stopped"})
+	_ = out
 }
 
 func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
@@ -142,14 +204,11 @@ func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
-	var body struct {
-		Path string `json:"path"`
-	}
+	var body struct{ Path string `json:"path"` }
 	if err := c.BindJSON(&body); err != nil || body.Path == "" {
 		c.JSON(400, gin.H{"error": "path is required"})
 		return
 	}
-
 	cmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
 		fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
 	out, err := cmd.CombinedOutput()
@@ -161,15 +220,166 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiMemstackSearch(c *gin.Context) {
-	var body struct {
-		Query string `json:"query"`
-	}
+	var body struct{ Query string `json:"query"` }
 	if err := c.BindJSON(&body); err != nil || body.Query == "" {
 		c.JSON(400, gin.H{"error": "query is required"})
 		return
 	}
-
 	cmd := exec.Command(ds.DwytBin+"/memstack", "search", body.Query)
 	out, _ := cmd.CombinedOutput()
 	c.JSON(200, gin.H{"results": string(out)})
+}
+
+// ─── Fase 2: novos handlers ─────────────────────────────────────────────────
+
+func (ds *DashboardServer) configPath() string {
+	return filepath.Join(ds.DwytHome, "config.json")
+}
+
+func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
+	var config Config
+	if err := c.BindJSON(&config); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	config.Configured = true
+	config.LastSetup = time.Now().Format(time.RFC3339)
+
+	data, _ := json.MarshalIndent(config, "", "  ")
+	os.WriteFile(ds.configPath(), data, 0644)
+	c.JSON(200, gin.H{"status": "saved"})
+}
+
+func (ds *DashboardServer) apiSetupLoad(c *gin.Context) {
+	data, err := os.ReadFile(ds.configPath())
+	if err != nil {
+		c.JSON(200, Config{Configured: false})
+		return
+	}
+	var config Config
+	json.Unmarshal(data, &config)
+	c.JSON(200, config)
+}
+
+func (ds *DashboardServer) apiSetupStatus(c *gin.Context) {
+	_, err := os.ReadFile(ds.configPath())
+	c.JSON(200, gin.H{"configured": err == nil})
+}
+
+func (ds *DashboardServer) apiFsBrowse(c *gin.Context) {
+	root := c.Query("path")
+	if root == "" {
+		root = os.Getenv("HOME")
+	}
+	if root == "" {
+		root = "/"
+	}
+
+	depth := 2
+	if d := c.Query("depth"); d != "" {
+		fmt.Sscanf(d, "%d", &depth)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	var nodes []FsNode
+	for _, e := range entries {
+		if e.Name()[0] == '.' {
+			continue
+		}
+		node := FsNode{
+			Name:  e.Name(),
+			Path:  filepath.Join(root, e.Name()),
+			IsDir: e.IsDir(),
+		}
+		if e.IsDir() && depth > 0 {
+			sub, _ := os.ReadDir(node.Path)
+			for _, s := range sub {
+				if s.Name()[0] == '.' {
+					continue
+				}
+				child := FsNode{
+					Name:  s.Name(),
+					Path:  filepath.Join(node.Path, s.Name()),
+					IsDir: s.IsDir(),
+				}
+				node.Children = append(node.Children, child)
+			}
+		}
+		nodes = append(nodes, node)
+	}
+
+	c.JSON(200, gin.H{"path": root, "entries": nodes})
+}
+
+func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
+	results := make(map[string]string)
+
+	// codebase-memory-mcp
+	if _, err := os.Stat(ds.DwytBin + "/codebase-memory-mcp"); err == nil {
+		cmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "--ui=true", "--port=9749")
+		cmd.Start()
+		results["codebase-memory-mcp"] = "started"
+	} else {
+		results["codebase-memory-mcp"] = "not_installed"
+	}
+
+	// headroom
+	if _, err := os.Stat(ds.DwytBin + "/headroom"); err == nil {
+		cmd := exec.Command(ds.DwytBin+"/headroom", "proxy", "--port", "8787")
+		cmd.Start()
+		time.Sleep(1 * time.Second)
+		results["headroom"] = "started"
+	} else {
+		results["headroom"] = "not_installed"
+	}
+
+	results["rtk"] = "available"
+	results["memstack"] = "available"
+
+	c.JSON(200, gin.H{"status": "started", "services": results})
+}
+
+func (ds *DashboardServer) apiServicesStopAll(c *gin.Context) {
+	exec.Command("pkill", "-f", "codebase-memory-mcp.*--ui").Run()
+	exec.Command("pkill", "-f", "headroom proxy --port 8787").Run()
+	c.JSON(200, gin.H{"status": "stopped"})
+}
+
+func (ds *DashboardServer) apiServicesStatus(c *gin.Context) {
+	all := status.PollAll(ds.DwytBin)
+	c.JSON(200, all)
+}
+
+func (ds *DashboardServer) apiLogs(c *gin.Context) {
+	service := c.Query("service")
+	logs := make(map[string]string)
+
+	pollLog := func(name, pattern string) string {
+		out, err := exec.Command("sh", "-c", fmt.Sprintf("pgrep -f '%s' | head -1", pattern)).Output()
+		if err != nil || len(out) == 0 {
+			return fmt.Sprintf("%s: offline", name)
+		}
+		pid := strings.TrimSpace(string(out))
+		return fmt.Sprintf("%s: running (PID %s)", name, pid)
+	}
+
+	if service == "" || service == "codebase" {
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp")
+	}
+	if service == "" || service == "headroom" {
+		logs["headroom"] = pollLog("headroom", "headroom proxy")
+	}
+	if service == "" || service == "rtk" {
+		logs["rtk"] = "RTK: CLI tool, no daemon"
+	}
+	if service == "" || service == "memstack" {
+		logs["memstack"] = "MemStack: CLI tool, no daemon"
+	}
+
+	c.JSON(200, gin.H{"logs": logs})
 }

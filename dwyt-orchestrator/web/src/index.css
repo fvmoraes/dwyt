@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #1a1b1e;
+  --card: #25262b;
+  --border: #373a40;
+  --text: #c1c2c5;
+  --green: #2f9e44;
+  --yellow: #f08d49;
+  --red: #f03e3e;
+  --blue: #339af0;
+  --cyan: #3bc9db;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.online {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+.status-dot.offline { background: #5c5f66; }
+
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+  transition: width 0.5s;
+}
+
+button {
+  background: var(--border);
+  color: var(--text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+button:hover { background: #4a4d55; }
+button.primary { background: var(--blue); color: white; }
+button.danger { background: var(--red); color: white; }
+button:disabled { opacity: 0.4; cursor: default; }
+
+input, select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.tag.ok { background: rgba(47,158,68,0.15); color: var(--green); }
+.tag.warn { background: rgba(224,49,49,0.15); color: var(--red); }
