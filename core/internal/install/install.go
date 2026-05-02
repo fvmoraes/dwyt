@@ -166,31 +166,36 @@ func Wrappers(dwytBin, dwytHome string) error {
 }
 
 func wrappersUnix(dwytBin, dwytHome string) error {
-	codex := `#!/usr/bin/env bash
+	headroomBin := filepath.Join(dwytBin, "headroom")
+	codex := fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
 HEADROOM_PORT="${HEADROOM_PORT:-8787}"
 HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+HEADROOM_BIN=%q
 HEADROOM_PID_FILE="${HOME}/.dwyt/.codex-headroom.pid"
 is_headroom_healthy() { curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1; }
 start_headroom() {
   is_headroom_healthy && return 0
-  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  [[ -x "$HEADROOM_BIN" ]] || { echo "Headroom not installed at $HEADROOM_BIN" >&2; exit 1; }
+  nohup "$HEADROOM_BIN" proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
   echo $! > "${HEADROOM_PID_FILE}"
   for _ in {1..20}; do is_headroom_healthy && return 0; sleep 1; done
   echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2; exit 1
 }
 start_headroom
 exec codex -c "openai_base_url=\"${HEADROOM_URL}/v1\"" "$@"
-`
-	opencode := `#!/usr/bin/env bash
+`, headroomBin)
+	opencode := fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
 HEADROOM_PORT="${HEADROOM_PORT:-8787}"
 HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+HEADROOM_BIN=%q
 HEADROOM_PID_FILE="${HOME}/.dwyt/.opencode-headroom.pid"
 is_headroom_healthy() { curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1; }
 start_headroom() {
   is_headroom_healthy && return 0
-  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  [[ -x "$HEADROOM_BIN" ]] || { echo "Headroom not installed at $HEADROOM_BIN" >&2; exit 1; }
+  nohup "$HEADROOM_BIN" proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
   echo $! > "${HEADROOM_PID_FILE}"
   for _ in {1..20}; do is_headroom_healthy && return 0; sleep 1; done
   echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2; exit 1
@@ -199,7 +204,7 @@ start_headroom
 export ANTHROPIC_BASE_URL="${HEADROOM_URL}"
 export OPENAI_BASE_URL="${HEADROOM_URL}/v1"
 exec opencode "$@"
-`
+`, headroomBin)
 	dwytUI := fmt.Sprintf(`#!/usr/bin/env bash
 DWYT_HOME=%q
 DWYT_BIN=%q

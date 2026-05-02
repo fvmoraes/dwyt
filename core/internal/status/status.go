@@ -6,15 +6,31 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/log"
+)
+
+type ServiceState string
+
+const (
+	StateNotInstalled ServiceState = "not_installed"
+	StateStarting    ServiceState = "starting"
+	StateRunning     ServiceState = "running"
+	StateFailed       ServiceState = "failed"
 )
 
 type ToolStatus struct {
-	Name    string `json:"name"`
-	Running bool   `json:"running"`
-	Healthy bool   `json:"healthy"`
-	Details string `json:"details,omitempty"`
+	Name    string       `json:"name"`
+	Running bool         `json:"running"`
+	Healthy bool         `json:"healthy"`
+	State   ServiceState `json:"state"`
+	Port    int          `json:"port,omitempty"`
+	Details string       `json:"details,omitempty"`
+	Error   string       `json:"error,omitempty"`
 }
 
 type SystemStatus struct {
@@ -45,53 +61,84 @@ func PollAll(dwytBin string) *SystemStatus {
 }
 
 func pollCBMCP(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "codebase-memory-mcp"}
-	bin := dwytBin + "/codebase-memory-mcp"
+	ts := ToolStatus{Name: "codebase-memory-mcp", State: StateNotInstalled}
+	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(bin); err != nil {
+		return ts
+	}
+
+	ts.State = StateRunning
+	ts.Port = 9749
+
+	if health.ProbeURL("http://127.0.0.1:9749/health") {
+		ts.Running = true
+		ts.Healthy = true
+		ts.State = StateRunning
+		ts.Details = "UI on port 9749"
+		return ts
+	}
+
 	if out, err := exec.Command(bin, "--version").Output(); err == nil {
 		ts.Running = true
 		ts.Healthy = true
 		ts.Details = strings.TrimSpace(string(out))
+		ts.State = StateRunning
+	} else {
+		ts.State = StateFailed
+		ts.Error = "process failed or not responding"
 	}
 	return ts
 }
 
 func pollRTK(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "rtk"}
-	bin := dwytBin + "/rtk"
+	ts := ToolStatus{Name: "rtk", State: StateNotInstalled}
+	bin := filepath.Join(dwytBin, "rtk")
+	if _, err := os.Stat(bin); err != nil {
+		return ts
+	}
+
+	ts.State = StateRunning
 	if out, err := exec.Command(bin, "--version").Output(); err == nil {
 		ts.Running = true
 		ts.Healthy = true
 		ts.Details = strings.TrimSpace(string(out))
+	} else {
+		ts.State = StateFailed
+		ts.Error = "binary is present but not responding"
 	}
 	return ts
 }
 
 func pollHeadroom() ToolStatus {
-	ts := ToolStatus{Name: "headroom"}
-	client := &http.Client{Timeout: 2 * time.Second}
-	if resp, err := client.Get("http://127.0.0.1:8787/health"); err == nil {
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			ts.Running = true
-			ts.Healthy = true
-			ts.Details = "proxy on port 8787"
-		}
+	ts := ToolStatus{Name: "headroom", Port: 8787}
+	if health.ProbeURL("http://127.0.0.1:8787/health") {
+		ts.Running = true
+		ts.Healthy = true
+		ts.State = StateRunning
+		ts.Details = "proxy on port 8787"
+	} else {
+		ts.State = StateNotInstalled
 	}
 	return ts
 }
 
 func pollMemStack(dwytBin string) ToolStatus {
 	ts := ToolStatus{Name: "memstack"}
-	if _, err := os.Stat(dwytBin + "/memstack"); err == nil {
-		ts.Running = true
-		ts.Healthy = true
-		ts.Details = "disponível"
+	bin := filepath.Join(dwytBin, "memstack")
+	if _, err := os.Stat(bin); err != nil {
+		ts.State = StateNotInstalled
+		return ts
 	}
+
+	ts.Running = true
+	ts.Healthy = true
+	ts.State = StateRunning
+	ts.Details = "disponível"
 	return ts
 }
 
 func GetRTKMetrics(dwytBin string) *RTKMetrics {
-	bin := dwytBin + "/rtk"
+	bin := filepath.Join(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
@@ -156,14 +203,11 @@ func parseTokenCount(s string) int64 {
 	return int64(v * float64(mul))
 }
 
-// GetRTKMetricsForPath runs `rtk gain --project` with the given directory as cwd,
-// returning per-project stats instead of global stats.
 func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
-	bin := dwytBin + "/rtk"
+	bin := filepath.Join(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
-	// rtk gain --project reads stats scoped to the current working directory
 	cmd := exec.Command(bin, "gain", "--project")
 	cmd.Dir = projectPath
 	out, err := cmd.Output()
@@ -187,9 +231,49 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 			}
 		}
 	}
-	// If no data for this project, return nil so caller falls back to global
 	if m.TotalCommands == 0 && m.TokensSaved == 0 {
 		return nil
 	}
 	return m
+}
+
+// HealthStatus returns a summary of all tool health suitable for quick polling.
+func HealthStatus(dwytBin string) map[string]ServiceState {
+	states := make(map[string]ServiceState)
+
+	// codebase
+	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(bin); err != nil {
+		states["codebase-memory-mcp"] = StateNotInstalled
+	} else if health.ProbeURL("http://127.0.0.1:9749/health") {
+		states["codebase-memory-mcp"] = StateRunning
+	} else {
+		states["codebase-memory-mcp"] = StateFailed
+	}
+
+	// headroom
+	if health.ProbeURL("http://127.0.0.1:8787/health") {
+		states["headroom"] = StateRunning
+	} else {
+		states["headroom"] = StateNotInstalled
+	}
+
+	// rtk
+	bin = filepath.Join(dwytBin, "rtk")
+	if _, err := os.Stat(bin); err != nil {
+		states["rtk"] = StateNotInstalled
+	} else {
+		states["rtk"] = StateRunning
+	}
+
+	// memstack
+	bin = filepath.Join(dwytBin, "memstack")
+	if _, err := os.Stat(bin); err != nil {
+		states["memstack"] = StateNotInstalled
+	} else {
+		states["memstack"] = StateRunning
+	}
+
+	log.Debug("health status poll", log.Fields{"states": states})
+	return states
 }
