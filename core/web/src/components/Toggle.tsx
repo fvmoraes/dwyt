@@ -1,3 +1,5 @@
+import { useLang } from '../LangContext'
+
 interface Props {
   checked: boolean
   onChange: () => void
@@ -6,17 +8,26 @@ interface Props {
 }
 
 export default function Toggle({ checked, onChange, label, description }: Props) {
+  useLang() // ensures re-render on lang change (descriptions are passed as props)
   return (
-    <label className="flex items-center gap-3 p-3 rounded-lg border border-[#373a40] cursor-pointer hover:bg-[#2c2e33] transition-colors">
+    <label style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '5px 8px', borderRadius: 5,
+      border: '1px solid var(--border)', cursor: 'pointer',
+      background: 'transparent', transition: 'border-color 0.15s',
+    }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--blue)')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+    >
       <div className="toggle">
         <input type="checkbox" checked={checked} onChange={onChange} />
         <span className="slider" />
       </div>
-      <div>
-        <div className="text-sm">{label}</div>
-        {description && <div className="text-xs text-[#5c5f66]">{description}</div>}
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 11, fontWeight: 500 }}>{label}</div>
+        {description && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{description}</div>}
       </div>
-      <div className="ml-auto text-xs" style={{ color: checked ? 'var(--green)' : 'var(--muted)' }}>
+      <div style={{ fontSize: 10, color: checked ? 'var(--green)' : 'var(--muted)', minWidth: 20, textAlign: 'right' }}>
         {checked ? 'ON' : 'OFF'}
       </div>
     </label>

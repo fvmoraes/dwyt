@@ -1,119 +1,86 @@
 import { useState, useEffect } from 'react'
 import * as api from '../api'
+import { useLang } from '../LangContext'
 
 interface FsEntry { name: string; path: string; is_dir: boolean }
-
 interface Props {
   onSelect: (path: string) => void
   selected: string
-  initialPath?: string   // if provided, start browsing here instead of HOME
+  initialPath?: string
 }
 
 export default function FileBrowser({ onSelect, selected, initialPath }: Props) {
-  const [entries, setEntries] = useState<FsEntry[]>([])
+  const { t } = useLang()
+  const [entries,     setEntries]     = useState<FsEntry[]>([])
   const [currentPath, setCurrentPath] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading,     setLoading]     = useState(false)
 
-  useEffect(() => {
-    // Use initialPath if given (and it looks like an absolute path), else fall back to HOME
-    const start = initialPath && initialPath.startsWith('/') ? initialPath : ''
-    loadDir(start)
-  }, [])
+  useEffect(() => { loadDir(initialPath && initialPath.startsWith('/') ? initialPath : '') }, [])
 
   async function loadDir(path: string) {
     setLoading(true)
     try {
       const data = await api.browseFs(path, 1)
-      const resolved = data.path || path || '/'
-      setCurrentPath(resolved)
+      setCurrentPath(data.path || path || '/')
       setEntries(data.entries || [])
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
     setLoading(false)
   }
 
-  function navigateTo(path: string) {
-    loadDir(path)
-    onSelect(path)
-  }
-
-  function goUp() {
-    const parent = currentPath.split('/').slice(0, -1).join('/') || '/'
-    navigateTo(parent)
-  }
-
-  function handleClick(entry: FsEntry) {
-    if (entry.is_dir) {
-      navigateTo(entry.path)
-    } else {
-      onSelect(currentPath)
-    }
-  }
+  function navigateTo(path: string) { loadDir(path); onSelect(path) }
+  function goUp() { navigateTo(currentPath.split('/').slice(0, -1).join('/') || '/') }
+  function handleClick(e: FsEntry) { e.is_dir ? navigateTo(e.path) : onSelect(currentPath) }
 
   const crumbs = currentPath.split('/').filter(Boolean)
 
   return (
-    <div className="border border-[#373a40] rounded-lg overflow-hidden">
+    <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', fontSize: 11 }}>
       {/* Breadcrumb */}
-      <div className="bg-[#1e1f23] px-3 py-2 flex items-center gap-1 text-xs overflow-x-auto border-b border-[#373a40]">
-        <button onClick={() => navigateTo('/')} className="text-[#339af0] hover:underline shrink-0">/</button>
+      <div style={{ background: '#1e1f23', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
+        <button onClick={() => navigateTo('/')} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 11, cursor: 'pointer' }}>/</button>
         {crumbs.map((part, i) => {
           const path = '/' + crumbs.slice(0, i + 1).join('/')
           return (
-            <span key={path} className="flex items-center gap-1 shrink-0">
-              <span className="text-[#5c5f66]">/</span>
-              <button onClick={() => navigateTo(path)} className="text-[#339af0] hover:underline">
-                {part}
-              </button>
+            <span key={path} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+              <span style={{ color: 'var(--muted)' }}>/</span>
+              <button onClick={() => navigateTo(path)} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 11, cursor: 'pointer' }}>{part}</button>
             </span>
           )
         })}
-        {loading && <span className="ml-2 text-[#f08d49] animate-pulse">...</span>}
+        {loading && <span style={{ marginLeft: 4, color: 'var(--yellow)', fontSize: 10 }}>...</span>}
       </div>
 
-      {/* Current path + select button */}
-      <div className="bg-[#25262b] px-3 py-2 flex items-center gap-2 border-b border-[#373a40]">
-        <button onClick={goUp} className="text-xs bg-[#373a40] hover:bg-[#4a4d55] px-3 py-1 rounded">
-          ← Subir
-        </button>
-        <span className="text-xs text-[#5c5f66] truncate flex-1">{currentPath}</span>
-        <button
-          className="primary text-xs px-4 py-1"
-          onClick={() => onSelect(currentPath)}
-        >
-          Selecionar este diretório
-        </button>
+      {/* Toolbar */}
+      <div style={{ background: 'var(--card)', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--border)' }}>
+        <button onClick={goUp} style={{ fontSize: 10, padding: '2px 7px' }}>{t.goUp}</button>
+        <span style={{ fontSize: 10, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentPath}</span>
+        <button className="primary" style={{ fontSize: 10, padding: '2px 8px', flexShrink: 0 }} onClick={() => onSelect(currentPath)}>{t.selectDir}</button>
       </div>
 
-      {/* Directory listing */}
-      <div className="max-h-56 overflow-y-auto">
+      {/* Listing */}
+      <div style={{ maxHeight: 180, overflowY: 'auto' }}>
         {loading && entries.length === 0 ? (
-          <div className="text-sm text-[#5c5f66] p-4">Carregando...</div>
+          <div style={{ padding: 10, fontSize: 11, color: 'var(--muted)' }}>{t.loading}</div>
         ) : entries.length === 0 ? (
-          <div className="text-sm text-[#5c5f66] p-4">Vazio</div>
-        ) : (
-          entries.map((entry) => (
-            <div
-              key={entry.path}
-              className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-sm border-b border-[#2c2e33] last:border-0 transition-colors ${
-                selected === entry.path
-                  ? 'bg-[#1a3a5c] text-[#339af0]'
-                  : 'hover:bg-[#2c2e33]'
-              }`}
-              onClick={() => handleClick(entry)}
-            >
-              <span className="text-xs w-5 text-center">
-                {entry.is_dir ? '📁' : '📄'}
-              </span>
-              <span className={selected === entry.path ? 'font-semibold' : ''}>
-                {entry.name}
-              </span>
-              {entry.is_dir && <span className="text-[#5c5f66] ml-auto text-xs">▸</span>}
-            </div>
-          ))
-        )}
+          <div style={{ padding: 10, fontSize: 11, color: 'var(--muted)' }}>—</div>
+        ) : entries.map(entry => (
+          <div key={entry.path}
+            onClick={() => handleClick(entry)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 8px', cursor: 'pointer', fontSize: 11,
+              borderBottom: '1px solid #2c2e33',
+              background: selected === entry.path ? '#1a3a5c' : 'transparent',
+              color: selected === entry.path ? 'var(--blue)' : 'var(--text)',
+            }}
+          >
+            <span style={{ fontSize: 10, width: 14, textAlign: 'center' }}>{entry.is_dir ? '📁' : '📄'}</span>
+            <span style={{ flex: 1, fontWeight: selected === entry.path ? 600 : 400 }}>{entry.name}</span>
+            {entry.is_dir && <span style={{ color: 'var(--muted)', fontSize: 10 }}>▸</span>}
+          </div>
+        ))}
       </div>
     </div>
   )
 }
+
