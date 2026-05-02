@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/DeusData/core/internal/detect"
+	"github.com/fvmoraes/dwyt/internal/detect"
 )
 
 func Ensure(e *detect.Env) error {

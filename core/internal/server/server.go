@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DeusData/core/internal/install"
-	"github.com/DeusData/core/internal/integrate"
-	"github.com/DeusData/core/internal/status"
+	"github.com/fvmoraes/dwyt/internal/install"
+	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
 

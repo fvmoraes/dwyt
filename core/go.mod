@@ -1,4 +1,4 @@
-module github.com/DeusData/core
+module github.com/fvmoraes/dwyt
 
 go 1.25.0
 

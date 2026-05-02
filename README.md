@@ -9,13 +9,13 @@ DWYT instala e orquestra quatro ferramentas open source que reduzem drasticament
 ## Instalação em um comando
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/dwyt/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 ```
 
 ou com wget:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/DeusData/dwyt/main/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 ```
 
 O script detecta sua plataforma, baixa o binário correto, configura o PATH e orienta os próximos passos.
@@ -68,7 +68,7 @@ Baixe o binário para sua plataforma:
 ### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/dwyt/main/dwyt-linux-amd64 -o dwyt
+curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/dwyt-linux-amd64 -o dwyt
 chmod +x dwyt
 ./dwyt .
 ```
@@ -76,7 +76,7 @@ chmod +x dwyt
 ### macOS (Apple Silicon)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/dwyt/main/dwyt-darwin-arm64 -o dwyt
+curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/dwyt-darwin-arm64 -o dwyt
 chmod +x dwyt
 ./dwyt .
 ```
@@ -84,7 +84,7 @@ chmod +x dwyt
 ### macOS (Intel)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeusData/dwyt/main/dwyt-darwin-amd64 -o dwyt
+curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/dwyt-darwin-amd64 -o dwyt
 chmod +x dwyt
 ./dwyt .
 ```
@@ -92,7 +92,7 @@ chmod +x dwyt
 ### Windows (PowerShell)
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/DeusData/dwyt/main/dwyt-windows-amd64.exe" -OutFile "dwyt.exe"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fvmoraes/dwyt/main/dwyt-windows-amd64.exe" -OutFile "dwyt.exe"
 .\dwyt.exe .
 ```
 

@@ -3,7 +3,7 @@ package cli
 import (
 	"os"
 
-	"github.com/DeusData/core/cmd/dwyt/cli/root"
+	"github.com/fvmoraes/dwyt/cmd/dwyt/cli/root"
 )
 
 func Execute() error {

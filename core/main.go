@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DeusData/core/cmd/dwyt/cli"
+	"github.com/fvmoraes/dwyt/cmd/dwyt/cli"
 )
 
 func main() {

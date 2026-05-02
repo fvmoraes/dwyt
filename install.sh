@@ -1,192 +1,190 @@
 #!/usr/bin/env bash
 # DWYT — Don't Waste Your Tokens
-# Instalador oficial: https://github.com/DeusData/dwyt
+# Installer: https://github.com/fvmoraes/dwyt
 #
-# Uso:
-#   curl -fsSL https://raw.githubusercontent.com/DeusData/dwyt/main/install.sh | bash
-#   wget -qO- https://raw.githubusercontent.com/DeusData/dwyt/main/install.sh | bash
+# Usage:
+#   # From GitHub (once published):
+#   curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
+#
+#   # From a local clone:
+#   bash install.sh
 
 set -euo pipefail
 
-# ── Cores ──────────────────────────────────────────────────────────────────────
-BOLD="\033[1m"
-CYAN="\033[36m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-RED="\033[31m"
-RESET="\033[0m"
+# ── Colors ────────────────────────────────────────────────────────────────────
+BOLD="\033[1m"; CYAN="\033[36m"; GREEN="\033[32m"
+YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
 
 info()    { echo -e "  ${CYAN}→${RESET}  $*"; }
 success() { echo -e "  ${GREEN}✓${RESET}  $*"; }
 warn()    { echo -e "  ${YELLOW}!${RESET}  $*"; }
-error()   { echo -e "  ${RED}✗${RESET}  $*" >&2; exit 1; }
+die()     { echo -e "\n  ${RED}✗  $*${RESET}\n" >&2; exit 1; }
 header()  { echo -e "\n${BOLD}${CYAN}$*${RESET}\n"; }
 
-# ── Detecção de plataforma ─────────────────────────────────────────────────────
-OS="$(uname -s)"
-ARCH="$(uname -m)"
+# ── Platform detection ────────────────────────────────────────────────────────
+OS="$(uname -s)"; ARCH="$(uname -m)"
 
 case "$OS" in
   Linux)
     case "$ARCH" in
       x86_64)  BINARY="dwyt-linux-amd64" ;;
-      aarch64) error "Linux ARM64 não suportado ainda. Compile do fonte." ;;
-      *)       error "Arquitetura não suportada: $ARCH" ;;
-    esac
-    ;;
+      aarch64|arm64) die "Linux ARM64 not yet supported. Build from source." ;;
+      *) die "Unsupported architecture: $ARCH" ;;
+    esac ;;
   Darwin)
     case "$ARCH" in
-      x86_64)  BINARY="dwyt-darwin-amd64" ;;
-      arm64)   BINARY="dwyt-darwin-arm64" ;;
-      *)       error "Arquitetura macOS não suportada: $ARCH" ;;
-    esac
-    ;;
+      x86_64) BINARY="dwyt-darwin-amd64" ;;
+      arm64)  BINARY="dwyt-darwin-arm64" ;;
+      *) die "Unsupported macOS architecture: $ARCH" ;;
+    esac ;;
   MINGW*|MSYS*|CYGWIN*)
-    BINARY="dwyt-windows-amd64.exe"
-    ;;
+    BINARY="dwyt-windows-amd64.exe" ;;
   *)
-    error "Sistema operacional não suportado: $OS"
-    ;;
+    die "Unsupported OS: $OS" ;;
 esac
 
-# ── Configuração ───────────────────────────────────────────────────────────────
-REPO="DeusData/dwyt"
 INSTALL_DIR="${HOME}/.local/bin"
-BINARY_NAME="dwyt"
+DEST="${INSTALL_DIR}/dwyt"
+GITHUB_RAW="https://raw.githubusercontent.com/fvmoraes/dwyt/main"
 
-# Detectar versão mais recente via GitHub API
-LATEST_URL="https://api.github.com/repos/${REPO}/releases/latest"
-DOWNLOAD_BASE="https://github.com/${REPO}/releases/latest/download"
-
-# Fallback: baixar direto do repositório (binários na raiz do main)
-RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
-
-# ── Banner ─────────────────────────────────────────────────────────────────────
+# ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}"
-echo "  ██████╗ ██╗    ██╗██╗   ██╗████████╗"
-echo "  ██╔══██╗██║    ██║╚██╗ ██╔╝╚══██╔══╝"
-echo "  ██║  ██║██║ █╗ ██║ ╚████╔╝    ██║   "
-echo "  ██║  ██║██║███╗██║  ╚██╔╝     ██║   "
-echo "  ██████╔╝╚███╔███╔╝   ██║      ██║   "
-echo "  ╚═════╝  ╚══╝╚══╝    ╚═╝      ╚═╝   "
-echo -e "${RESET}"
-echo -e "  ${BOLD}Don't Waste Your Tokens${RESET}"
-echo ""
+cat << 'EOF'
+  ██████╗ ██╗    ██╗██╗   ██╗████████╗
+  ██╔══██╗██║    ██║╚██╗ ██╔╝╚══██╔══╝
+  ██║  ██║██║ █╗ ██║ ╚████╔╝    ██║
+  ██║  ██║██║███╗██║  ╚██╔╝     ██║
+  ██████╔╝╚███╔███╔╝   ██║      ██║
+  ╚═════╝  ╚══╝╚══╝    ╚═╝      ╚═╝
+EOF
+echo -e "${RESET}  ${BOLD}Don't Waste Your Tokens${RESET}\n"
 
-# ── Verificar dependências ─────────────────────────────────────────────────────
-header "Verificando dependências..."
+# ── Check downloader ──────────────────────────────────────────────────────────
+header "Checking dependencies..."
 
 if command -v curl &>/dev/null; then
-  DOWNLOADER="curl"
-  info "curl encontrado"
+  DOWNLOADER="curl"; info "curl found"
 elif command -v wget &>/dev/null; then
-  DOWNLOADER="wget"
-  info "wget encontrado"
+  DOWNLOADER="wget"; info "wget found"
 else
-  error "curl ou wget é necessário para instalar o DWYT"
+  die "curl or wget is required"
 fi
 
-# ── Criar diretório de instalação ──────────────────────────────────────────────
+# ── Locate binary ─────────────────────────────────────────────────────────────
+header "Locating binary..."
+
+info "Platform : $OS $ARCH"
+info "Binary   : $BINARY"
+info "Dest     : $DEST"
+
+# Script directory — works whether piped or run directly
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/stdin}")" 2>/dev/null && pwd || echo "")"
+LOCAL_BIN="${SCRIPT_DIR}/${BINARY}"
+
 mkdir -p "$INSTALL_DIR"
 
-# ── Download ───────────────────────────────────────────────────────────────────
-header "Baixando DWYT..."
+if [[ -f "$LOCAL_BIN" ]]; then
+  # ── Case 1: binary is next to the install script (local clone / release zip)
+  info "Found local binary at $LOCAL_BIN"
+  cp "$LOCAL_BIN" "$DEST"
+  chmod +x "$DEST"
+  success "Copied from local file"
 
-DEST="${INSTALL_DIR}/${BINARY_NAME}"
-DOWNLOAD_URL="${RAW_BASE}/${BINARY}"
-
-info "Plataforma: ${OS} ${ARCH}"
-info "Binário:    ${BINARY}"
-info "Destino:    ${DEST}"
-echo ""
-
-if [ "$DOWNLOADER" = "curl" ]; then
-  curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST"
 else
-  wget -q --show-progress "$DOWNLOAD_URL" -O "$DEST"
+  # ── Case 2: download from GitHub
+  info "Downloading from GitHub..."
+  DOWNLOAD_URL="${GITHUB_RAW}/${BINARY}"
+
+  DL_OK=0
+  if [[ "$DOWNLOADER" == "curl" ]]; then
+    if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST" 2>/dev/null; then
+      DL_OK=1
+    fi
+  else
+    if wget -q --show-progress "$DOWNLOAD_URL" -O "$DEST" 2>/dev/null; then
+      DL_OK=1
+    fi
+  fi
+
+  if [[ $DL_OK -eq 0 ]]; then
+    # ── Case 3: GitHub not available — guide user to manual install
+    echo ""
+    warn "Could not download from GitHub (repo may not be published yet)."
+    echo ""
+    echo -e "  ${BOLD}Manual install:${RESET}"
+    echo ""
+    echo -e "  1. Download the binary for your platform from the release:"
+    echo -e "     ${CYAN}https://github.com/fvmoraes/dwyt/releases${RESET}"
+    echo ""
+    echo -e "  2. Or if you have the binary locally:"
+    echo -e "     ${BOLD}cp ${BINARY} ~/.local/bin/dwyt && chmod +x ~/.local/bin/dwyt${RESET}"
+    echo ""
+    echo -e "  3. Then run:"
+    echo -e "     ${BOLD}dwyt .${RESET}"
+    echo ""
+    exit 1
+  fi
+
+  chmod +x "$DEST"
+  success "Downloaded successfully"
 fi
 
-chmod +x "$DEST"
-success "Download concluído"
+# ── Configure PATH ────────────────────────────────────────────────────────────
+header "Configuring PATH..."
 
-# ── Verificar PATH ─────────────────────────────────────────────────────────────
-header "Configurando PATH..."
-
-# Detectar shell RC
-SHELL_RC=""
-if [ -n "${ZSH_VERSION:-}" ] || echo "$SHELL" | grep -q zsh; then
+# Detect shell RC
+if [[ -n "${ZSH_VERSION:-}" ]] || echo "${SHELL:-}" | grep -q zsh; then
   SHELL_RC="${HOME}/.zshrc"
-elif [ -f "${HOME}/.bashrc" ]; then
+elif [[ -f "${HOME}/.bashrc" ]]; then
   SHELL_RC="${HOME}/.bashrc"
-elif [ -f "${HOME}/.bash_profile" ]; then
+elif [[ -f "${HOME}/.bash_profile" ]]; then
   SHELL_RC="${HOME}/.bash_profile"
 else
   SHELL_RC="${HOME}/.profile"
 fi
 
-# Verificar se ~/.local/bin já está no PATH
 if echo "$PATH" | grep -q "${INSTALL_DIR}"; then
-  success "~/.local/bin já está no PATH"
+  success "~/.local/bin already in PATH"
 else
-  # Adicionar ao shell RC
   MARKER="# dwyt:path"
   if ! grep -q "$MARKER" "$SHELL_RC" 2>/dev/null; then
-    echo "" >> "$SHELL_RC"
-    echo "$MARKER" >> "$SHELL_RC"
-    echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$SHELL_RC"
-    success "PATH atualizado em $SHELL_RC"
+    { echo ""; echo "$MARKER"; echo "export PATH=\"${INSTALL_DIR}:\$PATH\""; } >> "$SHELL_RC"
+    success "PATH updated in $SHELL_RC"
   else
-    info "PATH já configurado em $SHELL_RC"
+    info "PATH already configured in $SHELL_RC"
   fi
-
-  # Exportar para a sessão atual
   export PATH="${INSTALL_DIR}:${PATH}"
 fi
 
-# ── Primeira execução ──────────────────────────────────────────────────────────
-header "Instalação concluída!"
+# ── Done ──────────────────────────────────────────────────────────────────────
+header "Installation complete!"
 
-echo -e "  ${GREEN}✓${RESET}  DWYT instalado em ${BOLD}${DEST}${RESET}"
+echo -e "  ${GREEN}✓${RESET}  DWYT installed at ${BOLD}${DEST}${RESET}"
+echo ""
+echo -e "  ${BOLD}How to use:${RESET}"
+echo ""
+echo -e "    ${CYAN}# Open DWYT in the current directory${RESET}"
+echo -e "    ${BOLD}dwyt .${RESET}"
+echo ""
+echo -e "    ${CYAN}# Or in any project${RESET}"
+echo -e "    ${BOLD}cd ~/my-project && dwyt .${RESET}"
+echo ""
+echo -e "    ${CYAN}# Stop all services${RESET}"
+echo -e "    ${BOLD}dwyt stop${RESET}"
 echo ""
 
-# Verificar se dwyt está acessível agora
-if command -v dwyt &>/dev/null || [ -x "$DEST" ]; then
-  echo -e "  ${BOLD}Como usar:${RESET}"
-  echo ""
-  echo -e "    ${CYAN}# Abrir o DWYT no diretório atual${RESET}"
-  echo -e "    ${BOLD}dwyt .${RESET}"
-  echo ""
-  echo -e "    ${CYAN}# Ou em qualquer projeto${RESET}"
-  echo -e "    ${BOLD}cd ~/meu-projeto && dwyt .${RESET}"
-  echo ""
-  echo -e "    ${CYAN}# Parar os serviços${RESET}"
-  echo -e "    ${BOLD}dwyt stop${RESET}"
-  echo ""
-
-  # Perguntar se quer rodar agora
-  if [ -t 0 ]; then  # só se for terminal interativo
-    echo -e "  ${YELLOW}Deseja abrir o DWYT agora? [S/n]${RESET} \c"
-    read -r REPLY
-    REPLY="${REPLY:-S}"
-    if [[ "$REPLY" =~ ^[Ss]$ ]]; then
-      echo ""
-      exec "$DEST" .
-    fi
+# Ask to run now (only in interactive terminal)
+if [[ -t 0 ]]; then
+  printf "  %bRun DWYT now? [Y/n]%b " "$YELLOW" "$RESET"
+  read -r REPLY
+  REPLY="${REPLY:-Y}"
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    echo ""
+    exec "$DEST" .
   fi
 else
-  warn "Reinicie o terminal ou execute:"
-  echo ""
-  echo -e "    ${BOLD}source ${SHELL_RC}${RESET}"
-  echo -e "    ${BOLD}dwyt .${RESET}"
-  echo ""
-fi
-
-# ── Nota sobre PATH no macOS ───────────────────────────────────────────────────
-if [ "$OS" = "Darwin" ]; then
-  echo ""
-  warn "macOS: se 'dwyt' não for encontrado após reiniciar o terminal,"
-  warn "adicione manualmente ao seu shell RC:"
-  echo -e "    ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+  echo -e "  Restart your terminal or run:"
+  echo -e "    ${BOLD}source ${SHELL_RC} && dwyt .${RESET}"
   echo ""
 fi

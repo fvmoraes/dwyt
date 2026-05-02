@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/DeusData/core/internal/detect"
-	"github.com/DeusData/core/internal/env"
-	"github.com/DeusData/core/internal/install"
-	"github.com/DeusData/core/internal/server"
-	"github.com/DeusData/core/internal/status"
+	"github.com/fvmoraes/dwyt/internal/detect"
+	"github.com/fvmoraes/dwyt/internal/env"
+	"github.com/fvmoraes/dwyt/internal/install"
+	"github.com/fvmoraes/dwyt/internal/server"
+	"github.com/fvmoraes/dwyt/internal/status"
 
 	"github.com/spf13/cobra"
 )
