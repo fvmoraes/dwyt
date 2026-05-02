@@ -23,6 +23,8 @@ type Config struct {
 	Configured  bool     `json:"configured"`
 	Tools       []string `json:"tools"`
 	Clients     []string `json:"clients"`
+	Ias         []string `json:"ias"`
+	Providers   []string `json:"providers"`
 	ProjectPath string   `json:"project_path"`
 	LastSetup   string   `json:"last_setup"`
 }
