@@ -175,14 +175,34 @@ func installBinaryOnPath(dwytBin string) {
 		filepath.Join(localBin, "dwyt"),
 		filepath.Join(dwytBin, "dwyt"),
 	} {
-		// Only create/update if the target would be different
-		existing, err := os.Readlink(link)
-		if err == nil && existing == realExe {
-			continue // already correct
+		// Skip if the link would point to the same on-disk file as the binary.
+		// On macOS, /tmp is a symlink to /private/tmp, so a string compare alone
+		// misses this — we must resolve the link's parent directory too.
+		// Without this, we'd remove the binary and replace it with a symlink to
+		// itself, producing "too many levels of symbolic links".
+		if sameFile(link, realExe) {
+			continue
+		}
+		// Skip if an existing symlink already points to the right place
+		if existing, err := os.Readlink(link); err == nil && existing == realExe {
+			continue
 		}
 		os.Remove(link)
 		os.Symlink(realExe, link)
 	}
+}
+
+// sameFile reports whether path resolves to the same on-disk file as target.
+// target is expected to already be a fully-resolved real path.
+func sameFile(path, target string) bool {
+	if path == target {
+		return true
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	return filepath.Join(parent, filepath.Base(path)) == target
 }
 
 func copyFile(src, dst string) error {
