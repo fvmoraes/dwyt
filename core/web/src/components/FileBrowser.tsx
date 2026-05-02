@@ -10,17 +10,20 @@ interface Props {
 
 export default function FileBrowser({ onSelect, selected }: Props) {
   const [entries, setEntries] = useState<FsEntry[]>([])
-  const [currentPath, setCurrentPath] = useState('/home')
+  const [currentPath, setCurrentPath] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    loadDir(currentPath)
-  }, [currentPath])
+    // Start at home dir — empty path = HOME on the server
+    loadDir('')
+  }, [])
 
   async function loadDir(path: string) {
     setLoading(true)
     try {
       const data = await api.browseFs(path, 1)
+      const resolved = data.path || path || '/'
+      setCurrentPath(resolved)
       setEntries(data.entries || [])
     } catch (e) {
       console.error(e)
@@ -28,37 +31,37 @@ export default function FileBrowser({ onSelect, selected }: Props) {
     setLoading(false)
   }
 
-  function navigate(path: string) {
-    setCurrentPath(path)
+  function navigateTo(path: string) {
+    loadDir(path)
     onSelect(path)
   }
 
   function goUp() {
     const parent = currentPath.split('/').slice(0, -1).join('/') || '/'
-    navigate(parent)
+    navigateTo(parent)
   }
 
   function handleClick(entry: FsEntry) {
     if (entry.is_dir) {
-      navigate(entry.path)
+      navigateTo(entry.path)
+    } else {
+      onSelect(currentPath)
     }
-    onSelect(entry.is_dir ? entry.path : currentPath)
   }
 
-  // breadcrumb parts
   const crumbs = currentPath.split('/').filter(Boolean)
 
   return (
     <div className="border border-[#373a40] rounded-lg overflow-hidden">
       {/* Breadcrumb */}
       <div className="bg-[#1e1f23] px-3 py-2 flex items-center gap-1 text-xs overflow-x-auto border-b border-[#373a40]">
-        <button onClick={() => navigate('/')} className="text-[#339af0] hover:underline shrink-0">/</button>
+        <button onClick={() => navigateTo('/')} className="text-[#339af0] hover:underline shrink-0">/</button>
         {crumbs.map((part, i) => {
           const path = '/' + crumbs.slice(0, i + 1).join('/')
           return (
             <span key={path} className="flex items-center gap-1 shrink-0">
               <span className="text-[#5c5f66]">/</span>
-              <button onClick={() => navigate(path)} className="text-[#339af0] hover:underline">
+              <button onClick={() => navigateTo(path)} className="text-[#339af0] hover:underline">
                 {part}
               </button>
             </span>

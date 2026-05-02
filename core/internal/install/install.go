@@ -124,3 +124,92 @@ func fetch(url string) string {
 	body, _ := io.ReadAll(resp.Body)
 	return string(body)
 }
+
+// Wrappers creates the dwyt-codex, dwyt-opencode and dwyt-ui shell scripts in dwytBin.
+func Wrappers(dwytBin, dwytHome string) error {
+	os.MkdirAll(dwytBin, 0755)
+
+	codex := `#!/usr/bin/env bash
+set -euo pipefail
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+HEADROOM_PID_FILE="${HOME}/.dwyt/.codex-headroom.pid"
+is_headroom_healthy() { curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1; }
+start_headroom() {
+  is_headroom_healthy && return 0
+  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  echo $! > "${HEADROOM_PID_FILE}"
+  for _ in {1..20}; do is_headroom_healthy && return 0; sleep 1; done
+  echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2; exit 1
+}
+start_headroom
+exec codex -c "openai_base_url=\"${HEADROOM_URL}/v1\"" "$@"
+`
+	opencode := `#!/usr/bin/env bash
+set -euo pipefail
+HEADROOM_PORT="${HEADROOM_PORT:-8787}"
+HEADROOM_URL="http://127.0.0.1:${HEADROOM_PORT}"
+HEADROOM_PID_FILE="${HOME}/.dwyt/.opencode-headroom.pid"
+is_headroom_healthy() { curl -fsS "${HEADROOM_URL}/health" >/dev/null 2>&1; }
+start_headroom() {
+  is_headroom_healthy && return 0
+  nohup headroom proxy --port "${HEADROOM_PORT}" >/dev/null 2>&1 &
+  echo $! > "${HEADROOM_PID_FILE}"
+  for _ in {1..20}; do is_headroom_healthy && return 0; sleep 1; done
+  echo "Falha ao iniciar o Headroom em ${HEADROOM_URL}" >&2; exit 1
+}
+start_headroom
+export ANTHROPIC_BASE_URL="${HEADROOM_URL}"
+export OPENAI_BASE_URL="${HEADROOM_URL}/v1"
+exec opencode "$@"
+`
+	dwytUI := fmt.Sprintf(`#!/usr/bin/env bash
+DWYT_HOME="%s"
+DWYT_BIN="%s"
+UI_PORT=9749
+UI_PID_FILE="${DWYT_HOME}/.ui.pid"
+stop_ui() {
+  if [[ -f "$UI_PID_FILE" ]]; then
+    kill "$(cat $UI_PID_FILE)" 2>/dev/null && echo "UI parada." || echo "Processo já encerrado."
+    rm -f "$UI_PID_FILE"
+  else echo "UI não está rodando."; fi
+}
+start_ui() {
+  stop_ui 2>/dev/null
+  for BIN in "${DWYT_BIN}/codebase-memory-mcp-ui" "${DWYT_BIN}/codebase-memory-mcp"; do
+    if [[ -x "$BIN" ]]; then
+      echo "Iniciando UI na porta $UI_PORT..."
+      if "$BIN" --help 2>&1 | grep -q "\-\-ui="; then
+        "$BIN" --ui=true --port="$UI_PORT" &>/dev/null &
+      elif "$BIN" --help 2>&1 | grep -q "serve"; then
+        "$BIN" serve --port "$UI_PORT" &>/dev/null &
+      else "$BIN" --port "$UI_PORT" &>/dev/null &; fi
+      echo $! > "$UI_PID_FILE"
+      sleep 2
+      if kill -0 "$(cat $UI_PID_FILE)" 2>/dev/null; then
+        echo "✓ UI rodando: http://localhost/${UI_PORT}  (PID $(cat $UI_PID_FILE))"
+      else rm -f "$UI_PID_FILE"; echo "✗ UI não iniciou com $BIN"; continue; fi
+      return 0
+    fi
+  done
+  echo "Erro: nenhum binário encontrado. Verifique: ls ${DWYT_BIN}"; exit 1
+}
+case "${1:-start}" in stop) stop_ui ;; *) start_ui ;; esac
+`, dwytHome, dwytBin)
+
+	scripts := map[string]string{
+		"dwyt-codex":    codex,
+		"dwyt-opencode": opencode,
+		"dwyt-ui":       dwytUI,
+	}
+	for name, content := range scripts {
+		p := filepath.Join(dwytBin, name)
+		if _, err := os.Stat(p); err == nil {
+			continue // already exists
+		}
+		if err := os.WriteFile(p, []byte(content), 0755); err != nil {
+			return fmt.Errorf("wrapper %s: %w", name, err)
+		}
+	}
+	return nil
+}

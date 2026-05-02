@@ -100,7 +100,7 @@ export default function Dashboard() {
           <div className="text-2xl font-bold">{cbmcp?.healthy ? '🟢 OK' : '🔴 Offline'}</div>
           <div className="text-xs text-[#5c5f66] uppercase">Status</div>
           <div className="flex gap-2 mt-auto">
-            <input value={indexPath} onChange={(e) => setIndexPath(e.target.value)} placeholder="path/to/repo" className="flex-1" />
+            <input value={indexPath} type="text" onChange={(e) => setIndexPath(e.target.value)} placeholder="path/to/repo" className="flex-1" />
             <button className="primary" onClick={handleIndex} disabled={indexing}>{indexing ? '...' : 'Indexar'}</button>
           </div>
           <button onClick={() => window.open('http://localhost:9749')} className="text-xs">Abrir Grafo →</button>
@@ -145,7 +145,7 @@ export default function Dashboard() {
           <div className="text-2xl font-bold">{ms?.healthy ? '🟢 Disponível' : '🔴 Indisponível'}</div>
           <div className="text-xs text-[#5c5f66] uppercase">Status</div>
           <div className="flex gap-2 mt-auto">
-            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar..." className="flex-1" />
+            <input value={searchQuery} type="text" onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar..." className="flex-1" />
             <button onClick={handleSearch}>Buscar</button>
           </div>
           {searchResult && <pre className="text-xs text-[#5c5f66] max-h-20 overflow-auto">{searchResult}</pre>}

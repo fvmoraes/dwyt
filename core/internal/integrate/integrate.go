@@ -33,11 +33,12 @@ func Project(projectPath, clients string) {
 	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSON)
 	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSON)
 
-	// Generate CLAUDE.md
+	// Generate CLAUDE.md at project root (Claude Code standard)
 	if strings.Contains(clients, "claude") {
-		cp := filepath.Join(projectPath, ".claude", "CLAUDE.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
+		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
+		// Also create .claude/ dir structure
+		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 	}
 
 	// Generate .cursor/rules/dwyt.mdc

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -39,19 +40,23 @@ type FsNode struct {
 }
 
 type DashboardServer struct {
-	Port       int
-	DwytBin    string
-	DwytHome   string
-	sseClients map[chan string]bool
-	sseMu      sync.Mutex
+	Port          int
+	DwytBin       string
+	DwytHome      string
+	sseClients    map[chan string]bool
+	sseMu         sync.Mutex
+	installMu     sync.Mutex
+	installStatus map[string]string // tool -> "pending"|"installing"|"ok"|"error: ..."
+	installing    bool
 }
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	return &DashboardServer{
-		Port:       port,
-		DwytBin:    dwytBin,
-		DwytHome:   dwytHome,
-		sseClients: make(map[chan string]bool),
+		Port:          port,
+		DwytBin:       dwytBin,
+		DwytHome:      dwytHome,
+		sseClients:    make(map[chan string]bool),
+		installStatus: make(map[string]string),
 	}
 }
 
@@ -109,6 +114,7 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/services/status", ds.apiServicesStatus)
 		api.GET("/logs", ds.apiLogs)
 		api.POST("/setup/install", ds.apiSetupInstall)
+		api.GET("/install/status", ds.apiInstallStatus)
 	}
 
 	go ds.broadcastLoop()
@@ -123,8 +129,13 @@ func (ds *DashboardServer) Start() error {
 }
 
 func openBrowser(url string) {
-	for _, cmd := range []string{"xdg-open", "open", "start"} {
-		exec.Command(cmd, "http://"+url).Start()
+	switch runtime.GOOS {
+	case "linux":
+		exec.Command("xdg-open", "http://"+url).Start()
+	case "darwin":
+		exec.Command("open", "http://"+url).Start()
+	case "windows":
+		exec.Command("cmd", "/c", "start", "http://"+url).Start()
 	}
 }
 
@@ -364,26 +375,39 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	service := c.Query("service")
 	logs := make(map[string]string)
 
-	pollLog := func(name, pattern string) string {
-		out, err := exec.Command("sh", "-c", fmt.Sprintf("pgrep -f '%s' | head -1", pattern)).Output()
-		if err != nil || len(out) == 0 {
+	// Check if a binary from dwytBin is running (avoids false positives from project paths)
+	pollLog := func(name, bin, pattern string) string {
+		binPath := filepath.Join(ds.DwytBin, bin)
+		if _, err := os.Stat(binPath); err != nil {
+			return fmt.Sprintf("%s: não instalado", name)
+		}
+		out, err := exec.Command("pgrep", "-f", pattern).Output()
+		if err != nil || len(strings.TrimSpace(string(out))) == 0 {
 			return fmt.Sprintf("%s: offline", name)
 		}
-		pid := strings.TrimSpace(string(out))
-		return fmt.Sprintf("%s: running (PID %s)", name, pid)
+		pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
+		return fmt.Sprintf("%s: rodando (PID %s)", name, pid)
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp")
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", ds.DwytBin+"/codebase-memory-mcp")
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom proxy")
+		logs["headroom"] = pollLog("headroom", "headroom", "headroom proxy --port 8787")
 	}
 	if service == "" || service == "rtk" {
-		logs["rtk"] = "RTK: CLI tool, no daemon"
+		if _, err := os.Stat(filepath.Join(ds.DwytBin, "rtk")); err == nil {
+			logs["rtk"] = "rtk: disponível (ferramenta CLI)"
+		} else {
+			logs["rtk"] = "rtk: não instalado"
+		}
 	}
 	if service == "" || service == "memstack" {
-		logs["memstack"] = "MemStack: CLI tool, no daemon"
+		if _, err := os.Stat(filepath.Join(ds.DwytBin, "memstack")); err == nil {
+			logs["memstack"] = "memstack: disponível (ferramenta CLI)"
+		} else {
+			logs["memstack"] = "memstack: não instalado"
+		}
 	}
 
 	c.JSON(200, gin.H{"logs": logs})
@@ -396,51 +420,91 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 		return
 	}
 
-	results := make(map[string]string)
-
-	// Install tools
+	ds.installMu.Lock()
+	if ds.installing {
+		ds.installMu.Unlock()
+		c.JSON(200, gin.H{"status": "already_running"})
+		return
+	}
+	ds.installing = true
+	ds.installStatus = make(map[string]string)
 	for _, t := range config.Tools {
-		switch t {
-		case "cbmcp":
-			err := install.CBMCP(ds.DwytBin)
-			results[t] = statusText(err)
-		case "rtk":
-			err := install.RTK(ds.DwytBin)
-			results[t] = statusText(err)
-		case "headroom":
-			err := install.Headroom(ds.DwytBin, ds.DwytHome)
-			results[t] = statusText(err)
-		case "memstack":
-			err := install.MemStack(ds.DwytBin, ds.DwytHome)
-			results[t] = statusText(err)
-		default:
-			results[t] = "unknown"
-		}
+		ds.installStatus[t] = "pending"
 	}
+	ds.installMu.Unlock()
 
-	// Integrate project
-	if config.ProjectPath != "" {
-		clients := strings.Join(config.Ias, ",")
-		if clients == "" {
-			clients = strings.Join(config.Clients, ",")
-		}
-		integrate.Project(config.ProjectPath, clients)
-		results["integrate"] = "ok"
+	// Respond immediately — installation runs in background
+	c.JSON(200, gin.H{"status": "installing", "message": "Instalação iniciada. Acompanhe em /api/install/status."})
 
-		// Trigger index
-		go func() {
-			exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
-				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath)).Run()
+	go func() {
+		defer func() {
+			ds.installMu.Lock()
+			ds.installing = false
+			ds.installMu.Unlock()
 		}()
-	}
 
-	results["status"] = "completed"
-	c.JSON(200, gin.H{"results": results})
+		setStatus := func(tool, s string) {
+			ds.installMu.Lock()
+			ds.installStatus[tool] = s
+			ds.installMu.Unlock()
+		}
+
+		for _, t := range config.Tools {
+			setStatus(t, "installing")
+			var err error
+			switch t {
+			case "cbmcp":
+				err = install.CBMCP(ds.DwytBin)
+			case "rtk":
+				err = install.RTK(ds.DwytBin)
+			case "headroom":
+				err = install.Headroom(ds.DwytBin, ds.DwytHome)
+			case "memstack":
+				err = install.MemStack(ds.DwytBin, ds.DwytHome)
+			}
+			if err != nil {
+				setStatus(t, "error: "+err.Error())
+			} else {
+				setStatus(t, "ok")
+			}
+		}
+
+		// Integrate project
+		if config.ProjectPath != "" {
+			setStatus("integrate", "installing")
+			clients := strings.Join(config.Ias, ",")
+			if clients == "" {
+				clients = strings.Join(config.Clients, ",")
+			}
+			integrate.Project(config.ProjectPath, clients)
+			setStatus("integrate", "ok")
+
+			// Trigger index after install
+			setStatus("index", "installing")
+			err := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
+				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath)).Run()
+			if err != nil {
+				setStatus("index", "error: "+err.Error())
+			} else {
+				setStatus("index", "ok")
+			}
+		}
+
+		// Save config as completed
+		config.Configured = true
+		config.LastSetup = time.Now().Format(time.RFC3339)
+		data, _ := json.MarshalIndent(config, "", "  ")
+		os.WriteFile(ds.configPath(), data, 0644)
+	}()
 }
 
-func statusText(err error) string {
-	if err != nil {
-		return "error: " + err.Error()
-	}
-	return "installed"
+func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
+	ds.installMu.Lock()
+	defer ds.installMu.Unlock()
+	c.JSON(200, gin.H{
+		"installing": ds.installing,
+		"tools":      ds.installStatus,
+	})
 }
+
+

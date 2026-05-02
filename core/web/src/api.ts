@@ -66,3 +66,17 @@ export async function searchMemstack(query: string) {
   })
   return r.json()
 }
+
+export async function getInstallStatus() {
+  const r = await fetch(`${API}/install/status`)
+  return r.json()
+}
+
+export async function installSetup(config: object) {
+  const r = await fetch(`${API}/setup/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  return r.json()
+}
