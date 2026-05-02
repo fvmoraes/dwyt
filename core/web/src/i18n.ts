@@ -31,7 +31,6 @@ export const T = {
     projectPlaceholder: 'Project path...', selectDir: 'Select this directory',
     goUp: '← Up',
     toolsInstalling: 'Installing tools in background. Please wait.',
-    // Tool descriptions
     cbmcpDesc: 'Code graph — structural exploration',
     memstackDesc: 'Persistent memory between sessions',
     headroomDesc: 'API call compression',

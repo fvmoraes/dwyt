@@ -89,23 +89,87 @@ export default function SetupWizard() {
     return '⏳'
   }
 
+  // ── Progress calculation ───────────────────────────────────────────────────
+  function calcProgress(progress: Record<string, string>): number {
+    const entries = Object.values(progress)
+    if (entries.length === 0) return 0
+    const done = entries.filter(s => s === 'ok' || s.startsWith('error')).length
+    return Math.round((done / entries.length) * 100)
+  }
+
   // ── Installing screen ──────────────────────────────────────────────────────
   if (installing) {
+    const pct = calcProgress(installProgress)
+    const total = Object.keys(installProgress).length
+    const done  = Object.values(installProgress).filter(s => s === 'ok' || s.startsWith('error')).length
+
     return (
       <div style={{ minHeight: '100vh', padding: '24px 20px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Logo size={22} showText />
         <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--cyan)' }}>{t.installing}</div>
         <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.toolsInstalling}</div>
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+        {/* ── Progress bar ── */}
+        {total > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* thin label */}
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                {done} / {total} {t.of} {total}
+              </span>
+              {/* percentage */}
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: 'monospace',
+                color: pct === 100 ? 'var(--green)' : 'var(--cyan)',
+              }}>
+                {pct}%
+              </span>
+            </div>
+            {/* bar track */}
+            <div style={{
+              height: 3,
+              borderRadius: 2,
+              background: 'var(--border)',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%',
+                borderRadius: 2,
+                width: `${pct}%`,
+                background: pct === 100 ? 'var(--green)' : 'var(--cyan)',
+                transition: 'width 0.4s ease, background 0.3s',
+                boxShadow: pct > 0 ? `0 0 6px ${pct === 100 ? 'var(--green)' : 'var(--cyan)'}` : 'none',
+              }} />
+            </div>
+          </div>
+        )}
+
+        {/* ── Tool list ── */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           {Object.keys(installProgress).length === 0 ? (
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.starting}</div>
-          ) : Object.entries(installProgress).map(([tool, s]) => (
-            <div key={tool} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
-              <span>{installIcon(s)}</span>
-              <span style={{ flex: 1 }}>{tool}</span>
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>{s}</span>
-            </div>
-          ))}
+          ) : Object.entries(installProgress).map(([tool, s]) => {
+            const isActive = s === 'installing'
+            const isOk     = s === 'ok'
+            const isErr    = s.startsWith('error')
+            return (
+              <div key={tool} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, width: 16, textAlign: 'center' }}>{installIcon(s)}</span>
+                <span style={{
+                  flex: 1,
+                  fontSize: 11,
+                  color: isActive ? 'var(--cyan)' : isOk ? 'var(--text)' : isErr ? 'var(--red)' : 'var(--muted)',
+                  fontWeight: isActive ? 600 : 400,
+                }}>{tool}</span>
+                <span style={{
+                  fontSize: 10,
+                  color: isOk ? 'var(--green)' : isErr ? 'var(--red)' : isActive ? 'var(--cyan)' : 'var(--muted)',
+                }}>{s}</span>
+              </div>
+            )
+          })}
         </div>
       </div>
     )
