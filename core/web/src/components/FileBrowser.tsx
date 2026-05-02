@@ -6,16 +6,18 @@ interface FsEntry { name: string; path: string; is_dir: boolean }
 interface Props {
   onSelect: (path: string) => void
   selected: string
+  initialPath?: string   // if provided, start browsing here instead of HOME
 }
 
-export default function FileBrowser({ onSelect, selected }: Props) {
+export default function FileBrowser({ onSelect, selected, initialPath }: Props) {
   const [entries, setEntries] = useState<FsEntry[]>([])
   const [currentPath, setCurrentPath] = useState('')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    // Start at home dir — empty path = HOME on the server
-    loadDir('')
+    // Use initialPath if given (and it looks like an absolute path), else fall back to HOME
+    const start = initialPath && initialPath.startsWith('/') ? initialPath : ''
+    loadDir(start)
   }, [])
 
   async function loadDir(path: string) {

@@ -29,7 +29,8 @@ body {
 }
 
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-dot.online  { background: var(--green);  box-shadow: 0 0 8px var(--green); }
+.status-dot.warn    { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
 .status-dot.offline { background: var(--muted); }
 
 .progress-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }

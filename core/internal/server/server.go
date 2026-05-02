@@ -115,6 +115,8 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/logs", ds.apiLogs)
 		api.POST("/setup/install", ds.apiSetupInstall)
 		api.GET("/install/status", ds.apiInstallStatus)
+		api.GET("/cwd", ds.apiCwd)
+		api.GET("/tool-details", ds.apiToolDetails)
 	}
 
 	go ds.broadcastLoop()
@@ -508,3 +510,176 @@ func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
 }
 
 
+
+func (ds *DashboardServer) apiCwd(c *gin.Context) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = os.Getenv("HOME")
+	}
+	c.JSON(200, gin.H{"cwd": cwd})
+}
+
+// ToolDetail holds per-tool enriched info shown in the dashboard cards.
+type ToolDetail struct {
+	TokensSaved  int64    `json:"tokens_saved"`   // 0 = unknown/N/A
+	UptimeSecs   int64    `json:"uptime_secs"`    // -1 = not running
+	UptimeLabel  string   `json:"uptime_label"`
+	Repos        []string `json:"repos"`
+}
+
+func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
+	out := map[string]*ToolDetail{
+		"codebase-memory-mcp": ds.detailCBMCP(),
+		"rtk":                 ds.detailRTK(),
+		"headroom":            ds.detailHeadroom(),
+		"memstack":            ds.detailMemStack(),
+	}
+	c.JSON(200, out)
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+func uptimeFromPID(pattern string) (int64, string) {
+	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return -1, ""
+	}
+	pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	// get process start time via /proc/<pid>/stat field 22 (starttime in jiffies)
+	statBytes, err := os.ReadFile("/proc/" + pid + "/stat")
+	if err != nil {
+		return 0, "rodando"
+	}
+	fields := strings.Fields(string(statBytes))
+	if len(fields) < 22 {
+		return 0, "rodando"
+	}
+	var startJiffies int64
+	fmt.Sscanf(fields[21], "%d", &startJiffies)
+
+	// system uptime
+	uptimeBytes, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0, "rodando"
+	}
+	var sysUptime float64
+	fmt.Sscanf(string(uptimeBytes), "%f", &sysUptime)
+
+	// clock ticks per second (usually 100)
+	clkTck := int64(100)
+	processUptimeSecs := int64(sysUptime) - startJiffies/clkTck
+	if processUptimeSecs < 0 {
+		processUptimeSecs = 0
+	}
+	return processUptimeSecs, fmtUptime(processUptimeSecs)
+}
+
+func fmtUptime(secs int64) string {
+	if secs < 0 {
+		return ""
+	}
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+	}
+	h := secs / 3600
+	m := (secs % 3600) / 60
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+func installedSince(binPath string) (int64, string) {
+	info, err := os.Stat(binPath)
+	if err != nil {
+		return -1, ""
+	}
+	secs := int64(time.Since(info.ModTime()).Seconds())
+	return secs, "instalado " + fmtUptime(secs) + " atrás"
+}
+
+func (ds *DashboardServer) loadedRepos() []string {
+	data, err := os.ReadFile(ds.configPath())
+	if err != nil {
+		return nil
+	}
+	var cfg Config
+	if json.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	if cfg.ProjectPath != "" {
+		return []string{cfg.ProjectPath}
+	}
+	return nil
+}
+
+// ── per-tool detail ───────────────────────────────────────────────────────────
+
+func (ds *DashboardServer) detailCBMCP() *ToolDetail {
+	d := &ToolDetail{Repos: ds.loadedRepos()}
+	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(bin); err != nil {
+		d.UptimeSecs = -1
+		return d
+	}
+	secs, label := uptimeFromPID(bin)
+	d.UptimeSecs = secs
+	d.UptimeLabel = label
+	// codebase-memory-mcp doesn't expose a token-savings metric directly
+	d.TokensSaved = 0
+	return d
+}
+
+func (ds *DashboardServer) detailRTK() *ToolDetail {
+	d := &ToolDetail{}
+	bin := filepath.Join(ds.DwytBin, "rtk")
+	if _, err := os.Stat(bin); err != nil {
+		d.UptimeSecs = -1
+		return d
+	}
+	// RTK is a CLI tool — uptime = time since binary was installed
+	secs, label := installedSince(bin)
+	d.UptimeSecs = secs
+	d.UptimeLabel = label
+
+	m := status.GetRTKMetrics(ds.DwytBin)
+	if m != nil {
+		d.TokensSaved = m.TokensSaved
+	}
+	// RTK is global — no per-repo association
+	d.Repos = nil
+	return d
+}
+
+func (ds *DashboardServer) detailHeadroom() *ToolDetail {
+	d := &ToolDetail{}
+	bin := filepath.Join(ds.DwytBin, "headroom")
+	if _, err := os.Stat(bin); err != nil {
+		d.UptimeSecs = -1
+		return d
+	}
+	secs, label := uptimeFromPID("headroom proxy --port 8787")
+	d.UptimeSecs = secs
+	d.UptimeLabel = label
+
+	m := status.GetHeadroomMetrics()
+	if m != nil {
+		d.TokensSaved = m.TokensSaved
+	}
+	d.Repos = nil
+	return d
+}
+
+func (ds *DashboardServer) detailMemStack() *ToolDetail {
+	d := &ToolDetail{Repos: ds.loadedRepos()}
+	bin := filepath.Join(ds.DwytBin, "memstack")
+	if _, err := os.Stat(bin); err != nil {
+		d.UptimeSecs = -1
+		return d
+	}
+	secs, label := installedSince(bin)
+	d.UptimeSecs = secs
+	d.UptimeLabel = label
+	d.TokensSaved = 0
+	return d
+}

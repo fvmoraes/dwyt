@@ -67,6 +67,11 @@ export async function searchMemstack(query: string) {
   return r.json()
 }
 
+export async function getCwd() {
+  const r = await fetch(`${API}/cwd`)
+  return r.json()
+}
+
 export async function getInstallStatus() {
   const r = await fetch(`${API}/install/status`)
   return r.json()
@@ -78,5 +83,10 @@ export async function installSetup(config: object) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   })
+  return r.json()
+}
+
+export async function getToolDetails() {
+  const r = await fetch(`${API}/tool-details`)
   return r.json()
 }
