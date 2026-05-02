@@ -2,12 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../api'
 
-interface ToolInfo {
-  name: string
-  running: boolean
-  healthy: boolean
-  details: string
-}
+interface ToolInfo { name: string; running: boolean; healthy: boolean; details: string }
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -31,13 +26,11 @@ export default function Dashboard() {
   }, [])
 
   async function poll() {
-    try { const data = await api.getStatus(); setTools(data.tools || []) } catch (e) {}
+    try { const d = await api.getStatus(); setTools(d.tools || []) } catch (e) {}
   }
-
   async function loadMetrics() {
-    try { const data = await api.getMetrics(); setRtk(data.rtk) } catch (e) {}
+    try { const d = await api.getMetrics(); setRtk(d.rtk) } catch (e) {}
   }
-
   async function loadLogs() {
     try {
       const r = await fetch('http://127.0.0.1:2737/api/logs')
@@ -47,16 +40,15 @@ export default function Dashboard() {
   }
 
   function getTool(name: string) { return tools.find((t) => t.name === name) }
-
   const cbmcp = getTool('codebase-memory-mcp')
   const rtkTool = getTool('rtk')
   const hr = getTool('headroom')
   const ms = getTool('memstack')
 
-  function formatTokens(n: number) {
+  function fmt(n: number) {
     if (!n) return '--'
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-    if (n >= 1_000) return (n / 1000).toFixed(0) + 'K'
+    if (n >= 1_000_000) return (n/1_000_000).toFixed(1)+'M'
+    if (n >= 1_000) return (n/1000).toFixed(0)+'K'
     return String(n)
   }
 
@@ -77,26 +69,21 @@ export default function Dashboard() {
     <div className="min-h-screen p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl text-[#3bc9db] font-bold">DWYT Dashboard</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="tag ok">online</span>
-          <button onClick={() => setShowLogs(!showLogs)} className="text-xs">
-            {showLogs ? 'Esconder Logs' : 'Logs'}
-          </button>
+          <button onClick={() => setShowLogs(!showLogs)} className="text-xs">{showLogs ? 'Esconder Logs' : 'Logs'}</button>
           <button onClick={() => navigate('/')} className="text-xs">← Setup</button>
         </div>
       </div>
 
-      {/* Logs panel */}
       {showLogs && (
         <div className="card mb-4 p-3">
-          <h3 className="text-xs font-semibold text-[#5c5f66] uppercase mb-2">Logs dos Serviços</h3>
+          <h3 className="text-xs font-semibold text-[#5c5f66] uppercase mb-2">Logs</h3>
           <div className="grid grid-cols-2 gap-2">
             {Object.entries(logs).map(([name, msg]) => (
               <div key={name} className="text-xs">
                 <span className="text-[#5c5f66]">{name}:</span>{' '}
-                <span className={msg.includes('offline') || msg.includes('no daemon') ? 'text-[#f03e3e]' : 'text-[#2f9e44]'}>
-                  {msg}
-                </span>
+                <span className={msg.includes('offline')||msg.includes('no daemon')?'text-[#f03e3e]':'text-[#2f9e44]'}>{msg}</span>
               </div>
             ))}
           </div>
@@ -111,9 +98,9 @@ export default function Dashboard() {
             <span className={`status-dot ${cbmcp?.healthy ? 'online' : 'offline'}`} />
           </div>
           <div className="text-2xl font-bold">{cbmcp?.healthy ? '🟢 OK' : '🔴 Offline'}</div>
-          <div className="text-xs text-[#5c5f66] uppercase">Status do serviço</div>
+          <div className="text-xs text-[#5c5f66] uppercase">Status</div>
           <div className="flex gap-2 mt-auto">
-            <input value={indexPath} onChange={(e) => setIndexPath(e.target.value)} placeholder="/path/to/repo..." className="flex-1" />
+            <input value={indexPath} onChange={(e) => setIndexPath(e.target.value)} placeholder="path/to/repo" className="flex-1" />
             <button className="primary" onClick={handleIndex} disabled={indexing}>{indexing ? '...' : 'Indexar'}</button>
           </div>
           <button onClick={() => window.open('http://localhost:9749')} className="text-xs">Abrir Grafo →</button>
@@ -125,11 +112,11 @@ export default function Dashboard() {
             <span className="text-sm font-semibold text-[#2f9e44] uppercase">RTK</span>
             <span className={`status-dot ${rtkTool?.healthy ? 'online' : 'offline'}`} />
           </div>
-          <div className="text-2xl font-bold">{formatTokens(rtk?.tokens_saved)}</div>
+          <div className="text-2xl font-bold">{fmt(rtk?.tokens_saved)}</div>
           <div className="text-xs text-[#5c5f66] uppercase">Tokens economizados</div>
-          <div className="progress-bar"><div className="progress-fill" style={{ width: `${rtk?.pct_saved || 0}%` }} /></div>
+          <div className="progress-bar"><div className="progress-fill" style={{ width: `${rtk?.pct_saved||0}%` }} /></div>
           <div className="flex justify-between mt-auto">
-            <span className="text-xs text-[#5c5f66]">{rtk?.pct_saved || 0}% economia</span>
+            <span className="text-xs text-[#5c5f66]">{rtk?.pct_saved||0}% economia</span>
             <button onClick={loadMetrics}>Atualizar</button>
           </div>
         </div>
@@ -141,7 +128,7 @@ export default function Dashboard() {
             <span className={`status-dot ${hr?.healthy ? 'online' : 'offline'}`} />
           </div>
           <div className="text-2xl font-bold">{hr?.healthy ? '🟢 ONLINE' : '🔴 OFFLINE'}</div>
-          <div className="text-xs text-[#5c5f66] uppercase">Proxy status</div>
+          <div className="text-xs text-[#5c5f66] uppercase">Proxy</div>
           <div className="flex gap-2 mt-auto">
             <button className="primary" onClick={() => api.startAll()}>Iniciar</button>
             <button className="danger" onClick={() => api.stopAll()}>Parar</button>
