@@ -2,9 +2,13 @@ package root
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/env"
@@ -73,35 +77,50 @@ func getHome() string {
 func runDefault(projectPath string) error {
 	e := detect.Detect()
 
-	// If no path argument, use cwd
 	cwd := getCWD()
 	if projectPath == "" {
 		projectPath = cwd
 	}
 
-	// Ensure env.sh + shell RC + symlinks on PATH
-	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
+	// ── Check if daemon is already running ────────────────────────────────────
+	// If yes, just switch the project context — no need to restart everything
+	if daemonRunning() {
+		if err := switchProject(projectPath); err == nil {
+			fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
+			fmt.Printf("  ║  DWYT — Don't Waste Your Tokens     ║\n")
+			fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
+			fmt.Printf("  Project: %s\n\n", projectPath)
+			fmt.Printf("  ✓ Dashboard → http://localhost:2737  (already running)\n")
+			fmt.Printf("  ✓ Project context updated\n\n")
+			openBrowserURL("http://localhost:2737")
+			return nil
+		}
+		// If switch failed, fall through to normal startup
+	}
 
-	// No-op now — wrappers removed, all control via UI
+	// ── Normal startup ────────────────────────────────────────────────────────
+	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
 	install.Wrappers(e.DwytBin, e.DwytHome)
 
 	fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
 	fmt.Printf("  ║  DWYT — Don't Waste Your Tokens     ║\n")
 	fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
-	fmt.Printf("  Projeto: %s\n\n", projectPath)
+	fmt.Printf("  Project: %s\n\n", projectPath)
 
-	// Start services (controlled by UI — just launch if already installed)
 	startService("codebase-memory-mcp", filepath.Join(e.DwytBin, "codebase-memory-mcp"), "--ui=true", "--port=9749")
 	startService("headroom", filepath.Join(e.DwytBin, "headroom"), "proxy", "--port", "8787")
 
 	for _, bin := range []string{"rtk", "memstack"} {
 		if _, err := os.Stat(filepath.Join(e.DwytBin, bin)); err == nil {
-			fmt.Printf("  →  %-25s disponível\n", bin)
+			fmt.Printf("  →  %-25s available\n", bin)
 		}
 	}
 
-	// Fork daemon — pass both cwd and explicit project path
 	exe, _ := os.Executable()
+	// Resolve real path to avoid symlink loops on macOS
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
 	daemon := exec.Command(exe, "daemon")
 	daemon.Stdout = nil
 	daemon.Stderr = nil
@@ -114,8 +133,49 @@ func runDefault(projectPath string) error {
 	daemon.Start()
 
 	fmt.Printf("\n  ✓ Dashboard → http://localhost:2737\n")
-	fmt.Printf("  Parar: dwyt stop\n\n")
+	fmt.Printf("  Stop: dwyt stop\n\n")
 	return nil
+}
+
+// daemonRunning checks if the DWYT dashboard is already up on port 2737.
+func daemonRunning() bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:2737/api/status")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+// switchProject tells the running daemon to switch to a new project.
+func switchProject(projectPath string) error {
+	body := fmt.Sprintf(`{"path":%q}`, projectPath)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Post(
+		"http://127.0.0.1:2737/api/project/switch",
+		"application/json",
+		strings.NewReader(body),
+	)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("switch failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func openBrowserURL(url string) {
+	switch runtime.GOOS {
+	case "linux":
+		exec.Command("xdg-open", url).Start()
+	case "darwin":
+		exec.Command("open", url).Start()
+	case "windows":
+		exec.Command("cmd", "/c", "start", url).Start()
+	}
 }
 
 func getCWD() string {

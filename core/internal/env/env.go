@@ -153,11 +153,16 @@ func installBinaryOnPath(dwytBin string) {
 		return
 	}
 
+	// Resolve the real path — critical on macOS where os.Executable()
+	// may return the symlink itself, causing "too many levels of symbolic links"
+	realExe, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		realExe = exe // fallback to original if resolution fails
+	}
+
 	if runtime.GOOS == "windows" {
-		// On Windows: copy the exe into dwytBin as dwyt.exe
-		// dwytBin is already in PATH (added via registry above)
 		dst := filepath.Join(dwytBin, "dwyt.exe")
-		copyFile(exe, dst)
+		copyFile(realExe, dst)
 		return
 	}
 
@@ -170,8 +175,13 @@ func installBinaryOnPath(dwytBin string) {
 		filepath.Join(localBin, "dwyt"),
 		filepath.Join(dwytBin, "dwyt"),
 	} {
+		// Only create/update if the target would be different
+		existing, err := os.Readlink(link)
+		if err == nil && existing == realExe {
+			continue // already correct
+		}
 		os.Remove(link)
-		os.Symlink(exe, link)
+		os.Symlink(realExe, link)
 	}
 }
 

@@ -44,7 +44,9 @@ type DashboardServer struct {
 	Port          int
 	DwytBin       string
 	DwytHome      string
-	StartCwd      string            // cwd captured at daemon start
+	StartCwd      string
+	ActiveProject string            // current project — can be updated via /api/project/switch
+	projectMu     sync.RWMutex
 	sseClients    map[chan string]bool
 	sseMu         sync.Mutex
 	installMu     sync.Mutex
@@ -54,8 +56,6 @@ type DashboardServer struct {
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	cwd, _ := os.Getwd()
-	// DWYT_PROJECT = explicit path from `dwyt .` or `dwyt /path`
-	// DWYT_START_CWD = cwd where user ran the command
 	project := os.Getenv("DWYT_PROJECT")
 	if project == "" {
 		project = os.Getenv("DWYT_START_CWD")
@@ -68,6 +68,7 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		DwytBin:       dwytBin,
 		DwytHome:      dwytHome,
 		StartCwd:      project,
+		ActiveProject: project,
 		sseClients:    make(map[chan string]bool),
 		installStatus: make(map[string]string),
 	}
@@ -133,6 +134,7 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/context", ds.apiContext)
 		api.POST("/codebase/open-ui", ds.apiCodebaseOpenUI)
 		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
+		api.POST("/project/switch", ds.apiProjectSwitch)
 	}
 
 	go ds.broadcastLoop()
@@ -528,14 +530,49 @@ func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
 
 
 func (ds *DashboardServer) apiCwd(c *gin.Context) {
-	cwd := ds.StartCwd
-	if cwd == "" {
-		cwd = os.Getenv("DWYT_START_CWD")
+	ds.projectMu.RLock()
+	project := ds.ActiveProject
+	ds.projectMu.RUnlock()
+	if project == "" {
+		project, _ = os.UserHomeDir()
 	}
-	if cwd == "" {
-		cwd, _ = os.UserHomeDir()
+	c.JSON(200, gin.H{"cwd": project})
+}
+
+// apiProjectSwitch updates the active project without restarting the daemon.
+// Called by `dwyt .` when the daemon is already running.
+func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
+	var body struct {
+		Path string `json:"path"`
 	}
-	c.JSON(200, gin.H{"cwd": cwd})
+	if err := c.BindJSON(&body); err != nil || body.Path == "" {
+		c.JSON(400, gin.H{"error": "path is required"})
+		return
+	}
+
+	ds.projectMu.Lock()
+	ds.ActiveProject = body.Path
+	ds.StartCwd      = body.Path
+	ds.projectMu.Unlock()
+
+	// Update config.json project_path so the UI reflects the new project
+	data, _ := os.ReadFile(ds.configPath())
+	var cfg Config
+	json.Unmarshal(data, &cfg)
+	cfg.ProjectPath = body.Path
+	updated, _ := json.MarshalIndent(cfg, "", "  ")
+	os.WriteFile(ds.configPath(), updated, 0644)
+
+	// Trigger re-index in background
+	go func() {
+		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+		if _, err := os.Stat(bin); err == nil {
+			exec.Command(bin, "cli", "index_repository",
+				fmt.Sprintf(`{"repo_path":"%s"}`, body.Path)).Run()
+		}
+	}()
+
+	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
 }
 
 type ToolDetail struct {
@@ -755,13 +792,10 @@ func (ds *DashboardServer) detailMemStack() *ToolDetail {
 // apiContext returns everything the UI needs on first load to decide
 // which screen to show and what to pre-fill.
 func (ds *DashboardServer) apiContext(c *gin.Context) {
-	cwd := ds.StartCwd
-	if cwd == "" {
-		cwd = os.Getenv("DWYT_PROJECT")
-	}
-	if cwd == "" {
-		cwd = os.Getenv("DWYT_START_CWD")
-	}
+	ds.projectMu.RLock()
+	cwd := ds.ActiveProject
+	ds.projectMu.RUnlock()
+
 	if cwd == "" {
 		cwd, _ = os.UserHomeDir()
 	}
