@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import FileBrowser from '../components/FileBrowser'
 import Toggle from '../components/Toggle'
+import Logo from '../components/Logo'
 import * as api from '../api'
 
 const TOOLS = [
@@ -193,7 +194,7 @@ export default function SetupWizard() {
   return (
     <div className="min-h-screen p-6 max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl text-[#3bc9db] font-bold">DWYT Setup</h1>
+        <Logo size={28} showText={true} />
         <div className="flex items-center gap-2">
           <button
             className="primary text-sm"

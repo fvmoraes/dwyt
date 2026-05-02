@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as api from '../api'
+import Logo from '../components/Logo'
 
 interface ToolInfo    { name: string; running: boolean; healthy: boolean; details: string }
 interface ToolDetail  { tokens_saved: number; uptime_secs: number; uptime_label: string; repos: string[] | null }
@@ -123,7 +124,7 @@ export default function Dashboard() {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-xl text-[#3bc9db] font-bold">DWYT Dashboard</h1>
+        <Logo size={28} showText={true} />
         <div className="flex items-center gap-2">
           <button onClick={() => setShowLogs(!showLogs)} className="text-xs">
             {showLogs ? 'Esconder Logs' : 'Logs'}
