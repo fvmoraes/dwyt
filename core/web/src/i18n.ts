@@ -14,13 +14,15 @@ export const T = {
     // Logs
     logsTitle: 'Logs',
     // Card labels
-    tokensSavedLabel: 'Tokens saved', uptime: 'Uptime', repos: 'Repos',
+    tokensSavedLabel: 'Tokens saved', uptime: 'Active', repos: 'Repos',
     scope: 'Scope', port: 'Port', requests: 'Requests', compression: 'Compression',
-    commands: 'Commands', savingsPct: '% savings', activeSince: 'Active since',
-    // Card status
-    notInstalled: 'Not installed', stopped: 'Stopped', ok: 'OK',
+    commands: 'Commands', savingsPct: '% savings', activeSince: 'Active',
+    // Card status — 3 states
+    notInstalled: 'Not Installed', inactive: 'Inactive', active: 'Active',
     // Card actions
-    start: '▶ Start', stop: '■ Stop', index: 'Index', indexing: '...', openGraph: 'Open Graph →',
+    start: '▶ Start', stop: '■ Stop',
+    index: 'Index', indexing: '...',
+    openGraph: 'Open Graph →', openStats: 'Open Stats →',
     search: 'Search', searchPlaceholder: 'Search memory...', repoPlaceholder: 'path/to/repo',
     global: 'global',
     // Setup
@@ -31,6 +33,7 @@ export const T = {
     projectPlaceholder: 'Project path...', selectDir: 'Select this directory',
     goUp: '← Up',
     toolsInstalling: 'Installing tools in background. Please wait.',
+    // Tool descriptions
     cbmcpDesc: 'Code graph — structural exploration',
     memstackDesc: 'Persistent memory between sessions',
     headroomDesc: 'API call compression',
@@ -41,7 +44,6 @@ export const T = {
     kiroDesc: '.kiro/steering/dwyt.md',
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
-    // variable
     variable: 'variable',
   },
   pt: {
@@ -51,11 +53,14 @@ export const T = {
     noDataTitle: 'Sem DWYT você gastaria muito mais tokens',
     noDataSub: 'Instale as ferramentas e comece a usar — os dados de economia aparecerão aqui.',
     logsTitle: 'Logs',
-    tokensSavedLabel: 'Tokens economizados', uptime: 'Uptime', repos: 'Repos',
+    tokensSavedLabel: 'Tokens economizados', uptime: 'Ativo', repos: 'Repos',
     scope: 'Escopo', port: 'Porta', requests: 'Requisições', compression: 'Compressão',
-    commands: 'Comandos', savingsPct: '% economia', activeSince: 'Ativo há',
-    notInstalled: 'Não instalado', stopped: 'Parado', ok: 'OK',
-    start: '▶ Iniciar', stop: '■ Parar', index: 'Indexar', indexing: '...', openGraph: 'Abrir Grafo →',
+    commands: 'Comandos', savingsPct: '% economia', activeSince: 'Ativo',
+    // 3 estados
+    notInstalled: 'Não instalado', inactive: 'Inativo', active: 'Ativo',
+    start: '▶ Iniciar', stop: '■ Parar',
+    index: 'Indexar', indexing: '...',
+    openGraph: 'Abrir Grafo →', openStats: 'Abrir Stats →',
     search: 'Buscar', searchPlaceholder: 'Buscar memória...', repoPlaceholder: 'path/to/repo',
     global: 'global',
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',

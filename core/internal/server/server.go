@@ -131,6 +131,8 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/cwd", ds.apiCwd)
 		api.GET("/tool-details", ds.apiToolDetails)
 		api.GET("/context", ds.apiContext)
+		api.POST("/codebase/open-ui", ds.apiCodebaseOpenUI)
+		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
 	}
 
 	go ds.broadcastLoop()
@@ -626,7 +628,8 @@ func installedSince(binPath string) (int64, string) {
 		return -1, ""
 	}
 	secs := int64(time.Since(info.ModTime()).Seconds())
-	return secs, "instalado " + fmtUptime(secs) + " atrás"
+	// Return only the duration in min/sec — no "installed X ago" text
+	return secs, fmtUptime(secs)
 }
 
 func (ds *DashboardServer) loadedRepos() []string {
@@ -806,4 +809,94 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"any_installed":    anyInstalled,
 		"config":           cfg,
 	})
+}
+
+// apiCodebaseOpenUI ensures the codebase-memory-mcp UI is running on port 9749,
+// starting it if needed, then returns the URL so the frontend can open it.
+func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
+	const uiPort = "9749"
+	const uiURL  = "http://localhost:" + uiPort
+
+	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(bin); err != nil {
+		c.JSON(404, gin.H{"error": "codebase-memory-mcp not installed", "url": ""})
+		return
+	}
+
+	// Check if already running by probing the port
+	probe := &http.Client{Timeout: 1 * time.Second}
+	if resp, err := probe.Get(uiURL); err == nil {
+		resp.Body.Close()
+		// Already up — just return the URL
+		c.JSON(200, gin.H{"url": uiURL, "started": false})
+		return
+	}
+
+	// Not running — start it
+	cmd := exec.Command(bin, "--ui=true", "--port="+uiPort)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error(), "url": ""})
+		return
+	}
+	go cmd.Wait()
+
+	// Wait up to 4s for it to be ready
+	for i := 0; i < 8; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if resp, err := probe.Get(uiURL); err == nil {
+			resp.Body.Close()
+			c.JSON(200, gin.H{"url": uiURL, "started": true})
+			return
+		}
+	}
+
+	// Timed out but process started — return URL anyway
+	c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "may still be starting"})
+}
+
+// apiHeadroomStatsURL checks if headroom proxy is running and returns the stats URL.
+// If not running, starts it first.
+func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
+	const proxyPort = "8787"
+	const healthURL = "http://127.0.0.1:" + proxyPort + "/health"
+	const statsURL  = "http://127.0.0.1:" + proxyPort + "/stats"
+
+	bin := filepath.Join(ds.DwytBin, "headroom")
+	if _, err := os.Stat(bin); err != nil {
+		c.JSON(404, gin.H{"error": "headroom not installed", "url": ""})
+		return
+	}
+
+	probe := &http.Client{Timeout: 1 * time.Second}
+
+	// Check if already running
+	if resp, err := probe.Get(healthURL); err == nil {
+		resp.Body.Close()
+		c.JSON(200, gin.H{"url": statsURL, "started": false})
+		return
+	}
+
+	// Start headroom proxy
+	cmd := exec.Command(bin, "proxy", "--port", proxyPort)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error(), "url": ""})
+		return
+	}
+	go cmd.Wait()
+
+	// Wait up to 4s
+	for i := 0; i < 8; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if resp, err := probe.Get(healthURL); err == nil {
+			resp.Body.Close()
+			c.JSON(200, gin.H{"url": statsURL, "started": true})
+			return
+		}
+	}
+
+	c.JSON(200, gin.H{"url": statsURL, "started": true, "note": "may still be starting"})
 }

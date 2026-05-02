@@ -11,14 +11,23 @@ interface ToolDetail {
   requests?: number; compression_pct?: number; proxy_port?: number
   total_commands?: number; pct_saved?: number
 }
-type Details = Record<string, ToolDetail>
-type ToolState = 'not_installed' | 'stopped' | 'running'
+type Details   = Record<string, ToolDetail>
+type ToolState = 'not_installed' | 'inactive' | 'active'
 
 const RELOAD_OPTIONS = [
   { label: 'Off', value: 0  },
   { label: '5s',  value: 5  },
   { label: '10s', value: 10 },
 ]
+
+// Format uptime as "Xm Ys" — only minutes and seconds
+function fmtUptime(secs: number): string {
+  if (secs < 0)    return ''
+  if (secs < 60)   return `${secs}s`
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -75,21 +84,32 @@ export default function Dashboard() {
   }, [reloadSecs, pollAll])
 
   // ── helpers ────────────────────────────────────────────────────────────────
-  const getTool   = (n: string) => tools.find(t => t.name === n)
+  const getTool   = (n: string) => tools.find(tool => tool.name === n)
   const getDetail = (n: string) => details[n] as ToolDetail | undefined
 
-  function toolState(t: ToolInfo | undefined, d: ToolDetail | undefined): ToolState {
-    if (!d || d.uptime_secs === -1) return 'not_installed'
-    if (t?.healthy)                 return 'running'
-    return 'stopped'
+  // 3 states: not_installed | inactive | active
+  function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): ToolState {
+    if (!det || det.uptime_secs === -1) return 'not_installed'
+    if (tool?.healthy)                  return 'active'
+    return 'inactive'
   }
+
   function dotClass(s: ToolState) {
-    return s === 'not_installed' ? 'error' : s === 'stopped' ? 'warn' : 'online'
+    if (s === 'not_installed') return 'error'   // red
+    if (s === 'inactive')      return 'warn'    // yellow
+    return 'online'                             // green
   }
+
   function badge(s: ToolState) {
     if (s === 'not_installed') return { icon: '🔴', text: t.notInstalled, color: '#f03e3e' }
-    if (s === 'stopped')       return { icon: '🟡', text: t.stopped,      color: '#f08d49' }
-    return                            { icon: '🟢', text: t.ok,           color: '#2f9e44' }
+    if (s === 'inactive')      return { icon: '🟡', text: t.inactive,     color: '#f08d49' }
+    return                            { icon: '🟢', text: t.active,       color: '#2f9e44' }
+  }
+
+  // Format uptime from detail — only show min/sec
+  function fmtUptimeFromDet(det: ToolDetail | undefined): string {
+    if (!det || det.uptime_secs < 0) return '—'
+    return fmtUptime(det.uptime_secs) || '—'
   }
 
   function fmtN(n: number | undefined) {
@@ -98,6 +118,7 @@ export default function Dashboard() {
     if (n >= 1_000)     return (n / 1_000).toFixed(0) + 'K'
     return String(n)
   }
+
   function logColor(msg: string) {
     if (/not installed|não instalado|offline/.test(msg)) return '#f08d49'
     if (/error|erro/.test(msg))                          return '#f03e3e'
@@ -115,6 +136,7 @@ export default function Dashboard() {
     } catch (e: any) { setIndexError(String(e)) }
     setIndexing(false)
   }
+
   async function handleSearch() {
     if (!searchQuery) return
     const d = await api.searchMemstack(searchQuery)
@@ -125,11 +147,11 @@ export default function Dashboard() {
   function CardHeader({ label, color, state }: { label: string; color: string; state: ToolState }) {
     const b = badge(state)
     return (
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</span>
-          <span className="text-xs">{b.icon}</span>
-          <span className="text-xs font-bold" style={{ color: b.color }}>{b.text}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color }}>{label}</span>
+          <span style={{ fontSize: 11 }}>{b.icon}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: b.color }}>{b.text}</span>
         </div>
         <span className={`status-dot ${dotClass(state)}`} />
       </div>
@@ -138,21 +160,24 @@ export default function Dashboard() {
 
   function Row({ label, value }: { label: string; value: string }) {
     return (
-      <div className="flex justify-between items-center" style={{ padding: '1px 0' }}>
-        <span style={{ color: 'var(--muted)', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
-        <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text)' }}>{value || '—'}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
+        <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--text)' }}>{value || '—'}</span>
       </div>
     )
   }
 
-  function Hr() { return <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} /> }
+  function Hr() {
+    return <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+  }
 
   function Repos({ repos }: { repos: string[] | null | undefined }) {
-    if (!repos?.length) return <span style={{ color: 'var(--muted)', fontSize: '11px' }}>—</span>
+    if (!repos?.length) return <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
         {repos.map(r => (
-          <span key={r} style={{ fontSize: '10px', color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r}>
+          <span key={r} title={r}
+            style={{ fontSize: 10, color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             📁 {r.split('/').pop()}
           </span>
         ))}
@@ -160,12 +185,29 @@ export default function Dashboard() {
     )
   }
 
-  function StartStop() {
+  function StartStop({ onStart, onStop }: { onStart?: () => void; onStop?: () => void }) {
     return (
       <div style={{ display: 'flex', gap: 4 }}>
-        <button className="subtle-start" onClick={() => { api.startAll(); setTimeout(pollAll, 2000) }}>{t.start}</button>
-        <button className="subtle-stop"  onClick={() => { api.stopAll();  setTimeout(pollAll, 2000) }}>{t.stop}</button>
+        <button className="subtle-start"
+          onClick={() => { (onStart ?? (() => api.startAll()))(); setTimeout(pollAll, 2000) }}>
+          {t.start}
+        </button>
+        <button className="subtle-stop"
+          onClick={() => { (onStop ?? (() => api.stopAll()))(); setTimeout(pollAll, 2000) }}>
+          {t.stop}
+        </button>
       </div>
+    )
+  }
+
+  function LinkBtn({ label, onClick }: { label: string; onClick: () => void }) {
+    return (
+      <button onClick={onClick} style={{
+        background: 'transparent', border: 'none', padding: '1px 0',
+        fontSize: 10, color: 'var(--muted)', textAlign: 'left', cursor: 'pointer',
+      }}>
+        {label}
+      </button>
     )
   }
 
@@ -192,9 +234,8 @@ export default function Dashboard() {
   const savingsPct  = withoutDwyt > 0 ? Math.round((totalSaved / withoutDwyt) * 100) : 0
   const hasData     = totalSaved > 0
 
-  // ── header btn style ───────────────────────────────────────────────────────
   const hBtn = {
-    base: 'text-[11px] px-2 py-1 rounded border transition-all bg-[#25262b] border-[#373a40] text-[#c1c2c5] hover:border-[#339af0] hover:text-[#339af0]',
+    base:   'text-[11px] px-2 py-1 rounded border transition-all bg-[#25262b] border-[#373a40] text-[#c1c2c5] hover:border-[#339af0] hover:text-[#339af0]',
     active: 'text-[11px] px-2 py-1 rounded border transition-all bg-[#25262b] border-[#3bc9db] text-[#3bc9db]',
   }
 
@@ -205,8 +246,7 @@ export default function Dashboard() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Logo size={22} showText />
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-
-          {/* Reload */}
+          {/* Reload selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 6px' }}>
             <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 2 }}>{t.auto}</span>
             {RELOAD_OPTIONS.map(o => (
@@ -218,7 +258,6 @@ export default function Dashboard() {
               >{o.label}</button>
             ))}
           </div>
-
           <button onClick={pollAll} className={hBtn.base}>{t.refresh}</button>
           <button onClick={toggleLogs} className={showLogs ? hBtn.active : hBtn.base}>
             {showLogs ? t.hideLogs : t.logs}
@@ -229,7 +268,6 @@ export default function Dashboard() {
             if (indexPath) p.set('project', indexPath)
             navigate('/setup?' + p.toString())
           }} className={hBtn.base}>{t.setup}</button>
-
           <LangToggle />
         </div>
       </div>
@@ -237,12 +275,12 @@ export default function Dashboard() {
       {/* ── Totals banner ── */}
       <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
         {hasData ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: 'none' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
             {[
-              { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e', bg: '#1e1f23' },
-              { label: t.withDwyt,    value: fmtN(withDwyt),    sub: t.tokensSpent,  color: '#2f9e44', bg: '#1e1f23' },
+              { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e' },
+              { label: t.withDwyt,    value: fmtN(withDwyt),    sub: t.tokensSpent,  color: '#2f9e44' },
             ].map((col, i) => (
-              <div key={i} style={{ padding: '7px 14px', background: col.bg, borderRight: '1px solid var(--border)' }}>
+              <div key={i} style={{ padding: '7px 14px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.1 }}>{col.value}</div>
                 <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
@@ -291,16 +329,16 @@ export default function Dashboard() {
       {/* ── 2×2 grid ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
 
-        {/* CODEBASE */}
+        {/* ── CODEBASE ── */}
         {(() => {
-          const det = getDetail('codebase-memory-mcp')
+          const det   = getDetail('codebase-memory-mcp')
           const state = toolState(cbmcp, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="Codebase" color="#339af0" state={state} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.uptime}           value={det?.uptime_label || '—'} />
+              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1px 0' }}>
                 <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.repos}</span>
                 <Repos repos={det?.repos} />
@@ -315,18 +353,21 @@ export default function Dashboard() {
                   {indexing ? t.indexing : t.index}
                 </button>
               </div>
-              {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
-              <button onClick={() => window.open('http://localhost:9749')}
-                style={{ background: 'transparent', border: 'none', padding: '1px 0', fontSize: 10, color: 'var(--muted)', textAlign: 'left', cursor: 'pointer' }}>
-                {t.openGraph}
-              </button>
+              {indexError && (
+                <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>
+              )}
+              <LinkBtn label={t.openGraph} onClick={async () => {
+                const r = await api.openCodebaseUI()
+                if (r.url) window.open(r.url)
+                if (r.started) setTimeout(pollAll, 2000)
+              }} />
             </div>
           )
         })()}
 
-        {/* RTK */}
+        {/* ── RTK ── */}
         {(() => {
-          const det = getDetail('rtk')
+          const det   = getDetail('rtk')
           const state = toolState(rtkTool, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -335,10 +376,10 @@ export default function Dashboard() {
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
               <Row label={t.commands}         value={det?.total_commands ? String(det.total_commands) : '—'} />
               <Row label={t.savingsPct}       value={det?.pct_saved ? `${det.pct_saved.toFixed(1)}%` : '—'} />
-              <Row label={t.activeSince}      value={det?.uptime_label || '—'} />
+              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
                 <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.scope}</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={indexPath}>
+                <span title={indexPath} style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {indexPath ? '📁 ' + indexPath.split('/').pop() : t.global}
                 </span>
               </div>
@@ -348,14 +389,14 @@ export default function Dashboard() {
                   <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%` }} />
                 </div>
               ) : null}
-              <button className="subtle-start" style={{ alignSelf: 'flex-start' }} onClick={pollAll}>{t.refresh}</button>
+              <button className="subtle-start" style={{ alignSelf: 'flex-start', marginTop: 2 }} onClick={pollAll}>{t.refresh}</button>
             </div>
           )
         })()}
 
-        {/* HEADROOM */}
+        {/* ── HEADROOM ── */}
         {(() => {
-          const det = getDetail('headroom')
+          const det   = getDetail('headroom')
           const state = toolState(hr, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -364,24 +405,29 @@ export default function Dashboard() {
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
               <Row label={t.requests}         value={det?.requests ? String(det.requests) : '—'} />
               <Row label={t.compression}      value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
-              <Row label={t.uptime}           value={det?.uptime_label || '—'} />
+              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
               <Row label={t.port}             value={String(det?.proxy_port || 8787)} />
               <Hr />
               <StartStop />
+              <LinkBtn label={t.openStats} onClick={async () => {
+                const r = await api.getHeadroomStatsURL()
+                if (r.url) window.open(r.url)
+                if (r.started) setTimeout(pollAll, 2000)
+              }} />
             </div>
           )
         })()}
 
-        {/* MEMSTACK */}
+        {/* ── MEMSTACK ── */}
         {(() => {
-          const det = getDetail('memstack')
+          const det   = getDetail('memstack')
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="MemStack" color="#f08d49" state={state} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={t.variable} />
-              <Row label={t.activeSince}      value={det?.uptime_label || '—'} />
+              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1px 0' }}>
                 <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.repos}</span>
                 <Repos repos={det?.repos} />
@@ -393,7 +439,9 @@ export default function Dashboard() {
                   placeholder={t.searchPlaceholder} style={{ flex: 1 }} />
                 <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
               </div>
-              {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
+              {searchResult && (
+                <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>
+              )}
             </div>
           )
         })()}

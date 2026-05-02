@@ -98,3 +98,15 @@ export async function getContext() {
   const r = await fetch(`${API}/context`)
   return r.json()
 }
+
+// Start codebase UI if needed and return its URL
+export async function openCodebaseUI(): Promise<{ url: string; started: boolean; error?: string }> {
+  const r = await fetch(`${API}/codebase/open-ui`, { method: 'POST' })
+  return r.json()
+}
+
+// Get headroom stats URL (starts proxy if needed)
+export async function getHeadroomStatsURL(): Promise<{ url: string; started: boolean; error?: string }> {
+  const r = await fetch(`${API}/headroom/stats-url`)
+  return r.json()
+}
