@@ -86,7 +86,15 @@ export async function installSetup(config: object) {
   return r.json()
 }
 
-export async function getToolDetails() {
-  const r = await fetch(`${API}/tool-details`)
+export async function getToolDetails(projectPath?: string) {
+  const url = projectPath
+    ? `${API}/tool-details?path=${encodeURIComponent(projectPath)}`
+    : `${API}/tool-details`
+  const r = await fetch(url)
+  return r.json()
+}
+
+export async function getContext() {
+  const r = await fetch(`${API}/context`)
   return r.json()
 }

@@ -10,21 +10,21 @@ import (
 	"runtime"
 )
 
-const (
-	DwytHome = "$HOME/.dwyt"
-)
-
 func CBMCP(dwytBin string) error {
-	binPath := filepath.Join(dwytBin, "codebase-memory-mcp")
+	binName := "codebase-memory-mcp"
 	if runtime.GOOS == "windows" {
-		binPath += ".exe"
+		binName += ".exe"
 	}
+	binPath := filepath.Join(dwytBin, binName)
 	if _, err := os.Stat(binPath); err == nil {
 		fmt.Println("  ✓ codebase-memory-mcp já instalado")
 		return nil
 	}
 	os.MkdirAll(dwytBin, 0755)
 	script := fetch("https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh")
+	if script == "" {
+		return fmt.Errorf("cbmcp: falha ao baixar script de instalação")
+	}
 	cmd := exec.Command("bash", "-s", "--", "--dir="+dwytBin, "--skip-config")
 	stdin, _ := cmd.StdinPipe()
 	go func() { io.WriteString(stdin, script); stdin.Close() }()
@@ -36,26 +36,40 @@ func CBMCP(dwytBin string) error {
 }
 
 func RTK(dwytBin string) error {
-	binPath := filepath.Join(dwytBin, "rtk")
+	binName := "rtk"
 	if runtime.GOOS == "windows" {
-		binPath += ".exe"
+		binName += ".exe"
 	}
+	binPath := filepath.Join(dwytBin, binName)
 	if _, err := os.Stat(binPath); err == nil {
 		fmt.Println("  ✓ RTK já instalado")
 		exec.Command(binPath, "init", "-g", "--yes").Run()
 		return nil
 	}
 	os.MkdirAll(dwytBin, 0755)
-	script := fetch("https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh")
-	cmd := exec.Command("sh")
-	stdin, _ := cmd.StdinPipe()
-	go func() { io.WriteString(stdin, script); stdin.Close() }()
-	cmd.Run()
 
-	for _, candidate := range []string{
-		os.Getenv("HOME") + "/.local/bin/rtk",
+	script := fetch("https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh")
+	if script != "" {
+		cmd := exec.Command("sh")
+		stdin, _ := cmd.StdinPipe()
+		go func() { io.WriteString(stdin, script); stdin.Close() }()
+		cmd.Run()
+	}
+
+	// Try to find the installed binary and copy it to dwytBin
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "rtk"),
 		"/usr/local/bin/rtk",
-	} {
+	}
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		candidates = []string{
+			filepath.Join(appData, "rtk", "rtk.exe"),
+			filepath.Join(home, "AppData", "Local", "rtk", "rtk.exe"),
+		}
+	}
+	for _, candidate := range candidates {
 		if data, err := os.ReadFile(candidate); err == nil {
 			os.WriteFile(binPath, data, 0755)
 			break
@@ -66,11 +80,16 @@ func RTK(dwytBin string) error {
 }
 
 func Headroom(dwytBin, dwytHome string) error {
-	wrapperPath := filepath.Join(dwytBin, "headroom")
+	wrapperName := "headroom"
+	if runtime.GOOS == "windows" {
+		wrapperName = "headroom.bat"
+	}
+	wrapperPath := filepath.Join(dwytBin, wrapperName)
 	if _, err := os.Stat(wrapperPath); err == nil {
 		fmt.Println("  ✓ Headroom já instalado")
 		return nil
 	}
+
 	venvDir := filepath.Join(dwytHome, "headroom-venv")
 	os.MkdirAll(dwytHome, 0755)
 
@@ -82,26 +101,33 @@ func Headroom(dwytBin, dwytHome string) error {
 	fmt.Printf("  → headroom venv...\n")
 	exec.Command(pythonBin, "-m", "venv", venvDir).Run()
 
-	pipBin := filepath.Join(venvDir, "bin", "pip")
+	var pipBin, hrBin string
 	if runtime.GOOS == "windows" {
 		pipBin = filepath.Join(venvDir, "Scripts", "pip.exe")
+		hrBin  = filepath.Join(venvDir, "Scripts", "headroom.exe")
+	} else {
+		pipBin = filepath.Join(venvDir, "bin", "pip")
+		hrBin  = filepath.Join(venvDir, "bin", "headroom")
 	}
+
 	exec.Command(pipBin, "install", "--quiet", "--upgrade", "pip").Run()
 	if err := exec.Command(pipBin, "install", "--quiet", "headroom-ai[proxy]").Run(); err != nil {
 		return fmt.Errorf("pip install headroom: %w", err)
 	}
 
-	hrBin := filepath.Join(venvDir, "bin", "headroom")
 	if runtime.GOOS == "windows" {
-		hrBin = filepath.Join(venvDir, "Scripts", "headroom.exe")
+		// On Windows create a .bat launcher instead of a symlink
+		bat := fmt.Sprintf("@echo off\r\n%q %%*\r\n", hrBin)
+		os.WriteFile(wrapperPath, []byte(bat), 0644)
+	} else {
+		os.Symlink(hrBin, wrapperPath)
 	}
-	os.Symlink(hrBin, wrapperPath)
 	return nil
 }
 
 func MemStack(dwytBin, dwytHome string) error {
 	dir := filepath.Join(dwytHome, "memstack")
-	if _, err := os.Stat(dir + "/.git"); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		fmt.Println("  ✓ MemStack já existe (atualizando...)")
 		exec.Command("git", "-C", dir, "pull", "--quiet").Run()
 		return nil
@@ -110,25 +136,36 @@ func MemStack(dwytBin, dwytHome string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("memstack clone: %w", err)
 	}
-	wrapper := fmt.Sprintf("#!/usr/bin/env bash\nMEMSTACK_HOME=%q\nexec python3 \"${MEMSTACK_HOME}/db/memstack-db.py\" \"$@\"\n", dir)
-	os.WriteFile(dwytBin+"/memstack", []byte(wrapper), 0755)
+
+	if runtime.GOOS == "windows" {
+		// Windows: .bat launcher
+		bat := fmt.Sprintf(
+			"@echo off\r\nset MEMSTACK_HOME=%s\r\npython \"%s\\db\\memstack-db.py\" %%*\r\n",
+			dir, dir,
+		)
+		os.WriteFile(filepath.Join(dwytBin, "memstack.bat"), []byte(bat), 0644)
+	} else {
+		wrapper := fmt.Sprintf(
+			"#!/usr/bin/env bash\nMEMSTACK_HOME=%q\nexec python3 \"${MEMSTACK_HOME}/db/memstack-db.py\" \"$@\"\n",
+			dir,
+		)
+		os.WriteFile(filepath.Join(dwytBin, "memstack"), []byte(wrapper), 0755)
+	}
 	return nil
 }
 
-func fetch(url string) string {
-	resp, err := http.Get(url)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return string(body)
-}
-
-// Wrappers creates the dwyt-codex, dwyt-opencode and dwyt-ui shell scripts in dwytBin.
+// Wrappers creates launcher scripts for dwyt-codex, dwyt-opencode and dwyt-ui.
+// On Unix: bash scripts. On Windows: .bat files.
 func Wrappers(dwytBin, dwytHome string) error {
 	os.MkdirAll(dwytBin, 0755)
 
+	if runtime.GOOS == "windows" {
+		return wrappersWindows(dwytBin, dwytHome)
+	}
+	return wrappersUnix(dwytBin, dwytHome)
+}
+
+func wrappersUnix(dwytBin, dwytHome string) error {
 	codex := `#!/usr/bin/env bash
 set -euo pipefail
 HEADROOM_PORT="${HEADROOM_PORT:-8787}"
@@ -164,35 +201,27 @@ export OPENAI_BASE_URL="${HEADROOM_URL}/v1"
 exec opencode "$@"
 `
 	dwytUI := fmt.Sprintf(`#!/usr/bin/env bash
-DWYT_HOME="%s"
-DWYT_BIN="%s"
+DWYT_HOME=%q
+DWYT_BIN=%q
 UI_PORT=9749
 UI_PID_FILE="${DWYT_HOME}/.ui.pid"
 stop_ui() {
-  if [[ -f "$UI_PID_FILE" ]]; then
-    kill "$(cat $UI_PID_FILE)" 2>/dev/null && echo "UI parada." || echo "Processo já encerrado."
-    rm -f "$UI_PID_FILE"
-  else echo "UI não está rodando."; fi
+  [[ -f "$UI_PID_FILE" ]] && kill "$(cat $UI_PID_FILE)" 2>/dev/null; rm -f "$UI_PID_FILE"
 }
 start_ui() {
   stop_ui 2>/dev/null
   for BIN in "${DWYT_BIN}/codebase-memory-mcp-ui" "${DWYT_BIN}/codebase-memory-mcp"; do
-    if [[ -x "$BIN" ]]; then
-      echo "Iniciando UI na porta $UI_PORT..."
-      if "$BIN" --help 2>&1 | grep -q "\-\-ui="; then
-        "$BIN" --ui=true --port="$UI_PORT" &>/dev/null &
-      elif "$BIN" --help 2>&1 | grep -q "serve"; then
-        "$BIN" serve --port "$UI_PORT" &>/dev/null &
-      else "$BIN" --port "$UI_PORT" &>/dev/null &; fi
-      echo $! > "$UI_PID_FILE"
-      sleep 2
-      if kill -0 "$(cat $UI_PID_FILE)" 2>/dev/null; then
-        echo "✓ UI rodando: http://localhost/${UI_PORT}  (PID $(cat $UI_PID_FILE))"
-      else rm -f "$UI_PID_FILE"; echo "✗ UI não iniciou com $BIN"; continue; fi
-      return 0
+    [[ -x "$BIN" ]] || continue
+    if "$BIN" --help 2>&1 | grep -q "\-\-ui="; then
+      "$BIN" --ui=true --port="$UI_PORT" &>/dev/null &
+    else
+      "$BIN" --port "$UI_PORT" &>/dev/null &
     fi
+    echo $! > "$UI_PID_FILE"; sleep 2
+    kill -0 "$(cat $UI_PID_FILE)" 2>/dev/null && echo "✓ UI: http://localhost:${UI_PORT}" && return 0
+    rm -f "$UI_PID_FILE"
   done
-  echo "Erro: nenhum binário encontrado. Verifique: ls ${DWYT_BIN}"; exit 1
+  echo "Erro: codebase-memory-mcp não encontrado em ${DWYT_BIN}"; exit 1
 }
 case "${1:-start}" in stop) stop_ui ;; *) start_ui ;; esac
 `, dwytHome, dwytBin)
@@ -205,11 +234,70 @@ case "${1:-start}" in stop) stop_ui ;; *) start_ui ;; esac
 	for name, content := range scripts {
 		p := filepath.Join(dwytBin, name)
 		if _, err := os.Stat(p); err == nil {
-			continue // already exists
+			continue
 		}
 		if err := os.WriteFile(p, []byte(content), 0755); err != nil {
 			return fmt.Errorf("wrapper %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+func wrappersWindows(dwytBin, dwytHome string) error {
+	// dwyt-codex.bat
+	codex := fmt.Sprintf(`@echo off
+set HEADROOM_PORT=8787
+set HEADROOM_URL=http://127.0.0.1:%%HEADROOM_PORT%%
+"%s\headroom.bat" proxy --port %%HEADROOM_PORT%%
+set OPENAI_BASE_URL=%%HEADROOM_URL%%/v1
+codex -c "openai_base_url=\"%%HEADROOM_URL%%/v1\"" %%*
+`, dwytBin)
+
+	// dwyt-opencode.bat
+	opencode := fmt.Sprintf(`@echo off
+set HEADROOM_PORT=8787
+set HEADROOM_URL=http://127.0.0.1:%%HEADROOM_PORT%%
+"%s\headroom.bat" proxy --port %%HEADROOM_PORT%%
+set ANTHROPIC_BASE_URL=%%HEADROOM_URL%%
+set OPENAI_BASE_URL=%%HEADROOM_URL%%/v1
+opencode %%*
+`, dwytBin)
+
+	// dwyt-ui.bat
+	dwytUI := fmt.Sprintf(`@echo off
+set DWYT_BIN=%s
+set UI_PORT=9749
+if exist "%%DWYT_BIN%%\codebase-memory-mcp.exe" (
+  start "" "%%DWYT_BIN%%\codebase-memory-mcp.exe" --ui=true --port=%%UI_PORT%%
+  echo UI iniciada em http://localhost:%%UI_PORT%%
+) else (
+  echo codebase-memory-mcp nao encontrado em %%DWYT_BIN%%
+)
+`, dwytBin)
+
+	scripts := map[string]string{
+		"dwyt-codex.bat":    codex,
+		"dwyt-opencode.bat": opencode,
+		"dwyt-ui.bat":       dwytUI,
+	}
+	for name, content := range scripts {
+		p := filepath.Join(dwytBin, name)
+		if _, err := os.Stat(p); err == nil {
+			continue
+		}
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			return fmt.Errorf("wrapper %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func fetch(url string) string {
+	resp, err := http.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return string(body)
 }

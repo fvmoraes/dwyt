@@ -1,231 +1,399 @@
 # DWYT — Don't Waste Your Tokens
 
-Um script que instala e integra quatro ferramentas open source para reduzir drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro, Cursor e OpenCode.
+> **Mascote:** um nerd determinado que te ajuda a não desperdiçar tokens.
 
-Suporte atual: Linux (Ubuntu/Debian/Fedora), macOS e Windows via Git Bash.
+DWYT instala e orquestra quatro ferramentas open source que reduzem drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro, Cursor e OpenCode.
 
-```bash
-chmod +x dwyt.sh && ./dwyt.sh
+---
+
+## Como funciona em 30 segundos
+
+```
+cd ~/meu-projeto
+dwyt
 ```
 
-Para integrar um novo repositório depois da instalação inicial:
+Isso é tudo. O DWYT:
+
+1. Detecta o diretório atual
+2. Sobe os serviços (codebase-memory-mcp, headroom)
+3. Abre o dashboard em `http://localhost:2737`
+4. Pré-carrega o projeto no contexto
+
+---
+
+## O binário é self-contained
+
+**Sim — o executável carrega tudo sozinho.** Não há arquivos externos necessários para rodar o DWYT.
+
+A UI web (React) é compilada e **embutida dentro do binário Go** em tempo de build:
+
+```go
+//go:embed dashboard/dist
+var reactFS embed.FS
+```
+
+Quando o daemon sobe, ele serve o HTML/JS/CSS diretamente da memória. O usuário recebe apenas o executável e tudo funciona: UI, API, serviços.
+
+```
+dwyt-linux-amd64   ← único arquivo, ~32MB, inclui a UI completa
+```
+
+As ferramentas externas (RTK, Headroom, etc.) são instaladas em `~/.dwyt/bin/` pelo Setup — mas o DWYT em si não precisa de nada além do executável.
+
+---
+
+## Instalação
+
+Baixe o binário para sua plataforma e execute:
+
+### Linux
 
 ```bash
-./dwyt.sh --repo /caminho/do/repo
+chmod +x dwyt-linux-amd64
+./dwyt-linux-amd64
+```
+
+O DWYT cria automaticamente um symlink em `~/.local/bin/dwyt`.
+Após a primeira execução, use apenas `dwyt` de qualquer diretório.
+
+### macOS
+
+```bash
+chmod +x dwyt-darwin-arm64   # Apple Silicon
+# ou
+chmod +x dwyt-darwin-amd64   # Intel
+
+./dwyt-darwin-arm64
+```
+
+### Windows
+
+```powershell
+.\dwyt-windows-amd64.exe
+```
+
+O DWYT adiciona `%APPDATA%\dwyt\bin` ao PATH do usuário via registro.
+Abra um novo terminal e use `dwyt` normalmente.
+
+> **Onde os dados ficam no Windows?**
+> `%APPDATA%\dwyt\` → `C:\Users\<usuario>\AppData\Roaming\dwyt\`
+> Este é o local padrão para dados de aplicativos por usuário no Windows.
+
+---
+
+## Fluxo de uso
+
+### Primeira vez (instalação)
+
+```
+dwyt
+```
+
+```
+╔══════════════════════════════════════╗
+║  DWYT — Don't Waste Your Tokens     ║
+╚══════════════════════════════════════╝
+
+  Projeto: /home/user/meu-projeto
+
+  →  codebase-memory-mcp       não instalado (use a UI para instalar)
+  →  headroom                  não instalado (use a UI para instalar)
+
+  ✓ Dashboard → http://localhost:2737
+  Parar: dwyt stop
+```
+
+O browser abre automaticamente no Setup:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  🤓 DWYT                              [Instalar →] [Dashboard →] │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ▾ Ferramentas                  4 de 4 selecionadas     │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ ● Codebase   Grafo de código — exploração       │    │
+│  │ ● MemStack   Memória persistente entre sessões  │    │
+│  │ ● Headroom   Compressão de chamadas à API       │    │
+│  │ ● RTK        Compressão de output de terminal   │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  ▾ IAs / Clientes               6 de 6 selecionados     │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ ● Claude Code    CLAUDE.md + .claude/           │    │
+│  │ ● Codex          AGENTS.md + .codex/            │    │
+│  │ ● GitHub Copilot .github/copilot-instructions   │    │
+│  │ ● Kiro           .kiro/steering/dwyt.md         │    │
+│  │ ● Cursor         .cursor/rules/dwyt.mdc         │    │
+│  │ ● OpenCode       opencode.json + AGENTS.md      │    │
+│  └─────────────────────────────────────────────────┘    │
+│                                                         │
+│  ▾ Projeto                      /home/user/meu-projeto  │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ /home/user/meu-projeto          [Selecionar]    │    │
+│  │ ← Subir  /home/user/meu-projeto                 │    │
+│  │ 📁 src   📁 tests   📄 README.md                │    │
+│  └─────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
+```
+
+Clique em **Instalar →** e acompanhe o progresso:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Instalando...                                          │
+│  Ferramentas sendo instaladas em background. Aguarde.   │
+│                                                         │
+│  🔄  cbmcp        installing                            │
+│  ⏳  rtk          pending                               │
+│  ⏳  headroom     pending                               │
+│  ⏳  memstack     pending                               │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Regra geral
+### Uso diário (ferramentas já instaladas)
 
-Todas as integrações do DWYT são opcionais:
+```bash
+cd ~/qualquer-projeto
+dwyt
+```
 
-- Se o Headroom estiver ativo via wrapper, use ele; se não estiver, não use
-- Se o codebase-memory-mcp estiver conectado e respondendo no cliente, use ele; se não estiver, faça fallback para busca manual
-- Se o RTK estiver instalado e funcionando, use ele; se não estiver, rode os comandos normalmente
-- Se o MemStack estiver disponível no cliente atual, use ele; se não estiver, siga sem memória persistente
+O browser abre direto no **Dashboard** com o projeto pré-carregado:
 
-## O problema
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  🤓 DWYT          [Auto Off 5s 10s] [↺ Atualizar] [Logs] [← Setup] │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  Sem DWYT          │  Com DWYT          │  Economia total   │    │
+│  │  2.4M tokens       │  480K tokens       │  1.9M  ↓ 80%     │    │
+│  │  seriam gastos     │  gastos            │  ████████████░░   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐        │
+│  │  CODEBASE            🟢  │  │  RTK                 🟢  │        │
+│  │  🟢 OK                   │  │  🟢 OK                   │        │
+│  │  ─────────────────────   │  │  ─────────────────────   │        │
+│  │  TOKENS ECONOMIZADOS  -- │  │  TOKENS ECONOMIZADOS 31M │        │
+│  │  UPTIME           2m 3s  │  │  COMANDOS            847 │        │
+│  │  REPOS  📁 meu-projeto   │  │  % ECONOMIA         61%  │        │
+│  │  ─────────────────────   │  │  ATIVO HÁ    instalado   │        │
+│  │  [/home/user/proj][Idx]  │  │  REPOS            global │        │
+│  │  Abrir Grafo →           │  │  ─────────────────────   │        │
+│  └──────────────────────────┘  │  ████████████░░░░░░░░░   │        │
+│                                └──────────────────────────┘        │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐        │
+│  │  HEADROOM            🟢  │  │  MEMSTACK            🟢  │        │
+│  │  🟢 OK                   │  │  🟢 OK                   │        │
+│  │  ─────────────────────   │  │  ─────────────────────   │        │
+│  │  TOKENS ECONOMIZADOS 8M  │  │  TOKENS ECONOMIZADOS var │        │
+│  │  REQUISIÇÕES         234 │  │  ATIVO HÁ    instalado   │        │
+│  │  COMPRESSÃO         34%  │  │  REPOS  📁 meu-projeto   │        │
+│  │  UPTIME           1h 2m  │  │  ─────────────────────   │        │
+│  │  PORTA             8787  │  │  [Buscar memória...][Bsc] │        │
+│  │  ─────────────────────   │  └──────────────────────────┘        │
+│  │  [  Iniciar  ][  Parar ] │                                       │
+│  └──────────────────────────┘                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-Com múltiplas sessões abertas e projetos paralelos, o consumo de tokens não escala linearmente — ele explode. O limite semanal do Claude Max aparece na quinta de manhã com uma mensagem que ninguém quer ver.
+---
+
+## Comandos CLI
+
+```bash
+dwyt                # inicia tudo e abre o dashboard
+dwyt stop           # para todos os serviços
+dwyt status         # status rápido no terminal
+dwyt version        # versão atual
+dwyt reinstall      # apaga ~/.dwyt e reinstala tudo
+dwyt uninstall      # remove todas as ferramentas
+```
+
+### Launchers com Headroom
+
+```bash
+dwyt-opencode       # OpenCode com proxy Headroom ativo
+dwyt-codex          # Codex com proxy Headroom ativo
+dwyt-ui             # inicia/para a UI do grafo (porta 9749)
+dwyt-ui stop
+```
+
+---
 
 ## As ferramentas
 
-| Ferramenta | O que faz | Redução |
+| Ferramenta | O que faz | Economia típica |
 |---|---|---|
-| **[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** | Grafo do código com UI visual — respostas estruturais sem grep arquivo por arquivo | ~99% de tokens por consulta |
+| **[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** | Grafo do código — respostas estruturais sem grep arquivo por arquivo | ~99% por consulta |
 | **[RTK](https://github.com/rtk-ai/rtk)** | Comprime output de terminal antes de entrar no contexto | 60–98% por comando |
 | **[Headroom](https://github.com/chopratejas/headroom)** | Proxy que comprime chamadas à API em trânsito | ~34% por requisição |
 | **[MemStack](https://github.com/cwinvestments/memstack)** | Memória persistente entre sessões — elimina reconstrução de contexto | variável |
 
-## O que o script faz
+---
 
-1. Apresenta um **checklist** para escolher quais ferramentas instalar
-2. Apresenta um **checklist** para escolher quais clientes LLM integrar
-3. Abre um **menu de navegação** para selecionar o projeto a integrar
-   Se `dialog` não estiver disponível, cai automaticamente para prompts em texto
-4. Instala **tudo em `~/.dwyt/`** — nenhum arquivo fora dessa pasta
-5. Configura `.mcp.json` e os arquivos corretos para cada cliente (`AGENTS.md`, `.codex/`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/`, `.kiro/steering/`)
-6. Adiciona ao `.gitignore` os diretórios gerados do tipo `.ferramenta/` e arquivos locais como `AGENTS.md`
-7. Indexa o projeto com codebase-memory-mcp
-8. **Sobe a UI visual do grafo automaticamente** em `http://localhost:9749`
-9. Mostra o resumo completo de uso
+## Onde os dados ficam
 
-## Modos de execução
-
-```bash
-./dwyt.sh               # instalação interativa (checklist + menu)
-./dwyt.sh --repo path   # integra e indexa um repositório sem reinstalar tudo
-./dwyt.sh --reinstall   # apaga ~/.dwyt e reinstala tudo do zero
-./dwyt.sh --uninstall   # remove todas as ferramentas instaladas
-./dwyt.sh --help        # mostra os modos disponíveis
-```
-
-## Requisitos
-
-- Linux (Ubuntu/Debian/Fedora), macOS ou Windows via Git Bash
-- `curl` e `git`
-- Python 3
-- `dialog` é opcional: quando não existir, o instalador usa prompts em texto
-- O restante (Node.js, `python3-venv`, etc.) é instalado automaticamente
-- No Windows, o script tenta usar `winget`, `choco` ou `scoop` quando precisar instalar dependências
-
-## Fluxo de trabalho
-
-```bash
-# 1. Se quiser usar Headroom em um cliente compatível, suba o proxy e abra com wrapper
-headroom proxy --port 8787
-headroom wrap claude      # usa Headroom no Claude Code
-dwyt-codex                # usa Headroom no Codex sem OPENAI_BASE_URL
-dwyt-opencode             # usa Headroom no OpenCode
-headroom wrap cursor      # usa Headroom no Cursor
-
-# Se não abrir com wrapper, siga normalmente sem Headroom
-
-# 2. No chat do LLM, se o MCP estiver conectado, valide e use os comandos principais
-/mcp                              # valida se o servidor MCP está conectado no cliente
-"Index this project"              # dispara a tool index_repository
-"Quem chama a função X?"          # usa trace_call_path para rastrear chamadores
-
-# 2.1 Para plugar outro repositório depois, sem reinstalar tudo
-./dwyt.sh --repo /caminho/do/outro-repo
-
-# Se o MCP não estiver disponível no cliente, faça busca manual normalmente
-
-# 3. Trabalhe normalmente
-#    Claude Code pode usar hooks automáticos de RTK e MemStack quando disponíveis
-#    Codex, Copilot, Kiro e Cursor usam instruções de projeto e MCP quando disponíveis
-
-# 4. UI visual do grafo já está rodando (subiu com o script)
-#    Acesse: http://localhost:9749
-#    Gerenciar: dwyt-ui / dwyt-ui stop
-
-# 5. Veja os tokens economizados
-rtk gain
-
-# 6. Ao final da sessão
-headroom learn --apply        # salva aprendizados no CLAUDE.md (Claude Code)
-curl localhost:8787/stats     # relatório de compressão
-```
-
-## Comandos de referência
-
-### codebase-memory-mcp
-
-| Tool | Purpose |
-|---|---|
-| `index_repository` | Indexa um projeto |
-| `index_status` | Verifica o progresso da indexação |
-| `detect_changes` | Encontra o que mudou desde a última indexação |
-| `search_graph` | Busca nós por padrão |
-| `search_code` | Faz busca textual no código-fonte |
-| `query_graph` | Executa consultas em Cypher |
-| `trace_call_path` | Percorre a cadeia de chamadas |
-| `get_code_snippet` | Lê o código-fonte de uma função |
-| `get_graph_schema` | Mostra o catálogo de tipos de nós e relações |
-| `get_architecture` | Gera um resumo de alto nível da arquitetura |
-| `list_projects` | Lista projetos indexados |
-| `delete_project` | Remove um projeto |
-| `manage_adr` | Gerencia registros de decisão arquitetural |
-| `ingest_traces` | Importa traces de runtime |
-
-```bash
-# Validação rápida no cliente
-"/mcp"                            # valida se o servidor MCP está conectado no cliente
-"Index this project"               # dispara a tool index_repository
-
-# UI visual do grafo
-dwyt-ui                            # inicia/reinicia na porta 9749
-dwyt-ui stop                       # para a UI
-
-# RTK
-rtk gain                           # tokens economizados total
-rtk discover                       # oportunidades ainda não capturadas
-rtk git status                     # uso manual com qualquer comando
-
-# Headroom
-headroom proxy --port 8787         # só o proxy
-headroom wrap claude               # proxy + Claude Code
-dwyt-codex                         # proxy + Codex sem OPENAI_BASE_URL
-headroom wrap cursor               # proxy + Cursor
-headroom wrap aider                # proxy + Aider
-curl http://localhost:8787/stats   # estatísticas em tempo real
-headroom learn --apply             # salva aprendizados no CLAUDE.md
-# Se configurar o Codex manualmente, use:
-# openai_base_url = "http://127.0.0.1:8787/v1"
-# o instalador do DWYT não escreve mais essa chave automaticamente
-# e não http://localhost:8787, para evitar 404 em /responses
-
-# MemStack (via chat no LLM)
-/memstack-search <query>           # busca nas memórias persistidas
-/memstack-headroom                 # status do proxy Headroom
-memstack help                     # lista os comandos disponíveis
-memstack start                    # inicia o proxy Headroom do MemStack
-memstack stop                     # para o proxy Headroom do MemStack
-memstack stats                    # estatísticas do banco MemStack
-memstack search "<query>"         # busca direta no banco
-memstack get-sessions <project>   # últimas sessões de um projeto
-memstack get-insights <project>   # insights salvos do projeto
-memstack get-context <project>    # contexto salvo do projeto
-memstack get-plan <project>       # tarefas/planejamento do projeto
-memstack export-md <project>      # exporta a memória do projeto em markdown
-```
-
-## Clientes suportados
-
-| Cliente | Arquivos gerados | Observações |
-|---|---|---|
-| **Claude Code** | `CLAUDE.md`, `.claude/settings.json`, `.claude/hooks/`, `.claude/rules/` | integração mais profunda hoje; `headroom wrap claude` é opcional; `.claude/` entra no ignore |
-| **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` | `AGENTS.md` é o arquivo que o Codex lê; `dwyt-codex` é o launcher opcional com Headroom; `.codex/` e `AGENTS.md` ficam locais |
-| **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md`, `.mcp.json` | usa instruções de repositório + contexto compartilhado com fallback quando integrações não estiverem disponíveis |
-| **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md`, `.mcp.json` | sem `wrap` oficial do Headroom; `.kiro/` entra no ignore |
-| **OpenCode** | `AGENTS.md`, `opencode.json`, `.mcp.json` | `dwyt-opencode` é o launcher opcional com Headroom; `opencode.json` fica local |
-| **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md`, `.mcp.json` | `headroom wrap cursor` é opcional; `.cursor/` entra no ignore |
-
-## Localização dos dados — tudo em `~/.dwyt/`
+### Linux / macOS
 
 ```
 ~/.dwyt/
-├── bin/                           # binários (no PATH)
+├── bin/                    # binários (no PATH)
 │   ├── codebase-memory-mcp
-│   ├── codebase-memory-mcp-ui
 │   ├── rtk
 │   ├── headroom
-│   └── dwyt-ui                    # gerenciador da UI
-├── data/                          # banco SQLite do grafo
-│   └── codebase-memory-mcp/
-│       └── codebase-memory.db
-├── headroom-venv/                 # Python virtualenv do Headroom
-├── memstack/                      # MemStack clonado
-├── env.sh                         # variáveis de ambiente (PATH, XDG_CACHE_HOME)
-└── .ui.pid                        # PID da UI em execução
-
-<projeto>/
-├── .mcp.json                      # config do codebase-memory-mcp
-├── opencode.json                  # config do OpenCode (local, ignorado pelo git)
-├── AGENTS.md                      # instruções universais para Codex, Cursor, Kiro e OpenCode (local, ignorado pelo git)
-├── CLAUDE.md                      # instruções específicas do Claude Code
-├── .codex/
-│   └── README.md                  # pasta auxiliar da integração do Codex (ignorada pelo git)
-├── .github/
-│   └── copilot-instructions.md    # instruções de repositório para GitHub Copilot
-├── .cursor/
-│   └── rules/
-│       └── dwyt.mdc               # regra alwaysApply do Cursor (ignorada pelo git)
-├── .kiro/
-│   └── steering/
-│       └── dwyt.md                # steering file do Kiro (ignorado pelo git)
-└── .claude/
-    ├── settings.json              # hooks/permissões locais do Claude Code (ignorado pelo git)
-    ├── settings.local.json        # opcional/local (ignorado pelo git)
-    ├── hooks/
-    │   └── rtk-rewrite.sh         # reescreve comandos automaticamente
-    ├── rules/                     # regras do MemStack
-    ├── skills/                    # skills do MemStack (symlink ou cópia local de ~/.dwyt/memstack/skills)
-    └── memory/                    # memórias persistentes entre sessões
+│   ├── memstack
+│   ├── dwyt                # symlink para o binário principal
+│   ├── dwyt-codex          # launcher Codex + Headroom
+│   ├── dwyt-opencode       # launcher OpenCode + Headroom
+│   └── dwyt-ui             # gerenciador da UI do grafo
+├── data/                   # banco SQLite do grafo
+├── headroom-venv/          # Python virtualenv do Headroom
+├── memstack/               # MemStack clonado
+├── env.sh                  # variáveis de ambiente
+├── config.json             # configuração salva pelo Setup
+└── state.json              # estado das ferramentas
 ```
 
-## Repositórios
+### Windows
+
+```
+%APPDATA%\dwyt\             # C:\Users\<user>\AppData\Roaming\dwyt\
+├── bin\
+│   ├── codebase-memory-mcp.exe
+│   ├── rtk.exe
+│   ├── headroom.bat
+│   ├── memstack.bat
+│   ├── dwyt.exe
+│   ├── dwyt-codex.bat
+│   ├── dwyt-opencode.bat
+│   └── dwyt-ui.bat
+├── data\
+├── headroom-venv\
+├── memstack\
+├── env.ps1                 # variáveis de ambiente (PowerShell)
+├── config.json
+└── state.json
+```
+
+---
+
+## Arquivos gerados por projeto
+
+```
+<projeto>/
+├── .mcp.json                      # config do codebase-memory-mcp
+├── AGENTS.md                      # instruções para Codex, Kiro, Cursor, OpenCode
+├── CLAUDE.md                      # instruções para Claude Code
+├── opencode.json                  # config do OpenCode
+├── .github/
+│   └── copilot-instructions.md   # instruções para GitHub Copilot
+├── .cursor/
+│   └── rules/dwyt.mdc            # regra alwaysApply do Cursor
+└── .kiro/
+    └── steering/dwyt.md          # steering file do Kiro
+```
+
+Todos esses arquivos são adicionados ao `.gitignore` automaticamente.
+
+---
+
+## Clientes suportados
+
+| Cliente | Arquivos gerados |
+|---|---|
+| **Claude Code** | `CLAUDE.md`, `.claude/` |
+| **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` |
+| **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md` |
+| **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md` |
+| **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md` |
+| **OpenCode** | `opencode.json`, `AGENTS.md`, `.mcp.json` |
+
+---
+
+## Dashboard — Status das ferramentas
+
+Cada card mostra um dos 3 estados:
+
+| Estado | Cor | Significado |
+|---|---|---|
+| 🔴 Não instalado | Vermelho | Binário não existe em `~/.dwyt/bin/` |
+| 🟡 Parado | Amarelo | Instalado mas não está rodando |
+| 🟢 OK | Verde | Instalado e funcionando |
+
+Os botões **▶ Iniciar** e **■ Parar** em cada card são sutis (fundo transparente com borda colorida) para não poluir a interface.
+
+---
+
+## Dashboard — RTK por projeto
+
+O card do RTK mostra estatísticas **filtradas pelo diretório atual** (onde você rodou `dwyt`), não globais. O escopo aparece no card:
+
+```
+ESCOPO    📁 meu-projeto
+```
+
+Se não houver dados para o projeto específico, cai automaticamente para as estatísticas globais.
+
+O banner no topo do dashboard compara o consumo com e sem DWYT:
+
+```
+┌──────────────────┬──────────────────┬──────────────────────┐
+│  Sem DWYT        │  Com DWYT        │  Economia total      │
+│  2.4M tokens     │  480K tokens     │  1.9M  ↓ 80%        │
+│  seriam gastos   │  gastos          │  ████████████░░      │
+└──────────────────┴──────────────────┴──────────────────────┘
+```
+
+- **Sem DWYT**: estimativa calculada a partir das métricas de economia do RTK e Headroom
+- **Com DWYT**: tokens efetivamente gastos
+- **Economia**: soma de todos os tokens economizados por todas as ferramentas
+
+---
+
+## Auto-reload
+
+O dashboard tem um seletor de atualização automática no header:
+
+```
+[Auto  Off  5s  10s]
+```
+
+O intervalo selecionado é salvo na URL como `?reload=5`, então persiste ao navegar entre telas.
+
+---
+
+## URLs e query parameters
+
+| URL | Descrição |
+|---|---|
+| `/#/` | Setup (sempre mostra primeiro) |
+| `/#/dashboard` | Dashboard |
+| `/#/dashboard?project=/path/repo` | Dashboard com projeto pré-carregado |
+| `/#/dashboard?reload=5` | Dashboard com auto-reload de 5s |
+| `/#/dashboard?logs=1` | Dashboard com painel de logs aberto |
+| `/#/setup?project=/path/repo` | Setup com projeto pré-preenchido |
+
+---
+
+## Requisitos
+
+| Plataforma | Requisitos |
+|---|---|
+| Linux | `curl`, `git`, Python 3, Node.js |
+| macOS | `curl`, `git`, Python 3, Node.js |
+| Windows | Git Bash ou PowerShell, Python 3, Node.js |
+
+Node.js e Python são necessários apenas para instalar as ferramentas via Setup.
+O binário `dwyt` em si não tem dependências.
+
+---
+
+## Repositórios das ferramentas
 
 - [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
 - [RTK](https://github.com/rtk-ai/rtk)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,18 +44,25 @@ type DashboardServer struct {
 	Port          int
 	DwytBin       string
 	DwytHome      string
+	StartCwd      string            // cwd captured at daemon start
 	sseClients    map[chan string]bool
 	sseMu         sync.Mutex
 	installMu     sync.Mutex
-	installStatus map[string]string // tool -> "pending"|"installing"|"ok"|"error: ..."
+	installStatus map[string]string
 	installing    bool
 }
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
+	cwd, _ := os.Getwd()
+	// prefer the cwd passed by the parent process (where user ran `dwyt`)
+	if envCwd := os.Getenv("DWYT_START_CWD"); envCwd != "" {
+		cwd = envCwd
+	}
 	return &DashboardServer{
 		Port:          port,
 		DwytBin:       dwytBin,
 		DwytHome:      dwytHome,
+		StartCwd:      cwd,
 		sseClients:    make(map[chan string]bool),
 		installStatus: make(map[string]string),
 	}
@@ -117,6 +125,7 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/install/status", ds.apiInstallStatus)
 		api.GET("/cwd", ds.apiCwd)
 		api.GET("/tool-details", ds.apiToolDetails)
+		api.GET("/context", ds.apiContext)
 	}
 
 	go ds.broadcastLoop()
@@ -287,7 +296,7 @@ func (ds *DashboardServer) apiSetupStatus(c *gin.Context) {
 func (ds *DashboardServer) apiFsBrowse(c *gin.Context) {
 	root := c.Query("path")
 	if root == "" {
-		root = os.Getenv("HOME")
+		root, _ = os.UserHomeDir()
 	}
 	if root == "" {
 		root = "/"
@@ -512,25 +521,42 @@ func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
 
 
 func (ds *DashboardServer) apiCwd(c *gin.Context) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = os.Getenv("HOME")
+	cwd := ds.StartCwd
+	if cwd == "" {
+		cwd = os.Getenv("DWYT_START_CWD")
+	}
+	if cwd == "" {
+		cwd, _ = os.UserHomeDir()
 	}
 	c.JSON(200, gin.H{"cwd": cwd})
 }
 
-// ToolDetail holds per-tool enriched info shown in the dashboard cards.
 type ToolDetail struct {
-	TokensSaved  int64    `json:"tokens_saved"`   // 0 = unknown/N/A
-	UptimeSecs   int64    `json:"uptime_secs"`    // -1 = not running
-	UptimeLabel  string   `json:"uptime_label"`
-	Repos        []string `json:"repos"`
+	TokensSaved     int64    `json:"tokens_saved"`
+	UptimeSecs      int64    `json:"uptime_secs"`
+	UptimeLabel     string   `json:"uptime_label"`
+	Repos           []string `json:"repos"`
+	// Headroom extras
+	Requests        int64    `json:"requests,omitempty"`
+	CompressionPct  float64  `json:"compression_pct,omitempty"`
+	ProxyPort       int      `json:"proxy_port,omitempty"`
+	// RTK extras
+	TotalCommands   int64    `json:"total_commands,omitempty"`
+	PctSaved        float64  `json:"pct_saved,omitempty"`
+	// Codebase extras
+	IndexedNodes    int64    `json:"indexed_nodes,omitempty"`
 }
 
 func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
+	// Optional project path filter — used by RTK to show per-project stats
+	projectPath := c.Query("path")
+	if projectPath == "" {
+		projectPath = ds.StartCwd
+	}
+
 	out := map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(),
-		"rtk":                 ds.detailRTK(),
+		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(),
 		"memstack":            ds.detailMemStack(),
 	}
@@ -630,29 +656,39 @@ func (ds *DashboardServer) detailCBMCP() *ToolDetail {
 	return d
 }
 
-func (ds *DashboardServer) detailRTK() *ToolDetail {
+func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	d := &ToolDetail{}
 	bin := filepath.Join(ds.DwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
 	}
-	// RTK is a CLI tool — uptime = time since binary was installed
 	secs, label := installedSince(bin)
 	d.UptimeSecs = secs
 	d.UptimeLabel = label
 
-	m := status.GetRTKMetrics(ds.DwytBin)
-	if m != nil {
-		d.TokensSaved = m.TokensSaved
+	// Run `rtk gain --project` scoped to the active project directory
+	// Falls back to global if path is empty or command fails
+	var m *status.RTKMetrics
+	if projectPath != "" {
+		m = status.GetRTKMetricsForPath(ds.DwytBin, projectPath)
 	}
-	// RTK is global — no per-repo association
-	d.Repos = nil
+	if m == nil {
+		m = status.GetRTKMetrics(ds.DwytBin)
+	}
+	if m != nil {
+		d.TokensSaved   = m.TokensSaved
+		d.TotalCommands = m.TotalCommands
+		d.PctSaved      = m.PctSaved
+	}
+	if projectPath != "" {
+		d.Repos = []string{projectPath}
+	}
 	return d
 }
 
 func (ds *DashboardServer) detailHeadroom() *ToolDetail {
-	d := &ToolDetail{}
+	d := &ToolDetail{ProxyPort: 8787}
 	bin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
@@ -662,9 +698,33 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	d.UptimeSecs = secs
 	d.UptimeLabel = label
 
-	m := status.GetHeadroomMetrics()
-	if m != nil {
-		d.TokensSaved = m.TokensSaved
+	// Fetch stats from headroom proxy
+	client := &http.Client{Timeout: 2 * time.Second}
+	if resp, err := client.Get("http://127.0.0.1:8787/stats"); err == nil {
+		defer resp.Body.Close()
+		var stats map[string]interface{}
+		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
+			if v, ok := stats["tokens_saved"].(float64); ok {
+				d.TokensSaved = int64(v)
+			}
+			if v, ok := stats["requests"].(float64); ok {
+				d.Requests = int64(v)
+			}
+			if v, ok := stats["compression_pct"].(float64); ok {
+				d.CompressionPct = v
+			}
+			// try alternate field names
+			if d.CompressionPct == 0 {
+				if v, ok := stats["compression_ratio"].(float64); ok {
+					d.CompressionPct = v * 100
+				}
+			}
+			if d.TokensSaved == 0 {
+				if v, ok := stats["saved_tokens"].(float64); ok {
+					d.TokensSaved = int64(v)
+				}
+			}
+		}
 	}
 	d.Repos = nil
 	return d
@@ -682,4 +742,60 @@ func (ds *DashboardServer) detailMemStack() *ToolDetail {
 	d.UptimeLabel = label
 	d.TokensSaved = 0
 	return d
+}
+
+// apiContext returns everything the UI needs on first load to decide
+// which screen to show and what to pre-fill.
+func (ds *DashboardServer) apiContext(c *gin.Context) {
+	cwd := ds.StartCwd
+	if cwd == "" {
+		cwd = os.Getenv("DWYT_START_CWD")
+	}
+	if cwd == "" {
+		cwd, _ = os.UserHomeDir()
+	}
+	if cwd == "" {
+		cwd = "/"
+	}
+
+	// Check which tools are installed
+	toolsInstalled := map[string]bool{}
+	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom", "memstack"} {
+		_, err := os.Stat(filepath.Join(ds.DwytBin, t))
+		toolsInstalled[t] = err == nil
+	}
+	anyInstalled := toolsInstalled["codebase-memory-mcp"] ||
+		toolsInstalled["rtk"] ||
+		toolsInstalled["headroom"] ||
+		toolsInstalled["memstack"]
+
+	// Load saved config
+	var cfg Config
+	if data, err := os.ReadFile(ds.configPath()); err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+
+	// Determine suggested screen:
+	// - "dashboard" if tools are installed (user just wants to work)
+	// - "setup"     if nothing is installed yet
+	suggestedScreen := "setup"
+	if anyInstalled {
+		suggestedScreen = "dashboard"
+	}
+
+	// Active project: cwd takes priority over saved config
+	// (user ran `dwyt` from a specific dir — that's the intent)
+	activeProject := cwd
+	if activeProject == "" {
+		activeProject = cfg.ProjectPath
+	}
+
+	c.JSON(200, gin.H{
+		"cwd":              cwd,
+		"active_project":   activeProject,
+		"suggested_screen": suggestedScreen,
+		"tools_installed":  toolsInstalled,
+		"any_installed":    anyInstalled,
+		"config":           cfg,
+	})
 }

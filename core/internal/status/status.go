@@ -155,3 +155,41 @@ func parseTokenCount(s string) int64 {
 	fmt.Sscanf(s, "%f", &v)
 	return int64(v * float64(mul))
 }
+
+// GetRTKMetricsForPath runs `rtk gain --project` with the given directory as cwd,
+// returning per-project stats instead of global stats.
+func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
+	bin := dwytBin + "/rtk"
+	if _, err := os.Stat(bin); err != nil {
+		return nil
+	}
+	// rtk gain --project reads stats scoped to the current working directory
+	cmd := exec.Command(bin, "gain", "--project")
+	cmd.Dir = projectPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	output := string(out)
+	m := &RTKMetrics{}
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Total commands:") {
+			fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands)
+		}
+		if strings.HasPrefix(line, "Tokens saved:") {
+			parts := strings.Split(line, "(")
+			val := strings.TrimPrefix(strings.TrimSpace(parts[0]), "Tokens saved:")
+			m.TokensSaved = parseTokenCount(strings.TrimSpace(val))
+			if len(parts) > 1 {
+				fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved)
+			}
+		}
+	}
+	// If no data for this project, return nil so caller falls back to global
+	if m.TotalCommands == 0 && m.TokensSaved == 0 {
+		return nil
+	}
+	return m
+}

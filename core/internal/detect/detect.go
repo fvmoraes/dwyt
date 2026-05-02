@@ -2,6 +2,7 @@ package detect
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -18,8 +19,9 @@ const (
 type Shell string
 
 const (
-	ShellZsh  Shell = "zsh"
-	ShellBash Shell = "bash"
+	ShellZsh        Shell = "zsh"
+	ShellBash       Shell = "bash"
+	ShellPowerShell Shell = "powershell"
 )
 
 type Env struct {
@@ -36,14 +38,38 @@ type Env struct {
 
 func Detect() *Env {
 	e := &Env{Arch: runtime.GOARCH}
+
+	// os.UserHomeDir() works on all platforms:
+	//   Linux/macOS → /home/user  or  /Users/user
+	//   Windows     → C:\Users\user
 	e.HomeDir, _ = os.UserHomeDir()
 	if e.HomeDir == "" {
-		e.HomeDir = os.Getenv("HOME")
+		// fallback: USERPROFILE on Windows, HOME on Unix
+		if runtime.GOOS == "windows" {
+			e.HomeDir = os.Getenv("USERPROFILE")
+		} else {
+			e.HomeDir = os.Getenv("HOME")
+		}
 	}
-	e.DwytHome = e.HomeDir + "/.dwyt"
-	e.DwytBin = e.DwytHome + "/bin"
-	e.DwytData = e.DwytHome + "/data"
 
+	// DwytHome:
+	//   Windows → %APPDATA%\dwyt  (C:\Users\user\AppData\Roaming\dwyt)
+	//             This is the standard location for per-user app data on Windows.
+	//   Unix    → ~/.dwyt
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(e.HomeDir, "AppData", "Roaming")
+		}
+		e.DwytHome = filepath.Join(appData, "dwyt")
+	} else {
+		e.DwytHome = filepath.Join(e.HomeDir, ".dwyt")
+	}
+
+	e.DwytBin  = filepath.Join(e.DwytHome, "bin")
+	e.DwytData = filepath.Join(e.DwytHome, "data")
+
+	// OS detection
 	switch {
 	case runtime.GOOS == "darwin":
 		e.OS = OSMacOS
@@ -57,16 +83,22 @@ func Detect() *Env {
 		e.OS = OSDebian
 	}
 
-	if strings.Contains(os.Getenv("SHELL"), "zsh") || os.Getenv("ZSH_VERSION") != "" {
-		e.Shell = ShellZsh
-		e.ShellRC = e.HomeDir + "/.zshrc"
-		e.LoginRC = e.HomeDir + "/.zprofile"
+	// Shell detection
+	if runtime.GOOS == "windows" {
+		e.Shell   = ShellPowerShell
+		// PowerShell profile — created if missing
+		e.ShellRC = filepath.Join(e.HomeDir, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+		e.LoginRC = ""
+	} else if strings.Contains(os.Getenv("SHELL"), "zsh") || os.Getenv("ZSH_VERSION") != "" {
+		e.Shell   = ShellZsh
+		e.ShellRC = filepath.Join(e.HomeDir, ".zshrc")
+		e.LoginRC = filepath.Join(e.HomeDir, ".zprofile")
 	} else {
-		e.Shell = ShellBash
-		e.ShellRC = e.HomeDir + "/.bashrc"
-		e.LoginRC = e.HomeDir + "/.profile"
-		if fileExists(e.HomeDir + "/.bash_profile") {
-			e.LoginRC = e.HomeDir + "/.bash_profile"
+		e.Shell   = ShellBash
+		e.ShellRC = filepath.Join(e.HomeDir, ".bashrc")
+		e.LoginRC = filepath.Join(e.HomeDir, ".profile")
+		if fileExists(filepath.Join(e.HomeDir, ".bash_profile")) {
+			e.LoginRC = filepath.Join(e.HomeDir, ".bash_profile")
 		}
 	}
 

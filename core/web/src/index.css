@@ -31,6 +31,7 @@ body {
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .status-dot.online  { background: var(--green);  box-shadow: 0 0 8px var(--green); }
 .status-dot.warn    { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.status-dot.error   { background: var(--red);    box-shadow: 0 0 8px var(--red); }
 .status-dot.offline { background: var(--muted); }
 
 .progress-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
@@ -38,12 +39,41 @@ body {
 
 button {
   background: var(--border); color: var(--text); border: none;
-  padding: 8px 16px; border-radius: 8px; cursor: pointer;
-  font-family: inherit; font-size: 13px; transition: background 0.2s;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  font-family: inherit; font-size: 12px; transition: all 0.15s;
 }
 button:hover { background: #4a4d55; }
+
+/* Variants */
 button.primary { background: var(--blue); color: white; }
-button.danger { background: var(--red); color: white; }
+button.primary:hover { background: #228be6; }
+button.danger  { background: var(--red);  color: white; }
+button.danger:hover  { background: #c92a2a; }
+
+/* Subtle — used for start/stop inside cards */
+button.subtle-start {
+  background: rgba(47,158,68,0.12);
+  color: var(--green);
+  border: 1px solid rgba(47,158,68,0.3);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+button.subtle-start:hover {
+  background: rgba(47,158,68,0.22);
+  border-color: var(--green);
+}
+button.subtle-stop {
+  background: rgba(240,62,62,0.10);
+  color: var(--red);
+  border: 1px solid rgba(240,62,62,0.25);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+button.subtle-stop:hover {
+  background: rgba(240,62,62,0.20);
+  border-color: var(--red);
+}
+
 button:disabled { opacity: 0.4; cursor: default; }
 
 input[type="text"] {

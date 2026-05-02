@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import FileBrowser from '../components/FileBrowser'
 import Toggle from '../components/Toggle'
 import Logo from '../components/Logo'
@@ -23,6 +23,7 @@ const IAS = [
 
 export default function SetupWizard() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'memstack'])
   const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot'])
@@ -35,21 +36,21 @@ export default function SetupWizard() {
 
   // Load saved config + cwd to pre-fill — but NEVER auto-redirect
   useEffect(() => {
+    // ?project= from URL takes highest priority (set by Boot/context)
+    const urlProject = searchParams.get('project')
+
     Promise.allSettled([
       api.loadSetup().catch(() => null),
       api.getCwd().catch(() => null),
     ]).then(([configRes, cwdRes]) => {
-      const config = configRes.status === 'fulfilled' ? configRes.value : null
-      const cwdData = cwdRes.status === 'fulfilled' ? cwdRes.value : null
+      const config  = configRes.status === 'fulfilled' ? configRes.value : null
+      const cwdData = cwdRes.status  === 'fulfilled' ? cwdRes.value  : null
 
-      if (config?.tools?.length)   setTools(config.tools)
-      if (config?.ias?.length)     setIas(config.ias)
+      if (config?.tools?.length) setTools(config.tools)
+      if (config?.ias?.length)   setIas(config.ias)
 
-      // Project path: prefer saved config, fallback to cwd
-      const savedPath = config?.project_path || ''
-      const cwd       = cwdData?.cwd || ''
-      setProjectPath(savedPath || cwd)
-
+      // Priority: URL param > saved config > cwd
+      setProjectPath(urlProject || config?.project_path || cwdData?.cwd || '')
       setReady(true)
     })
   }, [])
@@ -205,7 +206,7 @@ export default function SetupWizard() {
           </button>
           <button
             className="text-sm"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/dashboard?' + searchParams.toString())}
           >
             Dashboard →
           </button>
