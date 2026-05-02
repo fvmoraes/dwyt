@@ -12,7 +12,9 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/env"
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
 
@@ -29,12 +31,10 @@ var Cmd = &cobra.Command{
 	Use:   "dwyt [path]",
 	Short: "DWYT — Don't Waste Your Tokens",
 	Long:  "DWYT v3.1 — UI-First orchestrator. Use 'dwyt .' to open in current directory.",
-	// Accept 0 or 1 positional arg (the project path, like `dwyt .` or `dwyt /path/to/repo`)
-	Args: cobra.MaximumNArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectPath := ""
 		if len(args) == 1 {
-			// Resolve the path — "." becomes the absolute cwd
 			abs, err := filepath.Abs(args[0])
 			if err == nil {
 				projectPath = abs
@@ -57,6 +57,8 @@ func init() {
 		DwytBin  = DwytHome + "/bin"
 		DwytData = DwytHome + "/data"
 	}
+
+	log.SetOutput(filepath.Join(DwytHome, "dwyt.log"))
 
 	Cmd.AddCommand(stopCmd)
 	Cmd.AddCommand(statusCmd)
@@ -82,42 +84,34 @@ func runDefault(projectPath string) error {
 		projectPath = cwd
 	}
 
-	// ── Check if daemon is already running ────────────────────────────────────
-	// If yes, just switch the project context — no need to restart everything
-	if daemonRunning() {
-		if err := switchProject(projectPath); err == nil {
-			fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
-			fmt.Printf("  ║  DWYT — Don't Waste Your Tokens     ║\n")
-			fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
-			fmt.Printf("  Project: %s\n\n", projectPath)
-			fmt.Printf("  ✓ Dashboard → http://localhost:2737  (already running)\n")
-			fmt.Printf("  ✓ Project context updated\n\n")
-			openBrowserURL("http://localhost:2737")
-			return nil
-		}
-		// If switch failed, fall through to normal startup
-	}
+	log.Info("DWYT startup", log.Fields{"project": projectPath, "home": DwytHome})
 
-	// ── Normal startup ────────────────────────────────────────────────────────
+	banner()
+
+	// ── Phase 1: env init (fast, always safe) ─────────────────────────────────
+	fmt.Printf("  Phase 1/3: environment\n")
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
 	install.Wrappers(e.DwytBin, e.DwytHome)
 
-	fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
-	fmt.Printf("  ║  DWYT — Don't Waste Your Tokens     ║\n")
-	fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
-	fmt.Printf("  Project: %s\n\n", projectPath)
-
-	startService("codebase-memory-mcp", filepath.Join(e.DwytBin, "codebase-memory-mcp"), "--ui=true", "--port=9749")
-	startService("headroom", filepath.Join(e.DwytBin, "headroom"), "proxy", "--port", "8787")
-
-	for _, bin := range []string{"rtk", "memstack"} {
-		if _, err := os.Stat(filepath.Join(e.DwytBin, bin)); err == nil {
-			fmt.Printf("  →  %-25s available\n", bin)
+	// ── Phase 2: check if daemon is already running ───────────────────────────
+	fmt.Printf("  Phase 2/3: daemon\n")
+	if daemonOK := waitForDaemon(3 * time.Second); daemonOK {
+		fmt.Printf("  ✓ Daemon already running — switching project\n")
+		if err := switchProject(projectPath); err == nil {
+			fmt.Printf("  Project: %s\n\n", projectPath)
+			fmt.Printf("  ✓ Dashboard → http://localhost:2737\n\n")
+			openBrowserURL("http://localhost:2737")
+			return nil
 		}
+		fmt.Printf("  ! Project switch failed, restarting daemon\n")
 	}
 
+	// ── Phase 3: start services with healthchecks ────────────────────────────
+	fmt.Printf("  Phase 3/3: services\n")
+	startServicesWithHealth(e.DwytBin)
+
+	// ── Spawn daemon process ─────────────────────────────────────────────────
 	exe, _ := os.Executable()
-	// Resolve real path to avoid symlink loops on macOS
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
 	}
@@ -130,25 +124,51 @@ func runDefault(projectPath string) error {
 		"DWYT_PROJECT="+projectPath,
 	)
 	setDaemonAttr(daemon)
-	daemon.Start()
+	if err := daemon.Start(); err != nil {
+		log.Error("daemon failed to start", log.Fields{"error": err.Error()})
+		fmt.Printf("\n  ✗ Dashboard failed to start: %v\n", err)
+		return err
+	}
+	log.Info("daemon spawned", log.Fields{"pid": daemon.Process.Pid})
 
-	fmt.Printf("\n  ✓ Dashboard → http://localhost:2737\n")
-	fmt.Printf("  Stop: dwyt stop\n\n")
+	// ── Wait for daemon readiness ────────────────────────────────────────────
+	if waitForDaemon(15 * time.Second) {
+		fmt.Printf("\n  ✓ Dashboard → http://localhost:2737\n")
+		fmt.Printf("  Stop: dwyt stop\n\n")
+		openBrowserURL("http://localhost:2737")
+	} else {
+		fmt.Printf("\n  ⚠ Dashboard may still be starting at http://localhost:2737\n")
+		fmt.Printf("  Stop: dwyt stop\n\n")
+		openBrowserURL("http://localhost:2737")
+	}
+
 	return nil
 }
 
-// daemonRunning checks if the DWYT dashboard is already up on port 2737.
-func daemonRunning() bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get("http://127.0.0.1:2737/api/status")
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+func banner() {
+	fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
+	fmt.Printf("  ║  DWYT — Don't Waste Your Tokens     ║\n")
+	fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
 }
 
-// switchProject tells the running daemon to switch to a new project.
+func waitForDaemon(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	url := "http://127.0.0.1:2737/api/status"
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return true
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
 func switchProject(projectPath string) error {
 	body := fmt.Sprintf(`{"path":%q}`, projectPath)
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -167,6 +187,56 @@ func switchProject(projectPath string) error {
 	return nil
 }
 
+func startServicesWithHealth(dwytBin string) {
+	log.Info("Phase 3: starting services")
+
+	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(codebaseBin); err == nil {
+		fmt.Printf("  →  codebase-memory-mcp     starting...\n")
+		check, err := health.StartService(
+			"codebase-memory-mcp",
+			codebaseBin,
+			"http://127.0.0.1:9749/health",
+			"--ui=true", "--port=9749",
+		)
+		if err != nil || !check.Healthy {
+			log.Warn("codebase-memory-mcp failed healthcheck", log.Fields{"error": fmt.Sprintf("%v", err)})
+			fmt.Printf("  →  codebase-memory-mcp     ⚠ started but not healthy\n")
+		} else {
+			fmt.Printf("  →  codebase-memory-mcp     ✓ ready (port 9749)\n")
+		}
+	} else {
+		fmt.Printf("  →  codebase-memory-mcp     not installed (install via UI)\n")
+	}
+
+	headroomBin := filepath.Join(dwytBin, "headroom")
+	if _, err := os.Stat(headroomBin); err == nil {
+		fmt.Printf("  →  headroom                starting...\n")
+		check, err := health.StartService(
+			"headroom",
+			headroomBin,
+			"http://127.0.0.1:8787/health",
+			"proxy", "--port", "8787",
+		)
+		if err != nil || !check.Healthy {
+			log.Warn("headroom failed healthcheck", log.Fields{"error": fmt.Sprintf("%v", err)})
+			fmt.Printf("  →  headroom                ⚠ started but not healthy\n")
+		} else {
+			fmt.Printf("  →  headroom                ✓ ready (port 8787)\n")
+		}
+	} else {
+		fmt.Printf("  →  headroom                not installed (install via UI)\n")
+	}
+
+	for _, bin := range []string{"rtk", "memstack"} {
+		if _, err := os.Stat(filepath.Join(dwytBin, bin)); err == nil {
+			fmt.Printf("  →  %-24s ✓ available\n", bin)
+		} else {
+			fmt.Printf("  →  %-24s not installed (install via UI)\n", bin)
+		}
+	}
+}
+
 func openBrowserURL(url string) {
 	switch runtime.GOOS {
 	case "linux":
@@ -183,24 +253,12 @@ func getCWD() string {
 	return d
 }
 
-func startService(name, bin string, args ...string) {
-	if _, err := os.Stat(bin); err != nil {
-		fmt.Printf("  →  %-25s não instalado (instale via UI)\n", name)
-		return
-	}
-	cmd := exec.Command(bin, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	setProcAttr(cmd)
-	cmd.Start()
-	fmt.Printf("  →  %-25s iniciado\n", name)
-}
-
 var daemonCmd = &cobra.Command{
 	Use:    "daemon",
 	Short:  "Run dashboard server (internal)",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		log.Info("daemon process starting")
 		srv := server.New(2737, DwytBin, DwytHome)
 		return srv.Start()
 	},
@@ -210,11 +268,13 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop all DWYT services",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		health.StopAll()
 		exe, _ := os.Executable()
 		exec.Command("pkill", "-f", exe+" daemon").Run()
 		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
 		exec.Command("pkill", "-f", "codebase-memory-mcp").Run()
 		exec.Command("pkill", "-f", "headroom proxy").Run()
+		log.Info("all services stopped")
 		fmt.Println("  ✓ Serviços parados")
 		return nil
 	},
@@ -255,6 +315,7 @@ var reinstallCmd = &cobra.Command{
 		e := detect.Detect()
 		fmt.Printf("  Apagando %s...\n", e.DwytHome)
 		os.RemoveAll(e.DwytHome)
+		log.Info("reinstall: removed dwyt home", log.Fields{"path": e.DwytHome})
 		fmt.Printf("  ✓ Removido. Execute 'dwyt' para reinstalar via UI.\n")
 		return nil
 	},
@@ -266,6 +327,7 @@ var uninstallCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
 		os.RemoveAll(e.DwytHome)
+		log.Info("uninstall: removed dwyt home", log.Fields{"path": e.DwytHome})
 		fmt.Println("  ✓ Desinstalação concluída.")
 		return nil
 	},

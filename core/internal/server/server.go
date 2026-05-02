@@ -14,9 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -219,20 +222,20 @@ func (ds *DashboardServer) broadcastLoop() {
 }
 
 func (ds *DashboardServer) apiHeadroomStart(c *gin.Context) {
-	cmd := exec.Command(ds.DwytBin+"/headroom", "proxy", "--port", "8787")
-	if err := cmd.Start(); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+	bin := filepath.Join(ds.DwytBin, "headroom")
+	check, err := health.StartService("headroom", bin,
+		"http://127.0.0.1:8787/health", "proxy", "--port", "8787")
+	if err != nil || !check.Healthy {
+		c.JSON(500, gin.H{"error": check.Error})
 		return
 	}
-	go cmd.Wait()
-	time.Sleep(1 * time.Second)
 	c.JSON(200, gin.H{"status": "started", "port": "8787"})
 }
 
 func (ds *DashboardServer) apiHeadroomStop(c *gin.Context) {
-	out, _ := exec.Command("pkill", "-f", "headroom proxy --port 8787").CombinedOutput()
+	exec.Command("pkill", "-f", "headroom proxy --port 8787").Run()
+	log.Info("headroom stopped via pkill")
 	c.JSON(200, gin.H{"status": "stopped"})
-	_ = out
 }
 
 func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
@@ -355,21 +358,28 @@ func (ds *DashboardServer) apiFsBrowse(c *gin.Context) {
 func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 	results := make(map[string]string)
 
-	// codebase-memory-mcp
-	if _, err := os.Stat(ds.DwytBin + "/codebase-memory-mcp"); err == nil {
-		cmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "--ui=true", "--port=9749")
-		cmd.Start()
-		results["codebase-memory-mcp"] = "started"
+	codebaseBin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+	if _, err := os.Stat(codebaseBin); err == nil {
+		check, err := health.StartService("codebase-memory-mcp", codebaseBin,
+			"http://127.0.0.1:9749/health", "--ui=true", "--port=9749")
+		if err != nil || !check.Healthy {
+			results["codebase-memory-mcp"] = "error: " + check.Error
+		} else {
+			results["codebase-memory-mcp"] = "started"
+		}
 	} else {
 		results["codebase-memory-mcp"] = "not_installed"
 	}
 
-	// headroom
-	if _, err := os.Stat(ds.DwytBin + "/headroom"); err == nil {
-		cmd := exec.Command(ds.DwytBin+"/headroom", "proxy", "--port", "8787")
-		cmd.Start()
-		time.Sleep(1 * time.Second)
-		results["headroom"] = "started"
+	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	if _, err := os.Stat(headroomBin); err == nil {
+		check, err := health.StartService("headroom", headroomBin,
+			"http://127.0.0.1:8787/health", "proxy", "--port", "8787")
+		if err != nil || !check.Healthy {
+			results["headroom"] = "error: " + check.Error
+		} else {
+			results["headroom"] = "started"
+		}
 	} else {
 		results["headroom"] = "not_installed"
 	}
@@ -496,7 +506,7 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 			if clients == "" {
 				clients = strings.Join(config.Clients, ",")
 			}
-			integrate.Project(config.ProjectPath, clients)
+			integrate.Project(config.ProjectPath, clients, ds.DwytBin)
 			setStatus("integrate", "ok")
 
 			// Trigger index after install
@@ -550,10 +560,15 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		return
 	}
 
+	log.Info("switching project", log.Fields{"from": ds.ActiveProject, "to": body.Path})
+
 	ds.projectMu.Lock()
 	ds.ActiveProject = body.Path
 	ds.StartCwd      = body.Path
 	ds.projectMu.Unlock()
+
+	// Update per-project workspace state — record this project was opened
+	workspace.Touch(body.Path)
 
 	// Update config.json project_path so the UI reflects the new project
 	data, _ := os.ReadFile(ds.configPath())
@@ -567,6 +582,7 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	go func() {
 		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
 		if _, err := os.Stat(bin); err == nil {
+			log.Info("re-indexing project on switch", log.Fields{"path": body.Path})
 			exec.Command(bin, "cli", "index_repository",
 				fmt.Sprintf(`{"repo_path":"%s"}`, body.Path)).Run()
 		}
@@ -835,6 +851,13 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		activeProject = cfg.ProjectPath
 	}
 
+	// Load per-project workspace state
+	var projectState *workspace.ProjectState
+	if activeProject != "" {
+		ps, _ := workspace.Read(activeProject)
+		projectState = ps
+	}
+
 	c.JSON(200, gin.H{
 		"cwd":              cwd,
 		"active_project":   activeProject,
@@ -842,6 +865,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"tools_installed":  toolsInstalled,
 		"any_installed":    anyInstalled,
 		"config":           cfg,
+		"project_state":    projectState,
 	})
 }
 
@@ -857,37 +881,21 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
-	// Check if already running by probing the port
-	probe := &http.Client{Timeout: 1 * time.Second}
-	if resp, err := probe.Get(uiURL); err == nil {
-		resp.Body.Close()
-		// Already up — just return the URL
+	// Check if already running
+	if health.ProbeURL(uiURL + "/health") {
 		c.JSON(200, gin.H{"url": uiURL, "started": false})
 		return
 	}
 
 	// Not running — start it
-	cmd := exec.Command(bin, "--ui=true", "--port="+uiPort)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		c.JSON(500, gin.H{"error": err.Error(), "url": ""})
+	check, err := health.StartService("codebase-ui", bin, uiURL+"/health", "--ui=true", "--port="+uiPort)
+	if err != nil || !check.Healthy {
+		log.Error("failed to start codebase UI", log.Fields{"error": check.Error})
+		c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "may still be starting"})
 		return
 	}
-	go cmd.Wait()
 
-	// Wait up to 4s for it to be ready
-	for i := 0; i < 8; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if resp, err := probe.Get(uiURL); err == nil {
-			resp.Body.Close()
-			c.JSON(200, gin.H{"url": uiURL, "started": true})
-			return
-		}
-	}
-
-	// Timed out but process started — return URL anyway
-	c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "may still be starting"})
+	c.JSON(200, gin.H{"url": uiURL, "started": true})
 }
 
 // apiHeadroomStatsURL checks if headroom proxy is running and returns the stats URL.
@@ -903,34 +911,19 @@ func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
 		return
 	}
 
-	probe := &http.Client{Timeout: 1 * time.Second}
-
 	// Check if already running
-	if resp, err := probe.Get(healthURL); err == nil {
-		resp.Body.Close()
+	if health.ProbeURL(healthURL) {
 		c.JSON(200, gin.H{"url": statsURL, "started": false})
 		return
 	}
 
 	// Start headroom proxy
-	cmd := exec.Command(bin, "proxy", "--port", proxyPort)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		c.JSON(500, gin.H{"error": err.Error(), "url": ""})
+	check, err := health.StartService("headroom", bin, healthURL, "proxy", "--port", proxyPort)
+	if err != nil || !check.Healthy {
+		log.Error("failed to start headroom proxy", log.Fields{"error": check.Error})
+		c.JSON(200, gin.H{"url": statsURL, "started": true, "note": "may still be starting"})
 		return
 	}
-	go cmd.Wait()
 
-	// Wait up to 4s
-	for i := 0; i < 8; i++ {
-		time.Sleep(500 * time.Millisecond)
-		if resp, err := probe.Get(healthURL); err == nil {
-			resp.Body.Close()
-			c.JSON(200, gin.H{"url": statsURL, "started": true})
-			return
-		}
-	}
-
-	c.JSON(200, gin.H{"url": statsURL, "started": true, "note": "may still be starting"})
+	c.JSON(200, gin.H{"url": statsURL, "started": true})
 }
