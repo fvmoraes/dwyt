@@ -54,15 +54,20 @@ type DashboardServer struct {
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	cwd, _ := os.Getwd()
-	// prefer the cwd passed by the parent process (where user ran `dwyt`)
-	if envCwd := os.Getenv("DWYT_START_CWD"); envCwd != "" {
-		cwd = envCwd
+	// DWYT_PROJECT = explicit path from `dwyt .` or `dwyt /path`
+	// DWYT_START_CWD = cwd where user ran the command
+	project := os.Getenv("DWYT_PROJECT")
+	if project == "" {
+		project = os.Getenv("DWYT_START_CWD")
+	}
+	if project == "" {
+		project = cwd
 	}
 	return &DashboardServer{
 		Port:          port,
 		DwytBin:       dwytBin,
 		DwytHome:      dwytHome,
-		StartCwd:      cwd,
+		StartCwd:      project,
 		sseClients:    make(map[chan string]bool),
 		installStatus: make(map[string]string),
 	}
@@ -748,6 +753,9 @@ func (ds *DashboardServer) detailMemStack() *ToolDetail {
 // which screen to show and what to pre-fill.
 func (ds *DashboardServer) apiContext(c *gin.Context) {
 	cwd := ds.StartCwd
+	if cwd == "" {
+		cwd = os.Getenv("DWYT_PROJECT")
+	}
 	if cwd == "" {
 		cwd = os.Getenv("DWYT_START_CWD")
 	}
