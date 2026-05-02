@@ -87,30 +87,37 @@ func runDefault(projectPath string) error {
 	log.Info("DWYT startup", log.Fields{"project": projectPath, "home": DwytHome})
 
 	banner()
+	fmt.Printf("  Project: %s\n", projectPath)
 
 	// ── Phase 1: env init (fast, always safe) ─────────────────────────────────
-	fmt.Printf("  Phase 1/3: environment\n")
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
 	install.Wrappers(e.DwytBin, e.DwytHome)
 
-	// ── Phase 2: check if daemon is already running ───────────────────────────
-	fmt.Printf("  Phase 2/3: daemon\n")
-	if daemonOK := waitForDaemon(3 * time.Second); daemonOK {
-		fmt.Printf("  ✓ Daemon already running — switching project\n")
+	// ── Check if daemon is already running ────────────────────────────────────
+	// Quick probe (500ms) — if daemon responds, just switch project context
+	if daemonOK := probeDaemon(); daemonOK {
 		if err := switchProject(projectPath); err == nil {
-			fmt.Printf("  Project: %s\n\n", projectPath)
-			fmt.Printf("  ✓ Dashboard → http://localhost:2737\n\n")
+			fmt.Printf("  ✓ Dashboard → http://localhost:2737  (already running)\n")
+			fmt.Printf("  ✓ Project context updated\n\n")
 			openBrowserURL("http://localhost:2737")
 			return nil
 		}
-		fmt.Printf("  ! Project switch failed, restarting daemon\n")
+		// Switch failed, fall through to normal startup
 	}
 
-	// ── Phase 3: start services with healthchecks ────────────────────────────
-	fmt.Printf("  Phase 3/3: services\n")
-	startServicesWithHealth(e.DwytBin)
+	// ── Phase 2: start services (fire-and-forget in background) ───────────────
+	startServicesAsync(e.DwytBin)
 
-	// ── Spawn daemon process ─────────────────────────────────────────────────
+	// ── Marks available tools ──────────────────────────────────────────────────
+	for _, bin := range []string{"rtk", "memstack"} {
+		if _, err := os.Stat(filepath.Join(e.DwytBin, bin)); err == nil {
+			fmt.Printf("  →  %-25s available\n", bin)
+		} else {
+			fmt.Printf("  →  %-25s not installed (install via UI)\n", bin)
+		}
+	}
+
+	// ── Spawn daemon process (detached, non-blocking) ────────────────────────
 	exe, _ := os.Executable()
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
@@ -126,22 +133,14 @@ func runDefault(projectPath string) error {
 	setDaemonAttr(daemon)
 	if err := daemon.Start(); err != nil {
 		log.Error("daemon failed to start", log.Fields{"error": err.Error()})
-		fmt.Printf("\n  ✗ Dashboard failed to start: %v\n", err)
+		fmt.Printf("  ✗ Dashboard failed to start: %v\n", err)
 		return err
 	}
 	log.Info("daemon spawned", log.Fields{"pid": daemon.Process.Pid})
 
-	// ── Wait for daemon readiness ────────────────────────────────────────────
-	if waitForDaemon(15 * time.Second) {
-		fmt.Printf("\n  ✓ Dashboard → http://localhost:2737\n")
-		fmt.Printf("  Stop: dwyt stop\n\n")
-		openBrowserURL("http://localhost:2737")
-	} else {
-		fmt.Printf("\n  ⚠ Dashboard may still be starting at http://localhost:2737\n")
-		fmt.Printf("  Stop: dwyt stop\n\n")
-		openBrowserURL("http://localhost:2737")
-	}
-
+	fmt.Printf("  ✓ Dashboard → http://localhost:2737\n")
+	fmt.Printf("  Stop: dwyt stop\n\n")
+	openBrowserURL("http://localhost:2737")
 	return nil
 }
 
@@ -151,22 +150,14 @@ func banner() {
 	fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
 }
 
-func waitForDaemon(timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
+func probeDaemon() bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	url := "http://127.0.0.1:2737/api/health"
-
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return true
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
+	resp, err := client.Get("http://127.0.0.1:2737/api/health")
+	if err != nil {
+		return false
 	}
-	return false
+	resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 func switchProject(projectPath string) error {
@@ -187,24 +178,19 @@ func switchProject(projectPath string) error {
 	return nil
 }
 
-func startServicesWithHealth(dwytBin string) {
-	log.Info("Phase 3: starting services")
-
+func startServicesAsync(dwytBin string) {
 	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(codebaseBin); err == nil {
 		fmt.Printf("  →  codebase-memory-mcp     starting...\n")
-		check, err := health.StartService(
-			"codebase-memory-mcp",
-			codebaseBin,
-			"http://127.0.0.1:9749/health",
-			"--ui=true", "--port=9749",
-		)
-		if err != nil || !check.Healthy {
-			log.Warn("codebase-memory-mcp failed healthcheck", log.Fields{"error": fmt.Sprintf("%v", err)})
-			fmt.Printf("  →  codebase-memory-mcp     ⚠ started but not healthy\n")
-		} else {
-			fmt.Printf("  →  codebase-memory-mcp     ✓ ready (port 9749)\n")
-		}
+		go func() {
+			cmd := exec.Command(codebaseBin, "--ui=true", "--port=9749")
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			setProcAttr(cmd)
+			if err := cmd.Start(); err != nil {
+				log.Warn("codebase-memory-mcp start failed", log.Fields{"error": err.Error()})
+			}
+		}()
 	} else {
 		fmt.Printf("  →  codebase-memory-mcp     not installed (install via UI)\n")
 	}
@@ -212,28 +198,17 @@ func startServicesWithHealth(dwytBin string) {
 	headroomBin := filepath.Join(dwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err == nil {
 		fmt.Printf("  →  headroom                starting...\n")
-		check, err := health.StartService(
-			"headroom",
-			headroomBin,
-			"http://127.0.0.1:8787/health",
-			"proxy", "--port", "8787",
-		)
-		if err != nil || !check.Healthy {
-			log.Warn("headroom failed healthcheck", log.Fields{"error": fmt.Sprintf("%v", err)})
-			fmt.Printf("  →  headroom                ⚠ started but not healthy\n")
-		} else {
-			fmt.Printf("  →  headroom                ✓ ready (port 8787)\n")
-		}
+		go func() {
+			cmd := exec.Command(headroomBin, "proxy", "--port", "8787")
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			setProcAttr(cmd)
+			if err := cmd.Start(); err != nil {
+				log.Warn("headroom start failed", log.Fields{"error": err.Error()})
+			}
+		}()
 	} else {
 		fmt.Printf("  →  headroom                not installed (install via UI)\n")
-	}
-
-	for _, bin := range []string{"rtk", "memstack"} {
-		if _, err := os.Stat(filepath.Join(dwytBin, bin)); err == nil {
-			fmt.Printf("  →  %-24s ✓ available\n", bin)
-		} else {
-			fmt.Printf("  →  %-24s not installed (install via UI)\n", bin)
-		}
 	}
 }
 
