@@ -39,6 +39,7 @@ export default function Dashboard() {
   const [logs,         setLogs]         = useState<Record<string, string>>({})
   const [showLogs,     setShowLogs]     = useState(searchParams.get('logs') === '1')
   const [indexPath,    setIndexPath]    = useState('')
+  const [projectCtx,   setProjectCtx]   = useState<{active_project?: string; project_state?: {path?: string; last_open?: string; indexed_at?: string}}>({})
   const [indexing,     setIndexing]     = useState(false)
   const [indexError,   setIndexError]   = useState('')
   const [searchQuery,  setSearchQuery]  = useState('')
@@ -74,6 +75,7 @@ export default function Dashboard() {
       api.loadSetup().then(c => { if (c?.project_path) setIndexPath(c.project_path) }).catch(() => {})
       api.getCwd().then(d => { if (d?.cwd) setIndexPath(prev => prev || d.cwd) }).catch(() => {})
     }
+    api.getContext().then(c => setProjectCtx(c)).catch(() => {})
     pollAll()
   }, [])
 
@@ -271,6 +273,19 @@ export default function Dashboard() {
           <LangToggle />
         </div>
       </div>
+
+      {/* ── Project context bar ── */}
+      {projectCtx.active_project && (
+        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 10, color: '#3bc9db', fontWeight: 700 }}>📁</span>
+          <span style={{ fontSize: 11, color: 'var(--text)', fontFamily: 'monospace', fontWeight: 500 }}>{projectCtx.active_project}</span>
+          {projectCtx.project_state?.indexed_at && (
+            <span style={{ fontSize: 9, color: 'var(--muted)', marginLeft: 'auto' }}>
+              Indexado: {new Date(projectCtx.project_state.indexed_at).toLocaleString()}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Totals banner ── */}
       <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
