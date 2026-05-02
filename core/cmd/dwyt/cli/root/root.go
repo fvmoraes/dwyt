@@ -154,7 +154,7 @@ func banner() {
 func waitForDaemon(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	url := "http://127.0.0.1:2737/api/status"
+	url := "http://127.0.0.1:2737/api/health"
 
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)

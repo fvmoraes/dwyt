@@ -114,6 +114,7 @@ func (ds *DashboardServer) Start() error {
 
 	api := r.Group("/api")
 	{
+		api.GET("/health", ds.apiHealth)
 		api.GET("/status", ds.apiStatus)
 		api.GET("/metrics", ds.apiMetrics)
 		api.GET("/events", ds.apiSSE)
@@ -163,6 +164,14 @@ func openBrowser(url string) {
 }
 
 // ─── API handlers ───────────────────────────────────────────────────────────
+
+func (ds *DashboardServer) apiHealth(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"status":  "ok",
+		"project": ds.ActiveProject,
+		"tools":   status.HealthStatus(ds.DwytBin),
+	})
+}
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
 	c.JSON(200, status.PollAll(ds.DwytBin))
