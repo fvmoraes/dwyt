@@ -110,3 +110,9 @@ export async function getHeadroomStatsURL(): Promise<{ url: string; started: boo
   const r = await fetch(`${API}/headroom/stats-url`)
   return r.json()
 }
+
+// List all tracked projects
+export async function getProjects(): Promise<{ projects: Array<{path: string; active: boolean; last_open: string; indexed_at?: string; nodes?: number}>; default: string }> {
+  const r = await fetch(`${API}/projects`)
+  return r.json()
+}

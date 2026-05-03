@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import * as api from '../api'
 import Logo from '../components/Logo'
 import LangToggle from '../components/LangToggle'
+import Sidebar from '../components/Sidebar'
 import { useLang } from '../LangContext'
 
 interface ToolInfo   { name: string; running: boolean; healthy: boolean; details: string }
@@ -243,6 +244,7 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: '100vh', padding: '10px 14px' }}>
+      <Sidebar onProjectChange={() => pollAll()} />
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
