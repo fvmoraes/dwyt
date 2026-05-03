@@ -56,6 +56,8 @@ func Project(projectPath, clients, dwytBin string) {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
+		// Claude also reads .claude/mcp.json
+		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(cbmcpBin))
 	}
 
 	if strings.Contains(clients, "cursor") {
@@ -68,6 +70,8 @@ func Project(projectPath, clients, dwytBin string) {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, kiroSteering)
+		// Kiro also reads .kiro/mcp.json
+		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(cbmcpBin))
 	}
 
 	if strings.Contains(clients, "copilot") {
