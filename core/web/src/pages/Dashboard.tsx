@@ -70,27 +70,32 @@ export default function Dashboard() {
     try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch (_) {}
   }, [indexPath])
 
+  // Unified effect: watches project param and fetches everything
   useEffect(() => {
     const urlProject = searchParams.get('project')
+    const target = urlProject || ''
+
     if (urlProject) {
       setIndexPath(urlProject)
     } else {
-      api.loadSetup().then(c => { if (c?.project_path) setIndexPath(c.project_path) }).catch(() => {})
-      api.getCwd().then(d => { if (d?.cwd) setIndexPath(prev => prev || d.cwd) }).catch(() => {})
+      api.getCwd().then(d => { if (d?.cwd && !target) setIndexPath(d.cwd) }).catch(() => {})
     }
-    api.getContext().then(c => setProjectCtx(c)).catch(() => {})
-    pollAll()
-  }, [])
 
-  // React to project param changes from sidebar navigation
-  useEffect(() => {
-    const urlProject = searchParams.get('project')
-    if (urlProject && urlProject !== indexPath) {
-      setIndexPath(urlProject)
+    // Fetch context (updates bar + sidebar projects)
+    api.getContext().then(c => {
+      setProjectCtx(c)
+      if (c.projects) setSidebarPjs(c.projects)
+    }).catch(() => {})
+
+    // Fetch tool details for the current project
+    if (urlProject) {
+      api.loadSetup().then(() => {
+        setIndexPath(urlProject)
+      }).catch(() => {})
     }
   }, [searchParams.get('project')])
 
-  // Re-fetch when indexPath changes
+  // Re-fetch tool data when indexPath settles
   useEffect(() => {
     if (indexPath) pollAll()
   }, [indexPath])
@@ -189,16 +194,14 @@ export default function Dashboard() {
     return <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
   }
 
-  function Repos({ repos }: { repos: string[] | null | undefined }) {
-    if (!repos?.length) return <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>
+  function RepoRow() {
+    const name = projectCtx.project_state?.name || projectCtx.active_project?.split('/').pop() || '—'
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-        {repos.map(r => (
-          <span key={r} title={r}
-            style={{ fontSize: 10, color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            📁 {r.split('/').pop()}
-          </span>
-        ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
+        <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.repos}</span>
+        <span title={projectCtx.active_project} style={{ fontSize: 10, color: '#339af0', fontFamily: 'monospace', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          📁 {name}
+        </span>
       </div>
     )
   }
@@ -258,13 +261,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', padding: '10px 14px', paddingLeft: sidebarOpen ? 294 : 14, transition: 'padding-left 0.2s ease' }}>
+    <div style={{ minHeight: '100vh', padding: '10px 14px', paddingLeft: sidebarOpen ? 284 : 14, transition: 'padding-left 0.2s ease' }}>
       <Sidebar
         open={sidebarOpen}
         onToggle={setSidebarOpen}
         projects={sidebarPjs}
         onProjectsLoaded={setSidebarPjs}
-        onProjectChange={() => pollAll()}
       />
 
       {/* ── Header ── */}
@@ -376,12 +378,11 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="Codebase" color="#339af0" state={state} />
               <Hr />
+              <Row label={t.commands}       value={fmtN(det?.tokens_saved) !== '--' ? '—' : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1px 0' }}>
-                <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.repos}</span>
-                <Repos repos={det?.repos} />
-              </div>
+              <Row label={t.savingsPct}     value={'—'} />
+              <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <RepoRow />
               <Hr />
               <StartStop />
               <div style={{ display: 'flex', gap: 4 }}>
@@ -392,9 +393,7 @@ export default function Dashboard() {
                   {indexing ? t.indexing : t.index}
                 </button>
               </div>
-              {indexError && (
-                <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>
-              )}
+              {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
               <LinkBtn label={t.openGraph} onClick={async () => {
                 const r = await api.openCodebaseUI()
                 if (r.url) window.open(r.url)
@@ -412,23 +411,18 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="RTK" color="#2f9e44" state={state} />
               <Hr />
+              <Row label={t.commands}       value={det?.total_commands ? String(det.total_commands) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.commands}         value={det?.total_commands ? String(det.total_commands) : '—'} />
-              <Row label={t.savingsPct}       value={det?.pct_saved ? `${det.pct_saved.toFixed(1)}%` : '—'} />
-              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
-                <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.scope}</span>
-                <span title={indexPath} style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--blue)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {indexPath ? '📁 ' + indexPath.split('/').pop() : t.global}
-                </span>
-              </div>
+              <Row label={t.savingsPct}     value={det?.pct_saved ? `${det.pct_saved.toFixed(1)}%` : '—'} />
+              <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <RepoRow />
               <Hr />
+              <StartStop />
               {det?.pct_saved ? (
                 <div className="progress-bar">
                   <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%` }} />
                 </div>
               ) : null}
-              <button className="subtle-start" style={{ alignSelf: 'flex-start', marginTop: 2 }} onClick={pollAll}>{t.refresh}</button>
             </div>
           )
         })()}
@@ -441,13 +435,14 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="Headroom" color="#3bc9db" state={state} />
               <Hr />
+              <Row label={t.commands}       value={det?.requests ? String(det.requests) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.requests}         value={det?.requests ? String(det.requests) : '—'} />
-              <Row label={t.compression}      value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
-              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
-              <Row label={t.port}             value={String(det?.proxy_port || 8787)} />
+              <Row label={t.savingsPct}     value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
+              <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <RepoRow />
               <Hr />
               <StartStop />
+              <Row label={t.port} value={String(det?.proxy_port || 8787)} />
               <LinkBtn label={t.openStats} onClick={async () => {
                 const r = await api.getHeadroomStatsURL()
                 if (r.url) window.open(r.url)
@@ -465,12 +460,11 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label="MemStack" color="#f08d49" state={state} />
               <Hr />
+              <Row label={t.commands}       value={'—'} />
               <Row label={t.tokensSavedLabel} value={t.variable} />
-              <Row label={t.uptime}           value={fmtUptimeFromDet(det)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '1px 0' }}>
-                <span style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.repos}</span>
-                <Repos repos={det?.repos} />
-              </div>
+              <Row label={t.savingsPct}     value={'—'} />
+              <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <RepoRow />
               <Hr />
               <StartStop />
               <div style={{ display: 'flex', gap: 4 }}>
@@ -478,9 +472,7 @@ export default function Dashboard() {
                   placeholder={t.searchPlaceholder} style={{ flex: 1 }} />
                 <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
               </div>
-              {searchResult && (
-                <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>
-              )}
+              {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
             </div>
           )
         })()}
