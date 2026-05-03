@@ -177,11 +177,30 @@ func GetHeadroomMetrics() *HeadroomMetrics {
 		m.Running = true
 		var data map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&data) == nil {
-			if v, ok := data["tokens_saved"].(float64); ok {
-				m.TokensSaved = int64(v)
+			// Headroom v0.20+ nested: persistent_savings.lifetime.tokens_saved
+			if ps, ok := data["persistent_savings"].(map[string]interface{}); ok {
+				if lt, ok := ps["lifetime"].(map[string]interface{}); ok {
+					if v, ok := lt["tokens_saved"].(float64); ok {
+						m.TokensSaved = int64(v)
+					}
+				}
 			}
-			if v, ok := data["requests"].(float64); ok {
-				m.RequestsDone = int64(v)
+			// requests.total
+			if rq, ok := data["requests"].(map[string]interface{}); ok {
+				if v, ok := rq["total"].(float64); ok {
+					m.RequestsDone = int64(v)
+				}
+			}
+			// Fallback: top-level fields
+			if m.TokensSaved == 0 {
+				if v, ok := data["tokens_saved"].(float64); ok {
+					m.TokensSaved = int64(v)
+				}
+			}
+			if m.RequestsDone == 0 {
+				if v, ok := data["requests"].(float64); ok {
+					m.RequestsDone = int64(v)
+				}
 			}
 		}
 	}

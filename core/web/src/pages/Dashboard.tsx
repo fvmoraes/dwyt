@@ -288,14 +288,14 @@ export default function Dashboard() {
       </div>
 
       {/* ── Project context bar ── */}
-      {projectCtx.active_project && (
+      {indexPath && (
         <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 10, color: '#3bc9db', fontWeight: 700 }}>📁</span>
-          <span style={{ fontSize: 11, color: '#339af0', fontFamily: 'monospace', fontWeight: 600 }}>{projectCtx.project_state?.name || projectCtx.active_project.split('/').pop()}</span>
-          <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}>{projectCtx.active_project}</span>
+          <span style={{ fontSize: 11, color: '#339af0', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}>{indexPath}</span>
           {projectCtx.project_state?.indexed_at && (
             <span style={{ fontSize: 9, color: '#2f9e44', marginLeft: 'auto' }}>
-              ✓ Indexado: {new Date(projectCtx.project_state.indexed_at).toLocaleString()}
+              ✓ {new Date(projectCtx.project_state.indexed_at).toLocaleDateString()}
             </span>
           )}
         </div>

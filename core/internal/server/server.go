@@ -822,24 +822,42 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 		defer resp.Body.Close()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
-			if v, ok := stats["tokens_saved"].(float64); ok {
-				d.TokensSaved = int64(v)
-			}
-			if v, ok := stats["requests"].(float64); ok {
-				d.Requests = int64(v)
-			}
-			if v, ok := stats["compression_pct"].(float64); ok {
-				d.CompressionPct = v
-			}
-			// try alternate field names
-			if d.CompressionPct == 0 {
-				if v, ok := stats["compression_ratio"].(float64); ok {
-					d.CompressionPct = v * 100
+			// Headroom v0.20+ nested format: persistent_savings.lifetime.tokens_saved
+			if ps, ok := stats["persistent_savings"].(map[string]interface{}); ok {
+				if lt, ok := ps["lifetime"].(map[string]interface{}); ok {
+					if v, ok := lt["tokens_saved"].(float64); ok {
+						d.TokensSaved = int64(v)
+					}
 				}
 			}
+			// requests.total for request count
+			if rq, ok := stats["requests"].(map[string]interface{}); ok {
+				if v, ok := rq["total"].(float64); ok {
+					d.Requests = int64(v)
+				}
+			}
+			// compression summary
+			if sm, ok := stats["summary"].(map[string]interface{}); ok {
+				if cp, ok := sm["compression"].(map[string]interface{}); ok {
+					if v, ok := cp["avg_compression_pct"].(float64); ok {
+						d.CompressionPct = v
+					}
+				}
+			}
+			// Fallback: top-level fields (older headroom versions)
 			if d.TokensSaved == 0 {
-				if v, ok := stats["saved_tokens"].(float64); ok {
+				if v, ok := stats["tokens_saved"].(float64); ok {
 					d.TokensSaved = int64(v)
+				}
+			}
+			if d.Requests == 0 {
+				if v, ok := stats["requests"].(float64); ok {
+					d.Requests = int64(v)
+				}
+			}
+			if d.CompressionPct == 0 {
+				if v, ok := stats["compression_pct"].(float64); ok {
+					d.CompressionPct = v
 				}
 			}
 		}
