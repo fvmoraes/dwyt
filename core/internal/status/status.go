@@ -266,6 +266,8 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 		states["codebase-memory-mcp"] = StateNotInstalled
 	} else if health.ProbeURL("http://127.0.0.1:9749/health") {
 		states["codebase-memory-mcp"] = StateRunning
+	} else if pgrep("codebase-memory-mcp") {
+		states["codebase-memory-mcp"] = StateRunning  // running in stdio mode (no web UI)
 	} else {
 		states["codebase-memory-mcp"] = StateFailed
 	}
@@ -295,4 +297,9 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states
+}
+
+func pgrep(pattern string) bool {
+	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }
