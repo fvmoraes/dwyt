@@ -258,7 +258,7 @@ export default function Dashboard() {
       />
 
       {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginLeft: 32 }}>
         <Logo size={22} showText />
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {/* Reload selector */}

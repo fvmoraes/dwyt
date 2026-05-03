@@ -120,7 +120,7 @@ func writeIfMissing(path, content string) {
 func mcpJSONTemplate(cbmcpBin string) string {
 	return fmt.Sprintf(`{
   "mcpServers": {
-    "codebase-memory-mcp": {
+    "dwyt": {
       "type": "stdio",
       "command": %q
     }
@@ -134,7 +134,7 @@ func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["AGENTS.md"],
   "mcp": {
-    "codebase-memory-mcp": {
+    "dwyt": {
       "type": "local",
       "command": [%q]
     }
