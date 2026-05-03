@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, useCallback } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import * as api from '../api'
 
 interface Project {
@@ -22,28 +22,34 @@ interface Props {
 
 export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: Props) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [switching, setSwitching] = useState<string | null>(null)
 
   useEffect(() => {
-    if (open) loadProjects()
+    loadProjects()
   }, [open])
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
     try {
       const data = await api.getProjects()
       onProjectsLoaded(data.projects || [])
     } catch (_) {}
-  }
+  }, [])
 
   async function switchTo(path: string) {
-    onToggle(false)
+    setSwitching(path)
     try {
-      await fetch('http://127.0.0.1:2737/api/project/switch', {
+      const r = await fetch('http://127.0.0.1:2737/api/project/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),
       })
+      if (r.ok) {
+        await loadProjects()
+        navigate('/dashboard?project=' + encodeURIComponent(path))
+      }
     } catch (_) {}
-    navigate('/dashboard?project=' + encodeURIComponent(path))
+    setSwitching(null)
   }
 
   return (
@@ -85,18 +91,22 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
           </div>
         )}
 
-        {projects.map(p => (
+        {projects.map(p => {
+          const isActive = p.active || searchParams.get('project') === p.path
+          const isSwitching = switching === p.path
+          return (
           <div key={p.id}
-            onClick={() => switchTo(p.path)}
+            onClick={() => !isSwitching && switchTo(p.path)}
             style={{
-              padding: '6px 8px', borderRadius: 5, marginBottom: 3, cursor: 'pointer',
-              background: p.active ? 'rgba(51,154,240,0.13)' : 'transparent',
-              border: p.active ? '1px solid rgba(51,154,240,0.25)' : '1px solid transparent',
+              padding: '6px 8px', borderRadius: 5, marginBottom: 3, cursor: isSwitching ? 'wait' : 'pointer',
+              background: isActive ? 'rgba(51,154,240,0.13)' : 'transparent',
+              border: isActive ? '1px solid rgba(51,154,240,0.25)' : '1px solid transparent',
+              opacity: isSwitching ? 0.6 : 1,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 12 }}>{p.active ? '📂' : '📁'}</span>
-              <span style={{ fontSize: 11, fontWeight: p.active ? 600 : 400, color: p.active ? '#339af0' : 'var(--text)' }}>
+              <span style={{ fontSize: 12 }}>{isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
+              <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#339af0' : 'var(--text)' }}>
                 {p.name}
               </span>
             </div>
@@ -109,7 +119,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
               </div>
             )}
           </div>
-        ))}
+        )})}
       </div>
     </>
   )

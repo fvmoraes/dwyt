@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +18,9 @@ import (
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/memory"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -50,12 +51,21 @@ type DashboardServer struct {
 	StartCwd       string
 	DefaultProject string
 	Store          *db.Store
+	ProjectMemory  *memory.ProjectMemory
+	HeadroomPort   int
 	projectMu      sync.RWMutex
 	sseClients     map[chan string]bool
 	sseMu          sync.Mutex
 	installMu      sync.Mutex
 	installStatus  map[string]string
 	installing     bool
+	indexProject   string // path of project currently being indexed
+	codebaseProgress struct {
+		mu       sync.Mutex
+		indexing bool
+		progress string
+		error    string
+	}
 }
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
@@ -74,6 +84,19 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		log.Error("failed to open db", log.Fields{"error": err.Error()})
 	}
 
+	// Initialize project memory
+	pm, memErr := memory.NewProjectMemory(dwytHome, project)
+	if memErr != nil {
+		log.Error("failed to init project memory", log.Fields{"error": memErr.Error()})
+	}
+
+	// Read headroom port from env
+	headroomPort := 8787
+	if hp := os.Getenv("DWYT_HEADROOM_PORT"); hp != "" {
+		fmt.Sscanf(hp, "%d", &headroomPort)
+	}
+	status.SetHeadroomPort(headroomPort)
+
 	ds := &DashboardServer{
 		Port:           port,
 		DwytBin:        dwytBin,
@@ -81,6 +104,8 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		StartCwd:       project,
 		DefaultProject: project,
 		Store:          store,
+		ProjectMemory:  pm,
+		HeadroomPort:   headroomPort,
 		sseClients:     make(map[chan string]bool),
 		installStatus:  make(map[string]string),
 	}
@@ -139,6 +164,7 @@ func (ds *DashboardServer) Start() error {
 		api.POST("/headroom/stop", ds.apiHeadroomStop)
 		api.GET("/rtk/gain", ds.apiRTKGain)
 		api.POST("/codebase/index", ds.apiCodebaseIndex)
+		api.GET("/codebase/index/status", ds.apiCodebaseIndexStatus)
 		api.POST("/memstack/search", ds.apiMemstackSearch)
 		api.POST("/setup/save", ds.apiSetupSave)
 		api.GET("/setup/load", ds.apiSetupLoad)
@@ -157,41 +183,28 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
 		api.POST("/project/switch", ds.apiProjectSwitch)
 		api.GET("/projects", ds.apiProjectsList)
+		api.GET("/projects/current", ds.apiProjectsCurrent)
+		// MemStack memory endpoints
+		api.GET("/memory/status", ds.apiMemoryStatus)
+		api.GET("/memory/search", ds.apiMemorySearch)
+		api.POST("/memory/save", ds.apiMemorySave)
+		api.POST("/memory/summarize", ds.apiMemorySummarize)
+		api.POST("/memory/forget", ds.apiMemoryForget)
+		api.POST("/memory/save-command", ds.apiMemorySaveCommand)
 	}
 
 	go ds.broadcastLoop()
 
-	// Auto-index the starting project in background
-	go func() {
-		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
-		if _, err := os.Stat(bin); err == nil {
-			log.Info("auto-indexing project on startup", log.Fields{"path": ds.DefaultProject})
-			exec.Command(bin, "cli", "index_repository",
-				fmt.Sprintf(`{"repo_path":"%s"}`, ds.DefaultProject)).Run()
-		}
-	}()
-
 	addr := fmt.Sprintf("127.0.0.1:%d", ds.Port)
 	fmt.Printf("   Dashboard → http://%s\n", addr)
 
-	// auto-open browser
-	openBrowser(addr)
+	// Auto-index the project on startup if not already indexed
+	if ds.ShouldAutoIndex(ds.DefaultProject) {
+		go ds.triggerIndex(ds.DefaultProject)
+	}
 
 	return r.Run(addr)
 }
-
-func openBrowser(url string) {
-	switch runtime.GOOS {
-	case "linux":
-		exec.Command("xdg-open", "http://"+url).Start()
-	case "darwin":
-		exec.Command("open", "http://"+url).Start()
-	case "windows":
-		exec.Command("cmd", "/c", "start", "http://"+url).Start()
-	}
-}
-
-// ─── API handlers ───────────────────────────────────────────────────────────
 
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
 	c.JSON(200, gin.H{
@@ -260,17 +273,18 @@ func (ds *DashboardServer) broadcastLoop() {
 
 func (ds *DashboardServer) apiHeadroomStart(c *gin.Context) {
 	bin := filepath.Join(ds.DwytBin, "headroom")
-	check, err := health.StartService("headroom", bin,
-		"http://127.0.0.1:8787/health", "proxy", "--port", "8787")
+	portStr := fmt.Sprintf("%d", ds.HeadroomPort)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)
+	check, err := health.StartService("headroom", bin, healthURL, "proxy", "--port", portStr)
 	if err != nil || !check.Healthy {
 		c.JSON(500, gin.H{"error": check.Error})
 		return
 	}
-	c.JSON(200, gin.H{"status": "started", "port": "8787"})
+	c.JSON(200, gin.H{"status": "started", "port": ds.HeadroomPort})
 }
 
 func (ds *DashboardServer) apiHeadroomStop(c *gin.Context) {
-	exec.Command("pkill", "-f", "headroom proxy --port 8787").Run()
+	exec.Command("pkill", "-f", fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort)).Run()
 	log.Info("headroom stopped via pkill")
 	c.JSON(200, gin.H{"status": "stopped"})
 }
@@ -285,14 +299,68 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "path is required"})
 		return
 	}
-	cmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
-		fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error(), "output": string(out)})
+
+	ds.codebaseProgress.mu.Lock()
+	if ds.codebaseProgress.indexing {
+		proj := ds.indexProject
+		ds.codebaseProgress.mu.Unlock()
+		c.JSON(200, gin.H{"status": "already_indexing", "progress": ds.codebaseProgress.progress, "path": proj})
 		return
 	}
-	c.JSON(200, gin.H{"status": "indexed", "path": body.Path})
+	ds.codebaseProgress.indexing = true
+	ds.codebaseProgress.progress = "starting"
+	ds.codebaseProgress.error = ""
+	ds.indexProject = body.Path
+	ds.codebaseProgress.mu.Unlock()
+
+	c.JSON(200, gin.H{"status": "indexing", "progress": "starting"})
+
+	// Run indexing in background
+	go func() {
+		defer func() {
+			ds.codebaseProgress.mu.Lock()
+			ds.codebaseProgress.indexing = false
+			ds.codebaseProgress.mu.Unlock()
+		}()
+
+		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+		cmd := exec.Command(bin, "cli", "index_repository",
+			fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
+
+		ds.codebaseProgress.mu.Lock()
+		ds.codebaseProgress.progress = "indexing"
+		ds.codebaseProgress.mu.Unlock()
+
+		start := time.Now()
+		out, err := cmd.CombinedOutput()
+
+		ds.codebaseProgress.mu.Lock()
+		defer ds.codebaseProgress.mu.Unlock()
+
+		if err != nil {
+			ds.codebaseProgress.error = err.Error()
+			ds.codebaseProgress.progress = fmt.Sprintf("failed after %s: %s", time.Since(start).Round(time.Second), ds.codebaseProgress.error)
+			log.Error("codebase index failed", log.Fields{"path": body.Path, "error": err.Error(), "output": string(out)})
+		} else {
+			ds.codebaseProgress.progress = fmt.Sprintf("completed in %s", time.Since(start).Round(time.Second))
+			log.Info("codebase index completed", log.Fields{"path": body.Path})
+
+			if ds.Store != nil {
+				ds.Store.MarkIndexed(body.Path, 0, 0)
+			}
+		}
+		ds.broadcastSSE("index_update", ds.codebaseProgress.progress)
+	}()
+}
+
+func (ds *DashboardServer) apiCodebaseIndexStatus(c *gin.Context) {
+	ds.codebaseProgress.mu.Lock()
+	defer ds.codebaseProgress.mu.Unlock()
+	c.JSON(200, gin.H{
+		"indexing": ds.codebaseProgress.indexing,
+		"progress": ds.codebaseProgress.progress,
+		"error":    ds.codebaseProgress.error,
+	})
 }
 
 func (ds *DashboardServer) apiMemstackSearch(c *gin.Context) {
@@ -301,6 +369,21 @@ func (ds *DashboardServer) apiMemstackSearch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "query is required"})
 		return
 	}
+
+	// Use the new in-memory search engine
+	if ds.ProjectMemory != nil {
+		results := ds.ProjectMemory.Search(body.Query)
+		if len(results) > 0 {
+			var lines []string
+			for _, e := range results {
+				lines = append(lines, fmt.Sprintf("[%s] %s", e.Type, e.Content))
+			}
+			c.JSON(200, gin.H{"results": strings.Join(lines, "\n")})
+			return
+		}
+	}
+
+	// Fallback to legacy CLI search
 	cmd := exec.Command(ds.DwytBin+"/memstack", "search", body.Query)
 	out, _ := cmd.CombinedOutput()
 	c.JSON(200, gin.H{"results": string(out)})
@@ -416,8 +499,9 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 
 	headroomBin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err == nil {
-		check, err := health.StartService("headroom", headroomBin,
-			"http://127.0.0.1:8787/health", "proxy", "--port", "8787")
+		portStr := fmt.Sprintf("%d", ds.HeadroomPort)
+		healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)
+		check, err := health.StartService("headroom", headroomBin, healthURL, "proxy", "--port", portStr)
 		if err != nil || !check.Healthy {
 			results["headroom"] = "error: " + check.Error
 		} else {
@@ -435,7 +519,7 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 
 func (ds *DashboardServer) apiServicesStopAll(c *gin.Context) {
 	exec.Command("pkill", "-f", "codebase-memory-mcp.*--ui").Run()
-	exec.Command("pkill", "-f", "headroom proxy --port 8787").Run()
+	exec.Command("pkill", "-f", fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort)).Run()
 	c.JSON(200, gin.H{"status": "stopped"})
 }
 
@@ -466,7 +550,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", ds.DwytBin+"/codebase-memory-mcp")
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom", "headroom proxy --port 8787")
+		logs["headroom"] = pollLog("headroom", "headroom", fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort))
 	}
 	if service == "" || service == "rtk" {
 		if _, err := os.Stat(filepath.Join(ds.DwytBin, "rtk")); err == nil {
@@ -613,23 +697,79 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 
 	log.Info("switching project", log.Fields{"from": old, "to": body.Path})
 
+	// Cancel any in-progress indexing for the old project
+	ds.codebaseProgress.mu.Lock()
+	if ds.codebaseProgress.indexing && ds.indexProject == old {
+		ds.codebaseProgress.indexing = false
+		ds.codebaseProgress.progress = "cancelled (switched project)"
+	}
+	ds.codebaseProgress.mu.Unlock()
+
 	// Register project in SQLite
 	if ds.Store != nil {
 		ds.Store.TouchProject(body.Path)
 		ds.Store.SetConfig("project_path", body.Path)
 	}
 
-	// Trigger re-index in background
-	go func() {
-		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
-		if _, err := os.Stat(bin); err == nil {
-			log.Info("re-indexing project on switch", log.Fields{"path": body.Path})
-			exec.Command(bin, "cli", "index_repository",
-				fmt.Sprintf(`{"repo_path":"%s"}`, body.Path)).Run()
-		}
-	}()
+	// Ensure per-project workspace state (.dwyt/)
+	workspace.Touch(body.Path)
+
+	// Reload project memory
+	pm, memErr := memory.NewProjectMemory(ds.DwytHome, body.Path)
+	if memErr != nil {
+		log.Error("failed to load project memory on switch", log.Fields{"error": memErr.Error()})
+	} else {
+		ds.ProjectMemory = pm
+	}
+
+	// Broadcast SSE event so all clients update
+	ds.broadcastSSE("project_switch", body.Path)
+
+	// Auto-index the new project if not already indexed
+	if ds.ShouldAutoIndex(body.Path) {
+		go ds.triggerIndex(body.Path)
+	}
 
 	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
+}
+
+// apiProjectsCurrent returns the currently active project.
+func (ds *DashboardServer) apiProjectsCurrent(c *gin.Context) {
+	ds.projectMu.RLock()
+	project := ds.DefaultProject
+	ds.projectMu.RUnlock()
+
+	if ds.Store == nil || project == "" {
+		c.JSON(200, gin.H{"project": nil, "active": false})
+		return
+	}
+
+	var result map[string]interface{}
+	if p, err := ds.Store.GetProjectByPath(project); err == nil {
+		result = map[string]interface{}{
+			"id":         p.ID,
+			"path":       p.Path,
+			"name":       p.Name,
+			"last_open":  p.LastOpen,
+			"created_at": p.CreatedAt,
+			"active":     true,
+		}
+		if p.IndexedAt != nil {
+			result["indexed_at"] = p.IndexedAt
+			result["nodes"] = p.Nodes
+			result["edges"] = p.Edges
+		}
+		// Add memory stats
+		result["memory"] = ds.memoryStats()
+	} else {
+		result = map[string]interface{}{
+			"path":   project,
+			"name":   filepath.Base(project),
+			"active": true,
+		}
+	}
+
+	c.JSON(200, gin.H{"project": result, "active": true})
 }
 
 // apiProjectsList returns all tracked projects with their state.
@@ -678,6 +818,9 @@ type ToolDetail struct {
 	PctSaved        float64  `json:"pct_saved,omitempty"`
 	// Codebase extras
 	IndexedNodes    int64    `json:"indexed_nodes,omitempty"`
+	// MemStack extras
+	MemoryCount     int      `json:"memory_count,omitempty"`
+	LastUpdated     string   `json:"last_updated,omitempty"`
 }
 
 func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
@@ -758,6 +901,16 @@ func installedSince(binPath string) (int64, string) {
 	return secs, fmtUptime(secs)
 }
 
+func (ds *DashboardServer) memoryStats() map[string]interface{} {
+	if ds.ProjectMemory == nil {
+		return map[string]interface{}{"active": false}
+	}
+	return map[string]interface{}{
+		"active": true,
+		"stats":  ds.ProjectMemory.Stats(),
+	}
+}
+
 func (ds *DashboardServer) loadedRepos() []string {
 	if ds.Store != nil {
 		if pj, err := ds.Store.GetProjectByPath(ds.DefaultProject); err == nil {
@@ -777,10 +930,14 @@ func (ds *DashboardServer) detailCBMCP() *ToolDetail {
 		return d
 	}
 	secs, label := uptimeFromPID(bin)
-	d.UptimeSecs = secs
-	d.UptimeLabel = label
-	// codebase-memory-mcp doesn't expose a token-savings metric directly
-	d.TokensSaved = 0
+	if secs < 0 {
+		// Binary exists but not running
+		d.UptimeSecs = 0
+		d.UptimeLabel = "installed"
+	} else {
+		d.UptimeSecs = secs
+		d.UptimeLabel = label
+	}
 	return d
 }
 
@@ -816,19 +973,19 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 }
 
 func (ds *DashboardServer) detailHeadroom() *ToolDetail {
-	d := &ToolDetail{ProxyPort: 8787}
+	d := &ToolDetail{ProxyPort: ds.HeadroomPort}
 	bin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
 	}
-	secs, label := uptimeFromPID("headroom proxy --port 8787")
+	secs, label := uptimeFromPID(fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort))
 	d.UptimeSecs = secs
 	d.UptimeLabel = label
 
-	// Fetch stats from headroom proxy
+	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", ds.HeadroomPort)
 	client := &http.Client{Timeout: 2 * time.Second}
-	if resp, err := client.Get("http://127.0.0.1:8787/stats"); err == nil {
+	if resp, err := client.Get(statsURL); err == nil {
 		defer resp.Body.Close()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
@@ -878,15 +1035,26 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 
 func (ds *DashboardServer) detailMemStack() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
-	bin := filepath.Join(ds.DwytBin, "memstack")
-	if _, err := os.Stat(bin); err != nil {
+	if ds.ProjectMemory == nil {
 		d.UptimeSecs = -1
 		return d
 	}
-	secs, label := installedSince(bin)
-	d.UptimeSecs = secs
-	d.UptimeLabel = label
-	d.TokensSaved = 0
+
+	stats := ds.ProjectMemory.Stats()
+	if entries, ok := stats["total_entries"].(int); ok {
+		d.MemoryCount = entries
+	}
+	if lu, ok := stats["last_updated"].(string); ok {
+		d.LastUpdated = lu
+		if t, err := time.Parse(time.RFC3339, lu); err == nil {
+			d.UptimeSecs = int64(time.Since(t).Seconds())
+			d.UptimeLabel = fmtUptime(d.UptimeSecs)
+		}
+	}
+	if d.UptimeLabel == "" {
+		d.UptimeSecs = 0
+		d.UptimeLabel = "active"
+	}
 	return d
 }
 
@@ -982,6 +1150,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"config":           cfg,
 		"project_state":    projectState,
 		"projects":         projectsList,
+		"memory_stats":     ds.memoryStats(),
 	})
 }
 
@@ -1017,9 +1186,9 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 // apiHeadroomStatsURL checks if headroom proxy is running and returns the stats URL.
 // If not running, starts it first.
 func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
-	const proxyPort = "8787"
-	const healthURL = "http://127.0.0.1:" + proxyPort + "/health"
-	const statsURL  = "http://127.0.0.1:" + proxyPort + "/stats"
+	proxyPort := fmt.Sprintf("%d", ds.HeadroomPort)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%s/health", proxyPort)
+	statsURL  := fmt.Sprintf("http://127.0.0.1:%s/stats", proxyPort)
 
 	bin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
@@ -1042,4 +1211,201 @@ func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"url": statsURL, "started": true})
+}
+
+// ── MemStack memory API handlers ───────────────────────────────────────────
+
+// apiMemoryStatus returns stats about the current project memory.
+func (ds *DashboardServer) apiMemoryStatus(c *gin.Context) {
+	if ds.ProjectMemory == nil {
+		c.JSON(200, gin.H{"active": false, "error": "no project memory loaded"})
+		return
+	}
+	c.JSON(200, gin.H{"active": true, "stats": ds.ProjectMemory.Stats()})
+}
+
+// apiMemorySearch searches the project memory for a query.
+func (ds *DashboardServer) apiMemorySearch(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(400, gin.H{"error": "query parameter 'q' is required"})
+		return
+	}
+
+	projectID := c.Query("project")
+	if ds.ProjectMemory == nil || (projectID != "" && ds.ProjectMemory.ProjectID != projectID) {
+		c.JSON(200, gin.H{"results": []interface{}{}, "note": "no project memory"})
+		return
+	}
+
+	results := ds.ProjectMemory.Search(query)
+	c.JSON(200, gin.H{"results": results, "count": len(results)})
+}
+
+// apiMemorySave saves a new memory entry.
+func (ds *DashboardServer) apiMemorySave(c *gin.Context) {
+	if ds.ProjectMemory == nil {
+		c.JSON(400, gin.H{"error": "no project memory loaded"})
+		return
+	}
+
+	var body struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Type == "" {
+		body.Type = "note"
+	}
+	if body.Content == "" {
+		c.JSON(400, gin.H{"error": "content is required"})
+		return
+	}
+
+	if err := ds.ProjectMemory.AddEntry(body.Type, body.Content); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "saved"})
+}
+
+// apiMemorySummarize triggers a summary rebuild.
+func (ds *DashboardServer) apiMemorySummarize(c *gin.Context) {
+	if ds.ProjectMemory == nil {
+		c.JSON(400, gin.H{"error": "no project memory loaded"})
+		return
+	}
+
+	summary := ds.ProjectMemory.RebuildSummary()
+	if err := ds.ProjectMemory.Save(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "summarized", "summary": summary})
+}
+
+// apiMemoryForget clears all memory for the current project.
+func (ds *DashboardServer) apiMemoryForget(c *gin.Context) {
+	if ds.ProjectMemory == nil {
+		c.JSON(400, gin.H{"error": "no project memory loaded"})
+		return
+	}
+
+	if err := ds.ProjectMemory.Forget(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "forgotten"})
+}
+
+// apiMemorySaveCommand records a command in project memory.
+func (ds *DashboardServer) apiMemorySaveCommand(c *gin.Context) {
+	if ds.ProjectMemory == nil {
+		c.JSON(400, gin.H{"error": "no project memory loaded"})
+		return
+	}
+
+	var body struct {
+		Command string `json:"command"`
+	}
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Command == "" {
+		c.JSON(400, gin.H{"error": "command is required"})
+		return
+	}
+
+	if err := ds.ProjectMemory.AutoSaveCommand(body.Command); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "saved"})
+}
+
+// ── Project indexing helpers ──────────────────────────────────────────────────
+
+// ShouldAutoIndex returns true if the project exists and has not been indexed yet.
+func (ds *DashboardServer) ShouldAutoIndex(projectPath string) bool {
+	if ds.Store == nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(ds.DwytBin, "codebase-memory-mcp")); err != nil {
+		return false
+	}
+	p, err := ds.Store.GetProjectByPath(projectPath)
+	if err != nil {
+		return true // project not registered yet, should index
+	}
+	return p.IndexedAt == nil
+}
+
+// triggerIndex starts indexing the given project path in a background goroutine.
+func (ds *DashboardServer) triggerIndex(projectPath string) {
+	ds.codebaseProgress.mu.Lock()
+	if ds.codebaseProgress.indexing {
+		ds.codebaseProgress.mu.Unlock()
+		return
+	}
+	ds.codebaseProgress.indexing = true
+	ds.codebaseProgress.progress = "starting auto-index"
+	ds.codebaseProgress.error = ""
+	ds.indexProject = projectPath
+	ds.codebaseProgress.mu.Unlock()
+
+	go func() {
+		defer func() {
+			ds.codebaseProgress.mu.Lock()
+			ds.codebaseProgress.indexing = false
+			ds.codebaseProgress.mu.Unlock()
+		}()
+
+		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+		cmd := exec.Command(bin, "cli", "index_repository",
+			fmt.Sprintf(`{"repo_path":"%s"}`, projectPath))
+
+		ds.codebaseProgress.mu.Lock()
+		ds.codebaseProgress.progress = "indexing"
+		ds.codebaseProgress.mu.Unlock()
+
+		start := time.Now()
+		out, err := cmd.CombinedOutput()
+
+		ds.codebaseProgress.mu.Lock()
+		defer ds.codebaseProgress.mu.Unlock()
+
+		if err != nil {
+			ds.codebaseProgress.error = err.Error()
+			ds.codebaseProgress.progress = fmt.Sprintf("failed after %s", time.Since(start).Round(time.Second))
+			log.Error("auto-index failed", log.Fields{"path": projectPath, "error": err.Error(), "output": string(out)})
+		} else {
+			ds.codebaseProgress.progress = fmt.Sprintf("completed in %s", time.Since(start).Round(time.Second))
+			log.Info("auto-index completed", log.Fields{"path": projectPath})
+			if ds.Store != nil {
+				ds.Store.MarkIndexed(projectPath, 0, 0)
+			}
+		}
+		// Notify SSE clients
+		ds.broadcastSSE("index_update", ds.codebaseProgress.progress)
+	}()
+}
+
+// broadcastSSE pushes an event to all connected SSE clients.
+func (ds *DashboardServer) broadcastSSE(event, message string) {
+	data, err := json.Marshal(map[string]string{"event": event, "message": message})
+	if err != nil {
+		return
+	}
+	ds.sseMu.Lock()
+	defer ds.sseMu.Unlock()
+	for ch := range ds.sseClients {
+		select {
+		case ch <- string(data):
+		default:
+		}
+	}
 }

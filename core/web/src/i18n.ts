@@ -24,7 +24,12 @@ export const T = {
     index: 'Index', indexing: '...',
     openGraph: 'Open Graph →', openStats: 'Open Stats →',
     search: 'Search', searchPlaceholder: 'Search memory...', repoPlaceholder: 'path/to/repo',
+    rebuildSummary: 'Rebuild summary', forgetMemory: 'Forget memory',
+    memories: 'Memories',
     global: 'global',
+    // User-friendly tool names
+    memoryActive: 'Active memory', compressionActive: 'Active compression',
+    terminalOptimized: 'Terminal optimized', codeMap: 'Code map (optional)',
     // Setup
     setupTitle: 'DWYT Setup', install: 'Install →', installing: 'Installing...',
     dashboard: 'Dashboard →', loading: 'Loading...', starting: 'Starting...',
@@ -62,7 +67,12 @@ export const T = {
     index: 'Indexar', indexing: '...',
     openGraph: 'Abrir Grafo →', openStats: 'Abrir Stats →',
     search: 'Buscar', searchPlaceholder: 'Buscar memória...', repoPlaceholder: 'path/to/repo',
+    rebuildSummary: 'Reconstruir resumo', forgetMemory: 'Apagar memória',
+    memories: 'Memórias',
     global: 'global',
+    // User-friendly tool names
+    memoryActive: 'Memória ativa', compressionActive: 'Compressão ativa',
+    terminalOptimized: 'Terminal otimizado', codeMap: 'Mapa do código (opcional)',
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',
     dashboard: 'Dashboard →', loading: 'Carregando...', starting: 'Iniciando...',
     tools: 'Ferramentas', clients: 'IAs / Clientes', project: 'Projeto',

@@ -16,8 +16,10 @@ import (
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/memory"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/workspace"
 
 	"github.com/spf13/cobra"
 )
@@ -98,16 +100,20 @@ func runDefault(projectPath string) error {
 	// Quick probe (500ms) — if daemon responds, just switch project context
 	if daemonOK := probeDaemon(); daemonOK {
 		if err := switchProject(projectPath); err == nil {
+			workspace.Touch(projectPath)
 			fmt.Printf("  ✓ Dashboard → http://127.0.0.1:2737  (already running)\n")
 			fmt.Printf("  ✓ Project context updated\n\n")
 			openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 			return nil
 		}
-		// Switch failed, fall through to normal startup
+		// Switch failed — kill stale daemon and restart
+		log.Warn("daemon probe ok but switch failed, restarting")
+		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+		time.Sleep(300 * time.Millisecond)
 	}
 
 	// ── Phase 2: start services (fire-and-forget in background) ───────────────
-	startServicesAsync(e.DwytBin)
+	headroomPort := startServicesAsync(e.DwytBin)
 
 	// ── Marks available tools ──────────────────────────────────────────────────
 	for _, bin := range []string{"rtk", "memstack"} {
@@ -130,6 +136,7 @@ func runDefault(projectPath string) error {
 	daemon.Env = append(os.Environ(),
 		"DWYT_START_CWD="+cwd,
 		"DWYT_PROJECT="+projectPath,
+		fmt.Sprintf("DWYT_HEADROOM_PORT=%d", headroomPort),
 	)
 	setDaemonAttr(daemon)
 	if err := daemon.Start(); err != nil {
@@ -139,6 +146,15 @@ func runDefault(projectPath string) error {
 	}
 	log.Info("daemon spawned", log.Fields{"pid": daemon.Process.Pid})
 
+	// ── Phase 3: healthcheck daemon before declaring success ──────────────────
+	if !waitForDaemon(3*time.Second, 300*time.Millisecond) {
+		log.Error("daemon healthcheck timed out", log.Fields{"pid": daemon.Process.Pid})
+		daemon.Process.Kill()
+		fmt.Printf("  ✗ Dashboard failed to respond — see %s\n", filepath.Join(e.DwytHome, "dwyt.log"))
+		return fmt.Errorf("daemon healthcheck timeout")
+	}
+
+	workspace.Touch(projectPath)
 	fmt.Printf("  ✓ Dashboard → http://127.0.0.1:2737\n")
 	fmt.Printf("  Stop: dwyt stop\n\n")
 	openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
@@ -161,6 +177,17 @@ func probeDaemon() bool {
 	return resp.StatusCode == 200
 }
 
+func waitForDaemon(timeout, interval time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if probeDaemon() {
+			return true
+		}
+		time.Sleep(interval)
+	}
+	return false
+}
+
 func switchProject(projectPath string) error {
 	body := fmt.Sprintf(`{"path":%q}`, projectPath)
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -179,38 +206,55 @@ func switchProject(projectPath string) error {
 	return nil
 }
 
-func startServicesAsync(dwytBin string) {
+func startServicesAsync(dwytBin string) int {
 	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(codebaseBin); err == nil {
-		fmt.Printf("  →  codebase-memory-mcp     starting...\n")
-		go func() {
-			cmd := exec.Command(codebaseBin, "--ui=true", "--port=9749")
-			cmd.Stdout = nil
-			cmd.Stderr = nil
-			setProcAttr(cmd)
-			if err := cmd.Start(); err != nil {
-				log.Warn("codebase-memory-mcp start failed", log.Fields{"error": err.Error()})
-			}
-		}()
+		fmt.Printf("  →  codebase-memory-mcp     available (index on demand)\n")
 	} else {
 		fmt.Printf("  →  codebase-memory-mcp     not installed (install via UI)\n")
 	}
 
+	headroomPort := findFreePort(8787)
 	headroomBin := filepath.Join(dwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err == nil {
-		fmt.Printf("  →  headroom                starting...\n")
+		fmt.Printf("  →  headroom                starting on port %d...\n", headroomPort)
 		go func() {
-			cmd := exec.Command(headroomBin, "proxy", "--port", "8787")
-			cmd.Stdout = nil
-			cmd.Stderr = nil
+			cmd := exec.Command(headroomBin, "proxy", "--port", fmt.Sprintf("%d", headroomPort))
 			setProcAttr(cmd)
 			if err := cmd.Start(); err != nil {
-				log.Warn("headroom start failed", log.Fields{"error": err.Error()})
+				log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": headroomPort})
+				return
+			}
+			log.Info("headroom spawned", log.Fields{"pid": cmd.Process.Pid, "port": headroomPort})
+			// Brief healthcheck to confirm it actually came up
+			healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)
+			if health.WaitForHTTP(healthURL, 5*time.Second, 500*time.Millisecond).Healthy {
+				log.Info("headroom healthy", log.Fields{"port": headroomPort})
+			} else {
+				log.Warn("headroom started but not healthy", log.Fields{"port": headroomPort})
 			}
 		}()
 	} else {
 		fmt.Printf("  →  headroom                not installed (install via UI)\n")
 	}
+
+	memstackBin := filepath.Join(dwytBin, "memstack")
+	if _, err := os.Stat(memstackBin); err == nil {
+		fmt.Printf("  →  memstack                available\n")
+	}
+
+	return headroomPort
+}
+
+func findFreePort(defaultPort int) int {
+	port := defaultPort
+	for i := 0; i < 5; i++ {
+		if !health.ProbePort(port) {
+			return port
+		}
+		port++
+	}
+	return defaultPort
 }
 
 func openBrowserURL(url string) {
@@ -271,6 +315,22 @@ var statusCmd = &cobra.Command{
 			}
 			fmt.Printf("  %s %-22s %s\n", icon, t.Name, t.Details)
 		}
+
+		// Show memory status for current directory
+		cwd, _ := os.Getwd()
+		if pm, err := memory.NewProjectMemory(DwytHome, cwd); err == nil {
+			stats := pm.Stats()
+			if entries, ok := stats["total_entries"].(int); ok && entries > 0 {
+				fmt.Printf("\n  🧠 Memory: %d entries for %s\n", entries, stats["project_name"])
+				if summary, ok := stats["summary"].(string); ok && summary != "" {
+					if len(summary) > 120 {
+						summary = summary[:117] + "..."
+					}
+					fmt.Printf("     %s\n", summary)
+				}
+			}
+		}
+
 		return nil
 	},
 }

@@ -155,24 +155,42 @@ func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
 }
 
 func agentsMDTemplate(rtkBin string) string {
-	return fmt.Sprintf(`# DWYT — Don't Waste Your Tokens
-
-Este projeto usa um stack de ferramentas para reduzir consumo de tokens.
-**Todas as integrações são automáticas: use-as sempre que disponíveis.**
-
-## Regra geral (siga SEMPRE, sem hesitação):
-- Se o MCP do codebase-memory-mcp estiver conectado, use as tools MCP como PRIMEIRA opção antes de grep/glob/read
-- **SEMPRE** prefixe comandos de terminal com %crtk%c
-- Se Headroom estiver ativo via wrapper, use Headroom (se não estiver, ignore)
-- Se MemStack estiver disponível, consulte-o antes de começar tarefas novas
-`, '`', '`')
+	backtick := "`"
+	return "# DWYT — Don't Waste Your Tokens\n\n" +
+		"Este projeto usa um stack de ferramentas para reduzir consumo de tokens.\n" +
+		"**Todas as integrações são automáticas: use-as sempre que disponíveis.**\n\n" +
+		"## Prioridades (siga esta ordem):\n\n" +
+		"### 1. MemStack — Memória Persistente do Projeto\n" +
+		"- **SEMPRE** consulte a memória DWYT do projeto antes de começar tarefas novas.\n" +
+		"- Antes de pedir arquivos grandes ao usuário, busque contexto salvo.\n" +
+		"- Antes de reconstruir contexto, busque decisões anteriores.\n" +
+		"- Após concluir uma mudança relevante, salve um resumo curto:\n" +
+		"  - Use a API: POST /api/memory/save com type=\"decision\" ou type=\"action\"\n" +
+		"- **NUNCA** misture memória entre projetos diferentes.\n" +
+		"- A memória é isolada por projeto e carregada automaticamente.\n\n" +
+		"### 2. Codebase — Grafo Estrutural do Código\n" +
+		"- Use as tools MCP do codebase-memory-mcp para navegação estrutural.\n" +
+		"- Use search_graph, trace_call_path, get_code_snippet ao invés de grep/glob/read.\n" +
+		"- **APENAS** use codebase quando precisar entender a estrutura real do código.\n\n" +
+		"### 3. RTK — Compressão de Terminal\n" +
+		"- **SEMPRE** prefixe comandos de terminal com " + backtick + "rtk" + backtick + "\n" +
+		"- Isto reduz o contexto em 60-90%\n\n" +
+		"### 4. Headroom — Compressão de API\n" +
+		"- Se o Headroom estiver ativo (verifique variáveis *_BASE_URL), use-o automaticamente.\n" +
+		"- Não precisa de configuração manual.\n"
 }
 
 const claudeMD = `# DWYT — Don't Waste Your Tokens
 Claude Code integration.
-- Use codebase-memory-mcp as first option before file search
-- Always prefix shell commands with rtk
-- Use Headroom only when session started with wrapper
+
+## Priority order:
+1. **MemStack first** — consult project memory before reading large files or rebuilding context
+2. **Codebase MCP** — use codebase-memory-mcp tools for structural code exploration
+3. **RTK prefix** — always prefix shell commands with rtk
+4. **Headroom** — auto-detected via *_BASE_URL env vars
+
+To save context: POST http://127.0.0.1:2737/api/memory/save
+To search memory: GET http://127.0.0.1:2737/api/memory/search?q=your+query
 `
 
 const cursorRule = `---
@@ -180,19 +198,27 @@ description: DWYT project guidance
 alwaysApply: true
 ---
 
-Follow AGENTS.md instructions.
-- Prefer MCP tools over manual file search
-- Use rtk prefix for shell commands
+## DWYT Priority Order:
+1. MemStack: consult project memory before file operations. API at http://127.0.0.1:2737/api/memory/
+2. Codebase MCP: use for structural code exploration
+3. RTK: prefix shell commands with rtk
+4. Headroom: auto via env vars
 `
 
 const kiroSteering = `# DWYT Steering
-Follow AGENTS.md instructions.
-- Prefer MCP tools over manual file search
-- Use rtk prefix for shell commands
+## Priority:
+1. Check MemStack (project memory) — http://127.0.0.1:2737/api/memory/search?q=<query>
+2. Use Codebase MCP for structural exploration
+3. Prefix shell commands with rtk
+4. Headroom auto-detected
+Save important decisions to MemStack after completion.
 `
 
 const copilotMD = `# DWYT — GitHub Copilot
-Follow AGENTS.md instructions.
-- Prefer MCP tools over manual file search
-- Use rtk prefix for shell commands
+## Priority:
+1. Check project memory (MemStack) at http://127.0.0.1:2737/api/memory/ before heavy file reads
+2. Use Codebase MCP tools for structural exploration  
+3. Prefix shell commands with rtk
+4. Headroom compression is automatic
+Save summaries after important changes.
 `

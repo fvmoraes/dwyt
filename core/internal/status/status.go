@@ -51,6 +51,10 @@ type HeadroomMetrics struct {
 	RequestsDone int64 `json:"requests_done"`
 }
 
+var headroomDefaultPort = 8787
+
+func SetHeadroomPort(port int) { headroomDefaultPort = port }
+
 func PollAll(dwytBin string) *SystemStatus {
 	s := &SystemStatus{Timestamp: time.Now()}
 	s.Tools = append(s.Tools, pollCBMCP(dwytBin))
@@ -110,12 +114,13 @@ func pollRTK(dwytBin string) ToolStatus {
 }
 
 func pollHeadroom() ToolStatus {
-	ts := ToolStatus{Name: "headroom", Port: 8787}
-	if health.ProbeURL("http://127.0.0.1:8787/health") {
+	ts := ToolStatus{Name: "headroom", Port: headroomDefaultPort}
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)
+	if health.ProbeURL(url) {
 		ts.Running = true
 		ts.Healthy = true
 		ts.State = StateRunning
-		ts.Details = "proxy on port 8787"
+		ts.Details = fmt.Sprintf("proxy on port %d", headroomDefaultPort)
 	} else {
 		ts.State = StateNotInstalled
 	}
@@ -167,8 +172,8 @@ func GetRTKMetrics(dwytBin string) *RTKMetrics {
 }
 
 func GetHeadroomMetrics() *HeadroomMetrics {
-	m := &HeadroomMetrics{Port: 8787}
-	resp, err := http.Get("http://127.0.0.1:8787/stats")
+	m := &HeadroomMetrics{Port: headroomDefaultPort}
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/stats", headroomDefaultPort))
 	if err != nil {
 		return m
 	}
@@ -271,7 +276,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	}
 
 	// headroom
-	if health.ProbeURL("http://127.0.0.1:8787/health") {
+	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)) {
 		states["headroom"] = StateRunning
 	} else {
 		states["headroom"] = StateNotInstalled

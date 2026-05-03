@@ -31,8 +31,8 @@ func Init(dwytHome, dwytBin, dwytData, shellRC, loginRC string) {
 func initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC string) {
 	envFile := filepath.Join(dwytHome, "env.sh")
 	content := fmt.Sprintf(
-		"export XDG_CACHE_HOME=%q\nexport PATH=%s:$PATH\n",
-		dwytData, dwytBin,
+		"export XDG_CACHE_HOME=%q\nexport DWYT_HOME=%q\nexport PATH=%s:$PATH\n",
+		dwytData, dwytHome, dwytBin,
 	)
 	os.WriteFile(envFile, []byte(content), 0644)
 

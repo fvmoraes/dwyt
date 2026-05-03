@@ -47,6 +47,9 @@ export default function Dashboard() {
   const [indexError,   setIndexError]   = useState('')
   const [searchQuery,  setSearchQuery]  = useState('')
   const [searchResult, setSearchResult] = useState('')
+  const [memStats,     setMemStats]     = useState<any>(null)
+  const [summarizing,  setSummarizing]  = useState(false)
+  const [forgetting,   setForgetting]   = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -68,6 +71,10 @@ export default function Dashboard() {
     try { setTools((await api.getStatus()).tools || []) } catch (_) {}
     try { setDetails(await api.getToolDetails(indexPath || undefined) || {}) } catch (_) {}
     try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch (_) {}
+    try {
+      const ms = await api.getMemoryStatus()
+      if (ms.active && ms.stats) setMemStats(ms.stats)
+    } catch (_) {}
   }, [indexPath])
 
   // Main effect: fetch all data when project param changes
@@ -82,6 +89,25 @@ export default function Dashboard() {
       if (!proj && c.active_project) setIndexPath(c.active_project)
     }).catch(() => {})
   }, [searchParams.get('project')])
+
+  // SSE listener for project_switch events from other clients (CLI switch)
+  useEffect(() => {
+    const evtSource = new EventSource('http://127.0.0.1:2737/api/events')
+    evtSource.addEventListener('status', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.event === 'project_switch' && data.message) {
+          if (data.message !== indexPath) {
+            setIndexPath(data.message)
+            const p = new URLSearchParams(searchParams)
+            p.set('project', data.message)
+            setSearchParams(p)
+          }
+        }
+      } catch (_) {}
+    })
+    return () => { evtSource.close() }
+  }, [indexPath])
 
   // Fetch tool details + status when indexPath settles
   useEffect(() => {
@@ -150,8 +176,16 @@ export default function Dashboard() {
 
   async function handleSearch() {
     if (!searchQuery) return
-    const d = await api.searchMemstack(searchQuery)
-    setSearchResult(d.results || 'no results')
+    try {
+      const d = await api.searchMemory(searchQuery)
+      if (d.results && d.results.length > 0) {
+        setSearchResult(d.results.map((e: any) => `[${e.type}] ${e.content?.substring(0, 120)}...`).join('\n'))
+      } else {
+        setSearchResult('No results found')
+      }
+    } catch (_) {
+      setSearchResult('Search failed')
+    }
   }
 
   // ── sub-components ─────────────────────────────────────────────────────────
@@ -227,6 +261,10 @@ export default function Dashboard() {
   const ms      = getTool('memstack')
 
   const totalSaved = Object.values(details).reduce((a, d) => a + (d?.tokens_saved || 0), 0)
+  const rtkSaved     = details['rtk']?.tokens_saved || 0
+  const headroomSaved = details['headroom']?.tokens_saved || 0
+  const memCount      = memStats?.total_entries || 0
+  const memEstimate   = memCount > 0 ? memCount * 5000 : 0
 
   function calcWithout() {
     let w = 0
@@ -289,13 +327,18 @@ export default function Dashboard() {
 
       {/* ── Project context bar ── */}
       {indexPath && (
-        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 10, color: '#3bc9db', fontWeight: 700 }}>📁</span>
-          <span style={{ fontSize: 11, color: '#339af0', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
-          <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}>{indexPath}</span>
+        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid #2f9e44', background: 'linear-gradient(135deg, #1a2a1a 0%, #1e1f23 100%)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 10, color: '#2f9e44', fontWeight: 700 }}>🛡️</span>
+          <span style={{ fontSize: 11, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
+          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>DWYT is protecting this project</span>
+          {memCount > 0 && (
+            <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
+              🧠 {memCount} {t.memories}
+            </span>
+          )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: '#2f9e44', marginLeft: 'auto' }}>
-              ✓ {new Date(projectCtx.project_state.indexed_at).toLocaleDateString()}
+            <span style={{ fontSize: 9, color: '#339af0', marginLeft: 'auto' }}>
+              🗺️ Indexed
             </span>
           )}
         </div>
@@ -304,29 +347,45 @@ export default function Dashboard() {
       {/* ── Totals banner ── */}
       <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
         {hasData ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
-            {[
-              { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e' },
-              { label: t.withDwyt,    value: fmtN(withDwyt),    sub: t.tokensSpent,  color: '#2f9e44' },
-            ].map((col, i) => (
-              <div key={i} style={{ padding: '7px 14px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.1 }}>{col.value}</div>
-                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
-              </div>
-            ))}
-            <div style={{ padding: '7px 14px', background: '#1a2a1a' }}>
-              <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: '#3bc9db', lineHeight: 1.1 }}>{fmtN(totalSaved)}</span>
-                {savingsPct > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#2f9e44' }}>↓ {savingsPct}%</span>}
-              </div>
-              <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
-              {savingsPct > 0 && (
-                <div className="progress-bar" style={{ marginTop: 4 }}>
-                  <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: '#3bc9db' }} />
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
+              {[
+                { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e' },
+                { label: t.withDwyt,    value: fmtN(withDwyt),    sub: t.tokensSpent,  color: '#2f9e44' },
+              ].map((col, i) => (
+                <div key={i} style={{ padding: '7px 14px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.1 }}>{col.value}</div>
+                  <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
                 </div>
-              )}
+              ))}
+              <div style={{ padding: '7px 14px', background: '#1a2a1a' }}>
+                <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: '#3bc9db', lineHeight: 1.1 }}>{fmtN(totalSaved)}</span>
+                  {savingsPct > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#2f9e44' }}>↓ {savingsPct}%</span>}
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
+                {savingsPct > 0 && (
+                  <div className="progress-bar" style={{ marginTop: 4 }}>
+                    <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: '#3bc9db' }} />
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* Per-tool breakdown */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '4px 10px', background: '#1a1b1f', gap: 8 }}>
+              {[
+                { label: 'RTK', saved: rtkSaved, color: '#2f9e44' },
+                { label: 'Headroom', saved: headroomSaved, color: '#3bc9db' },
+                { label: 'MemStack', saved: memEstimate, color: '#f08d49' },
+                { label: 'Codebase', saved: 0, color: '#339af0' },
+              ].map(tool => (
+                <div key={tool.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 9, color: tool.color, fontWeight: 600 }}>{tool.label}</span>
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--muted)' }}>{fmtN(tool.saved)}</span>
+                </div>
+              ))}
             </div>
           </div>
         ) : (
@@ -364,29 +423,38 @@ export default function Dashboard() {
           const state = toolState(cbmcp, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label="Codebase" color="#339af0" state={state} />
+              <CardHeader label={t.codeMap} color="#339af0" state={state} />
               <Hr />
-              <Row label={t.commands}       value={fmtN(det?.tokens_saved) !== '--' ? '—' : '—'} />
-              <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.savingsPct}     value={'—'} />
+              <Row label={t.tokensSavedLabel} value={'—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
               <Hr />
               <StartStop />
-              <div style={{ display: 'flex', gap: 4 }}>
-                <input type="text" value={indexPath} onChange={e => setIndexPath(e.target.value)}
-                  placeholder={t.repoPlaceholder} style={{ flex: 1 }} />
-                <button className="primary" style={{ fontSize: 10, padding: '3px 8px' }}
-                  onClick={handleIndex} disabled={indexing}>
-                  {indexing ? t.indexing : t.index}
-                </button>
-              </div>
-              {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
-              <LinkBtn label={t.openGraph} onClick={async () => {
-                const r = await api.openCodebaseUI()
-                if (r.url) window.open(r.url)
-                if (r.started) setTimeout(pollAll, 2000)
-              }} />
+              {state === 'not_installed' ? (
+                <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.notInstalled}</span>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input type="text" value={indexPath} onChange={e => setIndexPath(e.target.value)}
+                      placeholder={t.repoPlaceholder} style={{ flex: 1 }} />
+                    <button className="primary" style={{ fontSize: 10, padding: '3px 8px' }}
+                      onClick={handleIndex} disabled={indexing}>
+                      {indexing ? t.indexing : t.index}
+                    </button>
+                  </div>
+                  {indexing && (
+                    <div className="progress-bar" style={{ marginTop: 2 }}>
+                      <div className="progress-fill" style={{ width: '60%', background: '#339af0', animation: 'pulse 1.5s infinite' }} />
+                    </div>
+                  )}
+                  {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
+                  <LinkBtn label={t.openGraph} onClick={async () => {
+                    const r = await api.openCodebaseUI()
+                    if (r.url) window.open(r.url)
+                    if (r.started) setTimeout(pollAll, 2000)
+                  }} />
+                </>
+              )}
             </div>
           )
         })()}
@@ -397,7 +465,7 @@ export default function Dashboard() {
           const state = toolState(rtkTool, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label="RTK" color="#2f9e44" state={state} />
+              <CardHeader label={t.terminalOptimized} color="#2f9e44" state={state} />
               <Hr />
               <Row label={t.commands}       value={det?.total_commands ? String(det.total_commands) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -421,7 +489,7 @@ export default function Dashboard() {
           const state = toolState(hr, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label="Headroom" color="#3bc9db" state={state} />
+              <CardHeader label={t.compressionActive} color="#3bc9db" state={state} />
               <Hr />
               <Row label={t.commands}       value={det?.requests ? String(det.requests) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -446,13 +514,17 @@ export default function Dashboard() {
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label="MemStack" color="#f08d49" state={state} />
+              <CardHeader label={t.memoryActive} color="#f08d49" state={state} />
               <Hr />
-              <Row label={t.commands}       value={'—'} />
-              <Row label={t.tokensSavedLabel} value={t.variable} />
-              <Row label={t.savingsPct}     value={'—'} />
+              <Row label={t.tokensSavedLabel} value={memEstimate > 0 ? fmtN(memEstimate) : '—'} />
+              <Row label={t.memories} value={memCount > 0 ? String(memCount) : '—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
+              {memStats?.summary && (
+                <div style={{ fontSize: 9, color: 'var(--muted)', maxHeight: 30, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {memStats.summary}
+                </div>
+              )}
               <Hr />
               <StartStop />
               <div style={{ display: 'flex', gap: 4 }}>
@@ -461,6 +533,26 @@ export default function Dashboard() {
                 <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
               </div>
               {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="subtle-start" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
+                  setSummarizing(true)
+                  try {
+                    const r = await api.summarizeMemory()
+                    if (r.summary) { setMemStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
+                  } catch (_) {}
+                  setSummarizing(false)
+                }} disabled={summarizing}>
+                  {summarizing ? '...' : t.rebuildSummary}
+                </button>
+                <button className="subtle-stop" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
+                  if (!confirm('Forget all memory for this project?')) return
+                  setForgetting(true)
+                  try { await api.forgetMemory(); setMemStats(null); pollAll() } catch (_) {}
+                  setForgetting(false)
+                }} disabled={forgetting}>
+                  {forgetting ? '...' : t.forgetMemory}
+                </button>
+              </div>
             </div>
           )
         })()}

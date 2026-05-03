@@ -116,3 +116,41 @@ export async function getProjects(): Promise<{ projects: Array<{id: string; path
   const r = await fetch(`${API}/projects`)
   return r.json()
 }
+
+// ── MemStack memory endpoints ─────────────────────────────────────────────
+export async function getMemoryStatus(): Promise<{ active: boolean; stats?: any; error?: string }> {
+  const r = await fetch(`${API}/memory/status`)
+  return r.json()
+}
+
+export async function searchMemory(query: string, project?: string): Promise<{ results: any[]; count: number }> {
+  const params = new URLSearchParams({ q: query })
+  if (project) params.set('project', project)
+  const r = await fetch(`${API}/memory/search?${params.toString()}`)
+  return r.json()
+}
+
+export async function saveMemory(type: string, content: string): Promise<{ status: string }> {
+  const r = await fetch(`${API}/memory/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, content }),
+  })
+  return r.json()
+}
+
+export async function summarizeMemory(): Promise<{ status: string; summary: string }> {
+  const r = await fetch(`${API}/memory/summarize`, { method: 'POST' })
+  return r.json()
+}
+
+export async function forgetMemory(): Promise<{ status: string }> {
+  const r = await fetch(`${API}/memory/forget`, { method: 'POST' })
+  return r.json()
+}
+
+// ── Codebase index status ─────────────────────────────────────────────────
+export async function getIndexStatus(): Promise<{ indexing: boolean; progress: string; error?: string }> {
+  const r = await fetch(`${API}/codebase/index/status`)
+  return r.json()
+}

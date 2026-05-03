@@ -64,7 +64,12 @@ func (s *Store) migrate() error {
 }
 
 func HashPath(path string) string {
-	h := sha256.Sum256([]byte(path))
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.Clean(abs)
+	h := sha256.Sum256([]byte(abs))
 	return hex.EncodeToString(h[:])[:12]
 }
 
