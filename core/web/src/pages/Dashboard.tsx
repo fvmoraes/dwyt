@@ -82,6 +82,19 @@ export default function Dashboard() {
     pollAll()
   }, [])
 
+  // React to project param changes from sidebar navigation
+  useEffect(() => {
+    const urlProject = searchParams.get('project')
+    if (urlProject && urlProject !== indexPath) {
+      setIndexPath(urlProject)
+    }
+  }, [searchParams.get('project')])
+
+  // Re-fetch when indexPath changes
+  useEffect(() => {
+    if (indexPath) pollAll()
+  }, [indexPath])
+
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
     if (reloadSecs > 0) timerRef.current = setInterval(pollAll, reloadSecs * 1000)
