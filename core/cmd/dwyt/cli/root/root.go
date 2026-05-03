@@ -98,9 +98,9 @@ func runDefault(projectPath string) error {
 	// Quick probe (500ms) — if daemon responds, just switch project context
 	if daemonOK := probeDaemon(); daemonOK {
 		if err := switchProject(projectPath); err == nil {
-			fmt.Printf("  ✓ Dashboard → http://localhost:2737  (already running)\n")
+			fmt.Printf("  ✓ Dashboard → http://127.0.0.1:2737  (already running)\n")
 			fmt.Printf("  ✓ Project context updated\n\n")
-			openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
+			openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 			return nil
 		}
 		// Switch failed, fall through to normal startup
@@ -139,9 +139,9 @@ func runDefault(projectPath string) error {
 	}
 	log.Info("daemon spawned", log.Fields{"pid": daemon.Process.Pid})
 
-	fmt.Printf("  ✓ Dashboard → http://localhost:2737\n")
+	fmt.Printf("  ✓ Dashboard → http://127.0.0.1:2737\n")
 	fmt.Printf("  Stop: dwyt stop\n\n")
-	openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
+	openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 	return nil
 }
 
