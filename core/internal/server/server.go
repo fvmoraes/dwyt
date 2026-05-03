@@ -44,17 +44,18 @@ type FsNode struct {
 }
 
 type DashboardServer struct {
-	Port          int
-	DwytBin       string
-	DwytHome      string
-	StartCwd      string
-	ActiveProject string            // current project — can be updated via /api/project/switch
-	projectMu     sync.RWMutex
-	sseClients    map[chan string]bool
-	sseMu         sync.Mutex
-	installMu     sync.Mutex
-	installStatus map[string]string
-	installing    bool
+	Port           int
+	DwytBin        string
+	DwytHome       string
+	StartCwd       string
+	DefaultProject string                          // currently active project — can be updated
+	Projects       map[string]*workspace.ProjectState // tracked projects by path
+	projectMu      sync.RWMutex
+	sseClients     map[chan string]bool
+	sseMu          sync.Mutex
+	installMu      sync.Mutex
+	installStatus  map[string]string
+	installing     bool
 }
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
@@ -66,15 +67,46 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	if project == "" {
 		project = cwd
 	}
-	return &DashboardServer{
-		Port:          port,
-		DwytBin:       dwytBin,
-		DwytHome:      dwytHome,
-		StartCwd:      project,
-		ActiveProject: project,
-		sseClients:    make(map[chan string]bool),
-		installStatus: make(map[string]string),
+
+	ds := &DashboardServer{
+		Port:           port,
+		DwytBin:        dwytBin,
+		DwytHome:       dwytHome,
+		StartCwd:       project,
+		DefaultProject: project,
+		Projects:       make(map[string]*workspace.ProjectState),
+		sseClients:     make(map[chan string]bool),
+		installStatus:  make(map[string]string),
 	}
+
+	// Load existing project state and mark current project
+	ps, _ := workspace.Read(project)
+	ps.LastOpen = time.Now()
+	ds.Projects[project] = ps
+	workspace.Save(ps)
+
+	// Load previously indexed projects from state.json (only to rediscover)
+	if data, err := os.ReadFile(filepath.Join(dwytHome, "state.json")); err == nil {
+		var s struct {
+			IntegratedProjects map[string]struct {
+				Path      string    `json:"path"`
+				IndexedAt time.Time `json:"indexed_at,omitempty"`
+				Nodes     int       `json:"nodes,omitempty"`
+				Edges     int       `json:"edges,omitempty"`
+			} `json:"integrated_projects"`
+		}
+		if json.Unmarshal(data, &s) == nil {
+			for path := range s.IntegratedProjects {
+				if path != project {
+					if wp, err := workspace.Read(path); err == nil {
+						ds.Projects[path] = wp
+					}
+				}
+			}
+		}
+	}
+
+	return ds
 }
 
 func (ds *DashboardServer) Start() error {
@@ -139,6 +171,7 @@ func (ds *DashboardServer) Start() error {
 		api.POST("/codebase/open-ui", ds.apiCodebaseOpenUI)
 		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
 		api.POST("/project/switch", ds.apiProjectSwitch)
+		api.GET("/projects", ds.apiProjectsList)
 	}
 
 	go ds.broadcastLoop()
@@ -168,7 +201,7 @@ func openBrowser(url string) {
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"status":  "ok",
-		"project": ds.ActiveProject,
+		"project": ds.DefaultProject,
 		"tools":   status.HealthStatus(ds.DwytBin),
 	})
 }
@@ -550,7 +583,7 @@ func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
 
 func (ds *DashboardServer) apiCwd(c *gin.Context) {
 	ds.projectMu.RLock()
-	project := ds.ActiveProject
+	project := ds.DefaultProject
 	ds.projectMu.RUnlock()
 	if project == "" {
 		project, _ = os.UserHomeDir()
@@ -569,15 +602,25 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		return
 	}
 
-	log.Info("switching project", log.Fields{"from": ds.ActiveProject, "to": body.Path})
-
 	ds.projectMu.Lock()
-	ds.ActiveProject = body.Path
+	old := ds.DefaultProject
+	ds.DefaultProject = body.Path
 	ds.StartCwd      = body.Path
+
+	// Add to projects map if new
+	if _, exists := ds.Projects[body.Path]; !exists {
+		ps, _ := workspace.Read(body.Path)
+		ps.LastOpen = time.Now()
+		ds.Projects[body.Path] = ps
+		workspace.Save(ps)
+		log.Info("new project registered", log.Fields{"path": body.Path})
+	} else {
+		ds.Projects[body.Path].LastOpen = time.Now()
+		workspace.Save(ds.Projects[body.Path])
+	}
 	ds.projectMu.Unlock()
 
-	// Update per-project workspace state — record this project was opened
-	workspace.Touch(body.Path)
+	log.Info("switching project", log.Fields{"from": old, "to": body.Path})
 
 	// Update config.json project_path so the UI reflects the new project
 	data, _ := os.ReadFile(ds.configPath())
@@ -598,6 +641,25 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	}()
 
 	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
+}
+
+// apiProjectsList returns all tracked projects with their state.
+func (ds *DashboardServer) apiProjectsList(c *gin.Context) {
+	ds.projectMu.RLock()
+	defer ds.projectMu.RUnlock()
+
+	list := make([]map[string]interface{}, 0, len(ds.Projects))
+	for path, ps := range ds.Projects {
+		list = append(list, map[string]interface{}{
+			"path":       path,
+			"active":     path == ds.DefaultProject,
+			"last_open":  ps.LastOpen,
+			"indexed_at": ps.IndexedAt,
+			"nodes":      ps.Nodes,
+			"edges":      ps.Edges,
+		})
+	}
+	c.JSON(200, gin.H{"projects": list, "default": ds.DefaultProject})
 }
 
 type ToolDetail struct {
@@ -818,7 +880,17 @@ func (ds *DashboardServer) detailMemStack() *ToolDetail {
 // which screen to show and what to pre-fill.
 func (ds *DashboardServer) apiContext(c *gin.Context) {
 	ds.projectMu.RLock()
-	cwd := ds.ActiveProject
+	cwd := ds.DefaultProject
+	projects := make([]map[string]interface{}, 0, len(ds.Projects))
+	for path, ps := range ds.Projects {
+		projects = append(projects, map[string]interface{}{
+			"path":       path,
+			"last_open":  ps.LastOpen,
+			"indexed_at": ps.IndexedAt,
+			"nodes":      ps.Nodes,
+			"edges":      ps.Edges,
+		})
+	}
 	ds.projectMu.RUnlock()
 
 	if cwd == "" {
@@ -846,15 +918,11 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 	}
 
 	// Determine suggested screen:
-	// - "dashboard" if tools are installed (user just wants to work)
-	// - "setup"     if nothing is installed yet
 	suggestedScreen := "setup"
 	if anyInstalled {
 		suggestedScreen = "dashboard"
 	}
 
-	// Active project: cwd takes priority over saved config
-	// (user ran `dwyt` from a specific dir — that's the intent)
 	activeProject := cwd
 	if activeProject == "" {
 		activeProject = cfg.ProjectPath
@@ -875,6 +943,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"any_installed":    anyInstalled,
 		"config":           cfg,
 		"project_state":    projectState,
+		"projects":         projects,
 	})
 }
 
