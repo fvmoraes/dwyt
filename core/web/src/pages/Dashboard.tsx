@@ -70,34 +70,22 @@ export default function Dashboard() {
     try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch (_) {}
   }, [indexPath])
 
-  // Unified effect: watches project param and fetches everything
+  // Main effect: fetch all data when project param changes
   useEffect(() => {
-    const urlProject = searchParams.get('project')
-    const target = urlProject || ''
-
-    if (urlProject) {
-      setIndexPath(urlProject)
-    } else {
-      api.getCwd().then(d => { if (d?.cwd && !target) setIndexPath(d.cwd) }).catch(() => {})
+    const proj = searchParams.get('project')
+    if (proj) {
+      setIndexPath(proj)
     }
-
-    // Fetch context (updates bar + sidebar projects)
     api.getContext().then(c => {
       setProjectCtx(c)
-      if (c.projects) setSidebarPjs(c.projects)
+      if (c.projects) setSidebarPjs(c.projects || [])
+      if (!proj && c.active_project) setIndexPath(c.active_project)
     }).catch(() => {})
-
-    // Fetch tool details for the current project
-    if (urlProject) {
-      api.loadSetup().then(() => {
-        setIndexPath(urlProject)
-      }).catch(() => {})
-    }
   }, [searchParams.get('project')])
 
-  // Re-fetch tool data when indexPath settles
+  // Fetch tool details + status when indexPath settles
   useEffect(() => {
-    if (indexPath) pollAll()
+    pollAll()
   }, [indexPath])
 
   useEffect(() => {
