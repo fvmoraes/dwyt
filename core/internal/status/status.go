@@ -260,14 +260,12 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 func HealthStatus(dwytBin string) map[string]ServiceState {
 	states := make(map[string]ServiceState)
 
-	// codebase
+	// codebase: MCP server launched on-demand by clients, not a persistent service
 	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		states["codebase-memory-mcp"] = StateNotInstalled
-	} else if health.ProbeURL("http://127.0.0.1:9749/health") {
+	} else if _, err := exec.Command(bin, "--version").Output(); err == nil {
 		states["codebase-memory-mcp"] = StateRunning
-	} else if pgrep("codebase-memory-mcp") {
-		states["codebase-memory-mcp"] = StateRunning  // running in stdio mode (no web UI)
 	} else {
 		states["codebase-memory-mcp"] = StateFailed
 	}

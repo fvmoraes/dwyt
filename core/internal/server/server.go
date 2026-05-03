@@ -161,6 +161,16 @@ func (ds *DashboardServer) Start() error {
 
 	go ds.broadcastLoop()
 
+	// Auto-index the starting project in background
+	go func() {
+		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+		if _, err := os.Stat(bin); err == nil {
+			log.Info("auto-indexing project on startup", log.Fields{"path": ds.DefaultProject})
+			exec.Command(bin, "cli", "index_repository",
+				fmt.Sprintf(`{"repo_path":"%s"}`, ds.DefaultProject)).Run()
+		}
+	}()
+
 	addr := fmt.Sprintf("127.0.0.1:%d", ds.Port)
 	fmt.Printf("   Dashboard → http://%s\n", addr)
 
