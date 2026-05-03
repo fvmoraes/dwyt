@@ -40,7 +40,9 @@ export default function Dashboard() {
   const [logs,         setLogs]         = useState<Record<string, string>>({})
   const [showLogs,     setShowLogs]     = useState(searchParams.get('logs') === '1')
   const [indexPath,    setIndexPath]    = useState('')
-  const [projectCtx,   setProjectCtx]   = useState<{active_project?: string; project_state?: {path?: string; last_open?: string; indexed_at?: string}}>({})
+  const [projectCtx,   setProjectCtx]   = useState<{active_project?: string; project_state?: {path?: string; last_open?: string; indexed_at?: string}; projects?: Array<{path:string; active:boolean; last_open:string; indexed_at?:string; nodes?:number}>}>({})
+  const [sidebarOpen,  setSidebarOpen]  = useState(false)
+  const [sidebarPjs,   setSidebarPjs]   = useState<any[]>([])
   const [indexing,     setIndexing]     = useState(false)
   const [indexError,   setIndexError]   = useState('')
   const [searchQuery,  setSearchQuery]  = useState('')
@@ -243,8 +245,14 @@ export default function Dashboard() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', padding: '10px 14px' }}>
-      <Sidebar onProjectChange={() => pollAll()} />
+    <div style={{ minHeight: '100vh', padding: '10px 14px', paddingLeft: sidebarOpen ? 294 : 14, transition: 'padding-left 0.2s ease' }}>
+      <Sidebar
+        open={sidebarOpen}
+        onToggle={setSidebarOpen}
+        projects={sidebarPjs}
+        onProjectsLoaded={setSidebarPjs}
+        onProjectChange={() => pollAll()}
+      />
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>

@@ -187,6 +187,17 @@ export default function SetupWizard() {
   // ── Sections ───────────────────────────────────────────────────────────────
   const sections = [
     {
+      title: t.project,
+      subtitle: projectPath || t.noneSelected,
+      content: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input type="text" value={projectPath} onChange={e => setProjectPath(e.target.value)}
+            placeholder={t.projectPlaceholder} />
+          <FileBrowser onSelect={setProjectPath} selected={projectPath} initialPath={projectPath} />
+        </div>
+      ),
+    },
+    {
       title: t.tools,
       subtitle: `${tools.length} ${t.of} ${TOOLS.length} ${t.selected}`,
       content: (
@@ -209,17 +220,6 @@ export default function SetupWizard() {
               checked={ias.includes(ia.id)}
               onChange={() => toggle(ias, ia.id, setIas)} />
           ))}
-        </div>
-      ),
-    },
-    {
-      title: t.project,
-      subtitle: projectPath || t.noneSelected,
-      content: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <input type="text" value={projectPath} onChange={e => setProjectPath(e.target.value)}
-            placeholder={t.projectPlaceholder} />
-          <FileBrowser onSelect={setProjectPath} selected={projectPath} initialPath={projectPath} />
         </div>
       ),
     },
