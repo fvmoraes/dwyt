@@ -220,6 +220,9 @@ func startServicesAsync(dwytBin string) int {
 		fmt.Printf("  →  headroom                starting on port %d...\n", headroomPort)
 		go func() {
 			cmd := exec.Command(headroomBin, "proxy", "--port", fmt.Sprintf("%d", headroomPort))
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			cmd.Stdin = nil
 			setProcAttr(cmd)
 			if err := cmd.Start(); err != nil {
 				log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": headroomPort})

@@ -25,16 +25,16 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
   const [searchParams] = useSearchParams()
   const [switching, setSwitching] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadProjects()
-  }, [open])
-
   const loadProjects = useCallback(async () => {
     try {
       const data = await api.getProjects()
       onProjectsLoaded(data.projects || [])
     } catch (_) {}
-  }, [])
+  }, [onProjectsLoaded])
+
+  useEffect(() => {
+    loadProjects()
+  }, [open, loadProjects])
 
   async function switchTo(path: string) {
     setSwitching(path)
