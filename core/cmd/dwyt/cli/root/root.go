@@ -3,6 +3,7 @@ package root
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,7 +100,7 @@ func runDefault(projectPath string) error {
 		if err := switchProject(projectPath); err == nil {
 			fmt.Printf("  ✓ Dashboard → http://localhost:2737  (already running)\n")
 			fmt.Printf("  ✓ Project context updated\n\n")
-			openBrowserURL("http://localhost:2737/#/dashboard?project=" + projectPath)
+			openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 			return nil
 		}
 		// Switch failed, fall through to normal startup
@@ -140,7 +141,7 @@ func runDefault(projectPath string) error {
 
 	fmt.Printf("  ✓ Dashboard → http://localhost:2737\n")
 	fmt.Printf("  Stop: dwyt stop\n\n")
-	openBrowserURL("http://localhost:2737/#/dashboard?project=" + projectPath)
+	openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 	return nil
 }
 
