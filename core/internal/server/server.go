@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/status"
-	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,8 +48,8 @@ type DashboardServer struct {
 	DwytBin        string
 	DwytHome       string
 	StartCwd       string
-	DefaultProject string                          // currently active project — can be updated
-	Projects       map[string]*workspace.ProjectState // tracked projects by path
+	DefaultProject string
+	Store          *db.Store
 	projectMu      sync.RWMutex
 	sseClients     map[chan string]bool
 	sseMu          sync.Mutex
@@ -68,42 +68,27 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		project = cwd
 	}
 
+	// Open SQLite store
+	store, err := db.New(filepath.Join(dwytHome, "dwyt.db"))
+	if err != nil {
+		log.Error("failed to open db", log.Fields{"error": err.Error()})
+	}
+
 	ds := &DashboardServer{
 		Port:           port,
 		DwytBin:        dwytBin,
 		DwytHome:       dwytHome,
 		StartCwd:       project,
 		DefaultProject: project,
-		Projects:       make(map[string]*workspace.ProjectState),
+		Store:          store,
 		sseClients:     make(map[chan string]bool),
 		installStatus:  make(map[string]string),
 	}
 
-	// Load existing project state and mark current project
-	ps, _ := workspace.Read(project)
-	ps.LastOpen = time.Now()
-	ds.Projects[project] = ps
-	workspace.Save(ps)
-
-	// Load previously indexed projects from state.json (only to rediscover)
-	if data, err := os.ReadFile(filepath.Join(dwytHome, "state.json")); err == nil {
-		var s struct {
-			IntegratedProjects map[string]struct {
-				Path      string    `json:"path"`
-				IndexedAt time.Time `json:"indexed_at,omitempty"`
-				Nodes     int       `json:"nodes,omitempty"`
-				Edges     int       `json:"edges,omitempty"`
-			} `json:"integrated_projects"`
-		}
-		if json.Unmarshal(data, &s) == nil {
-			for path := range s.IntegratedProjects {
-				if path != project {
-					if wp, err := workspace.Read(path); err == nil {
-						ds.Projects[path] = wp
-					}
-				}
-			}
-		}
+	// Register current project in db
+	if store != nil {
+		store.TouchProject(project)
+		store.SetConfig("project_path", project)
 	}
 
 	return ds
@@ -313,10 +298,6 @@ func (ds *DashboardServer) apiMemstackSearch(c *gin.Context) {
 
 // ─── Fase 2: novos handlers ─────────────────────────────────────────────────
 
-func (ds *DashboardServer) configPath() string {
-	return filepath.Join(ds.DwytHome, "config.json")
-}
-
 func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 	var config Config
 	if err := c.BindJSON(&config); err != nil {
@@ -326,24 +307,34 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 	config.Configured = true
 	config.LastSetup = time.Now().Format(time.RFC3339)
 
-	data, _ := json.MarshalIndent(config, "", "  ")
-	os.WriteFile(ds.configPath(), data, 0644)
+	data, _ := json.Marshal(config)
+	if ds.Store != nil {
+		ds.Store.SetConfig("setup", string(data))
+	}
 	c.JSON(200, gin.H{"status": "saved"})
 }
 
 func (ds *DashboardServer) apiSetupLoad(c *gin.Context) {
-	data, err := os.ReadFile(ds.configPath())
+	if ds.Store == nil {
+		c.JSON(200, Config{Configured: false})
+		return
+	}
+	raw, err := ds.Store.GetConfig("setup")
 	if err != nil {
 		c.JSON(200, Config{Configured: false})
 		return
 	}
 	var config Config
-	json.Unmarshal(data, &config)
+	json.Unmarshal([]byte(raw), &config)
 	c.JSON(200, config)
 }
 
 func (ds *DashboardServer) apiSetupStatus(c *gin.Context) {
-	_, err := os.ReadFile(ds.configPath())
+	if ds.Store == nil {
+		c.JSON(200, gin.H{"configured": false})
+		return
+	}
+	_, err := ds.Store.GetConfig("setup")
 	c.JSON(200, gin.H{"configured": err == nil})
 }
 
@@ -565,8 +556,10 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 		// Save config as completed
 		config.Configured = true
 		config.LastSetup = time.Now().Format(time.RFC3339)
-		data, _ := json.MarshalIndent(config, "", "  ")
-		os.WriteFile(ds.configPath(), data, 0644)
+		data, _ := json.Marshal(config)
+		if ds.Store != nil {
+			ds.Store.SetConfig("setup", string(data))
+		}
 	}()
 }
 
@@ -606,29 +599,15 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	old := ds.DefaultProject
 	ds.DefaultProject = body.Path
 	ds.StartCwd      = body.Path
-
-	// Add to projects map if new
-	if _, exists := ds.Projects[body.Path]; !exists {
-		ps, _ := workspace.Read(body.Path)
-		ps.LastOpen = time.Now()
-		ds.Projects[body.Path] = ps
-		workspace.Save(ps)
-		log.Info("new project registered", log.Fields{"path": body.Path})
-	} else {
-		ds.Projects[body.Path].LastOpen = time.Now()
-		workspace.Save(ds.Projects[body.Path])
-	}
 	ds.projectMu.Unlock()
 
 	log.Info("switching project", log.Fields{"from": old, "to": body.Path})
 
-	// Update config.json project_path so the UI reflects the new project
-	data, _ := os.ReadFile(ds.configPath())
-	var cfg Config
-	json.Unmarshal(data, &cfg)
-	cfg.ProjectPath = body.Path
-	updated, _ := json.MarshalIndent(cfg, "", "  ")
-	os.WriteFile(ds.configPath(), updated, 0644)
+	// Register project in SQLite
+	if ds.Store != nil {
+		ds.Store.TouchProject(body.Path)
+		ds.Store.SetConfig("project_path", body.Path)
+	}
 
 	// Trigger re-index in background
 	go func() {
@@ -645,19 +624,32 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 
 // apiProjectsList returns all tracked projects with their state.
 func (ds *DashboardServer) apiProjectsList(c *gin.Context) {
-	ds.projectMu.RLock()
-	defer ds.projectMu.RUnlock()
+	if ds.Store == nil {
+		c.JSON(200, gin.H{"projects": []interface{}{}, "default": ""})
+		return
+	}
+	projects, err := ds.Store.ListProjects()
+	if err != nil {
+		c.JSON(200, gin.H{"projects": []interface{}{}, "default": ""})
+		return
+	}
 
-	list := make([]map[string]interface{}, 0, len(ds.Projects))
-	for path, ps := range ds.Projects {
-		list = append(list, map[string]interface{}{
-			"path":       path,
-			"active":     path == ds.DefaultProject,
-			"last_open":  ps.LastOpen,
-			"indexed_at": ps.IndexedAt,
-			"nodes":      ps.Nodes,
-			"edges":      ps.Edges,
-		})
+	list := make([]map[string]interface{}, 0, len(projects))
+	for _, p := range projects {
+		item := map[string]interface{}{
+			"id":         p.ID,
+			"path":       p.Path,
+			"name":       p.Name,
+			"active":     p.Path == ds.DefaultProject,
+			"last_open":  p.LastOpen,
+			"created_at": p.CreatedAt,
+		}
+		if p.IndexedAt != nil {
+			item["indexed_at"] = p.IndexedAt
+			item["nodes"] = p.Nodes
+			item["edges"] = p.Edges
+		}
+		list = append(list, item)
 	}
 	c.JSON(200, gin.H{"projects": list, "default": ds.DefaultProject})
 }
@@ -757,16 +749,10 @@ func installedSince(binPath string) (int64, string) {
 }
 
 func (ds *DashboardServer) loadedRepos() []string {
-	data, err := os.ReadFile(ds.configPath())
-	if err != nil {
-		return nil
-	}
-	var cfg Config
-	if json.Unmarshal(data, &cfg) != nil {
-		return nil
-	}
-	if cfg.ProjectPath != "" {
-		return []string{cfg.ProjectPath}
+	if ds.Store != nil {
+		if pj, err := ds.Store.GetProjectByPath(ds.DefaultProject); err == nil {
+			return []string{pj.Path}
+		}
 	}
 	return nil
 }
@@ -881,16 +867,6 @@ func (ds *DashboardServer) detailMemStack() *ToolDetail {
 func (ds *DashboardServer) apiContext(c *gin.Context) {
 	ds.projectMu.RLock()
 	cwd := ds.DefaultProject
-	projects := make([]map[string]interface{}, 0, len(ds.Projects))
-	for path, ps := range ds.Projects {
-		projects = append(projects, map[string]interface{}{
-			"path":       path,
-			"last_open":  ps.LastOpen,
-			"indexed_at": ps.IndexedAt,
-			"nodes":      ps.Nodes,
-			"edges":      ps.Edges,
-		})
-	}
 	ds.projectMu.RUnlock()
 
 	if cwd == "" {
@@ -911,13 +887,15 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		toolsInstalled["headroom"] ||
 		toolsInstalled["memstack"]
 
-	// Load saved config
+	// Load saved config from db
 	var cfg Config
-	if data, err := os.ReadFile(ds.configPath()); err == nil {
-		json.Unmarshal(data, &cfg)
+	if ds.Store != nil {
+		if raw, err := ds.Store.GetConfig("setup"); err == nil {
+			json.Unmarshal([]byte(raw), &cfg)
+		}
 	}
 
-	// Determine suggested screen:
+	// Determine suggested screen
 	suggestedScreen := "setup"
 	if anyInstalled {
 		suggestedScreen = "dashboard"
@@ -928,11 +906,43 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		activeProject = cfg.ProjectPath
 	}
 
-	// Load per-project workspace state
-	var projectState *workspace.ProjectState
-	if activeProject != "" {
-		ps, _ := workspace.Read(activeProject)
-		projectState = ps
+	// Load project list from db
+	var projectsList []map[string]interface{}
+	if ds.Store != nil {
+		if projs, err := ds.Store.ListProjects(); err == nil {
+			for _, p := range projs {
+				item := map[string]interface{}{
+					"id":         p.ID,
+					"path":       p.Path,
+					"name":       p.Name,
+					"last_open":  p.LastOpen,
+					"created_at": p.CreatedAt,
+				}
+				if p.IndexedAt != nil {
+					item["indexed_at"] = p.IndexedAt
+					item["nodes"] = p.Nodes
+					item["edges"] = p.Edges
+				}
+				projectsList = append(projectsList, item)
+			}
+		}
+	}
+
+	// Current project state from db
+	var projectState map[string]interface{}
+	if ds.Store != nil && activeProject != "" {
+		if p, err := ds.Store.GetProjectByPath(activeProject); err == nil {
+			projectState = map[string]interface{}{
+				"id":         p.ID,
+				"path":       p.Path,
+				"name":       p.Name,
+				"last_open":  p.LastOpen,
+			}
+			if p.IndexedAt != nil {
+				projectState["indexed_at"] = p.IndexedAt
+				projectState["nodes"] = p.Nodes
+			}
+		}
 	}
 
 	c.JSON(200, gin.H{
@@ -943,7 +953,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"any_installed":    anyInstalled,
 		"config":           cfg,
 		"project_state":    projectState,
-		"projects":         projects,
+		"projects":         projectsList,
 	})
 }
 

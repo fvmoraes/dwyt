@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import * as api from '../api'
 
 interface Project {
+  id: string
   path: string
+  name: string
   active: boolean
   last_open: string
   indexed_at?: string
@@ -96,7 +98,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded, on
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>{p.active ? '📂' : '📁'}</span>
               <span style={{ fontSize: 11, fontWeight: p.active ? 600 : 400, color: p.active ? '#339af0' : 'var(--text)', wordBreak: 'break-all' }}>
-                {p.path.split('/').slice(-2).join('/')}
+                {p.name}
               </span>
             </div>
             <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2, paddingLeft: 19, wordBreak: 'break-all' }}>

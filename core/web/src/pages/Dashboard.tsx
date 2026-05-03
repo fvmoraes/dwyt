@@ -40,7 +40,7 @@ export default function Dashboard() {
   const [logs,         setLogs]         = useState<Record<string, string>>({})
   const [showLogs,     setShowLogs]     = useState(searchParams.get('logs') === '1')
   const [indexPath,    setIndexPath]    = useState('')
-  const [projectCtx,   setProjectCtx]   = useState<{active_project?: string; project_state?: {path?: string; last_open?: string; indexed_at?: string}; projects?: Array<{path:string; active:boolean; last_open:string; indexed_at?:string; nodes?:number}>}>({})
+  const [projectCtx,   setProjectCtx]   = useState<{active_project?: string; project_state?: {id?:string; path?:string; name?:string; last_open?: string; indexed_at?: string}; projects?: Array<{id:string; path:string; name:string; active:boolean; last_open:string; indexed_at?:string; nodes?:number}>}>({})
   const [sidebarOpen,  setSidebarOpen]  = useState(false)
   const [sidebarPjs,   setSidebarPjs]   = useState<any[]>([])
   const [indexing,     setIndexing]     = useState(false)
@@ -301,10 +301,11 @@ export default function Dashboard() {
       {projectCtx.active_project && (
         <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 10, color: '#3bc9db', fontWeight: 700 }}>📁</span>
-          <span style={{ fontSize: 11, color: 'var(--text)', fontFamily: 'monospace', fontWeight: 500 }}>{projectCtx.active_project}</span>
+          <span style={{ fontSize: 11, color: '#339af0', fontFamily: 'monospace', fontWeight: 600 }}>{projectCtx.project_state?.name || projectCtx.active_project.split('/').pop()}</span>
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}>{projectCtx.active_project}</span>
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: 'var(--muted)', marginLeft: 'auto' }}>
-              Indexado: {new Date(projectCtx.project_state.indexed_at).toLocaleString()}
+            <span style={{ fontSize: 9, color: '#2f9e44', marginLeft: 'auto' }}>
+              ✓ Indexado: {new Date(projectCtx.project_state.indexed_at).toLocaleString()}
             </span>
           )}
         </div>
