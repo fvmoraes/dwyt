@@ -2,11 +2,11 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
-      - 'core/**'
-      - 'install.sh'
-      - '.github/workflows/release.yml'
+      - "core/**"
+      - "install.sh"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: write
@@ -21,13 +21,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.25"
           cache: true
           cache-dependency-path: core/go.sum
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: core/web/package-lock.json
 
@@ -42,24 +42,19 @@ jobs:
         run: |
           # Get previous tag or start from v0.0.0
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          
+
           # Get commit messages since last tag
           if [ "$PREV_TAG" = "v0.0.0" ]; then
             COMMITS=$(git log --pretty=format:"%s" --no-merges)
           else
             COMMITS=$(git log --pretty=format:"%s" --no-merges "${PREV_TAG}..HEAD")
           fi
-          
+
           # Determine version bump based on commit messages
-          # feat: or feature: -> minor bump
-          # fix: or bugfix: -> patch bump
-          # BREAKING CHANGE: or breaking: -> major bump
-          # Default: patch bump
-          
           MAJOR=0
           MINOR=0
           PATCH=0
-          
+
           if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
             MAJOR=1
           elif echo "$COMMITS" | grep -qiE "^(feat|feature):"; then
@@ -67,11 +62,11 @@ jobs:
           else
             PATCH=1
           fi
-          
+
           # Parse previous version
           PREV_VERSION=${PREV_TAG#v}
           IFS='.' read -r PREV_MAJOR PREV_MINOR PREV_PATCH <<< "$PREV_VERSION"
-          
+
           # Calculate new version
           if [ $MAJOR -eq 1 ]; then
             NEW_VERSION="$((PREV_MAJOR + 1)).0.0"
@@ -80,22 +75,23 @@ jobs:
           else
             NEW_VERSION="${PREV_MAJOR}.${PREV_MINOR}.$((PREV_PATCH + 1))"
           fi
-          
+
           NEW_TAG="v${NEW_VERSION}"
-          
+
           echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
           echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
-          
-          # Generate structured changelog
-          CHANGELOG="# Release ${NEW_TAG}
 
-**Released:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-**Previous version:** ${PREV_TAG}
+          # Generate changelog file
+          cat > /tmp/changelog.md << 'CHANGELOG_EOF'
+          # Release ${NEW_TAG}
 
-## Changes
+          **Released:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Previous version:** ${PREV_TAG}
 
-"
-          
+          ## Changes
+
+          CHANGELOG_EOF
+
           # Categorize commits
           BREAKING=""
           FEATURES=""
@@ -103,94 +99,86 @@ jobs:
           DOCS=""
           CHORES=""
           OTHER=""
-          
+
           while IFS= read -r commit; do
             if echo "$commit" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
-              BREAKING="${BREAKING}- ${commit#*: }
-"
+              BREAKING="${BREAKING}- ${commit#*: }"$'\n'
             elif echo "$commit" | grep -qiE "^(feat|feature):"; then
-              FEATURES="${FEATURES}- ${commit#*: }
-"
+              FEATURES="${FEATURES}- ${commit#*: }"$'\n'
             elif echo "$commit" | grep -qiE "^(fix|bugfix):"; then
-              FIXES="${FIXES}- ${commit#*: }
-"
+              FIXES="${FIXES}- ${commit#*: }"$'\n'
             elif echo "$commit" | grep -qiE "^(docs|doc):"; then
-              DOCS="${DOCS}- ${commit#*: }
-"
+              DOCS="${DOCS}- ${commit#*: }"$'\n'
             elif echo "$commit" | grep -qiE "^(chore|build|ci):"; then
-              CHORES="${CHORES}- ${commit#*: }
-"
+              CHORES="${CHORES}- ${commit#*: }"$'\n'
             else
-              OTHER="${OTHER}- ${commit}
-"
+              OTHER="${OTHER}- ${commit}"$'\n'
             fi
           done <<< "$COMMITS"
-          
+
           # Build changelog sections
           if [ -n "$BREAKING" ]; then
-            CHANGELOG="${CHANGELOG}### 🚨 Breaking Changes
-
-${BREAKING}
-"
+            echo "### 🚨 Breaking Changes" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$BREAKING" >> /tmp/changelog.md
           fi
-          
+
           if [ -n "$FEATURES" ]; then
-            CHANGELOG="${CHANGELOG}### ✨ Features
-
-${FEATURES}
-"
+            echo "### ✨ Features" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$FEATURES" >> /tmp/changelog.md
           fi
-          
+
           if [ -n "$FIXES" ]; then
-            CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes
-
-${FIXES}
-"
+            echo "### 🐛 Bug Fixes" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$FIXES" >> /tmp/changelog.md
           fi
-          
+
           if [ -n "$DOCS" ]; then
-            CHANGELOG="${CHANGELOG}### 📚 Documentation
-
-${DOCS}
-"
+            echo "### 📚 Documentation" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$DOCS" >> /tmp/changelog.md
           fi
-          
+
           if [ -n "$CHORES" ]; then
-            CHANGELOG="${CHANGELOG}### 🔧 Chores
-
-${CHORES}
-"
+            echo "### 🔧 Chores" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$CHORES" >> /tmp/changelog.md
           fi
-          
+
           if [ -n "$OTHER" ]; then
-            CHANGELOG="${CHANGELOG}### 📝 Other Changes
-
-${OTHER}
-"
+            echo "### 📝 Other Changes" >> /tmp/changelog.md
+            echo "" >> /tmp/changelog.md
+            echo "$OTHER" >> /tmp/changelog.md
           fi
-          
+
           # Add installation instructions
-          CHANGELOG="${CHANGELOG}
-## Installation
+          cat >> /tmp/changelog.md << 'INSTALL_EOF'
 
-\`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/\${{ github.repository }}/main/install.sh | bash
-\`\`\`
+          ## Installation
 
-Or download the binary for your platform from the assets below.
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          ```
 
-## Checksums
+          Or download the binary for your platform from the assets below.
 
-SHA256 checksums are available in \`checksums.txt\`.
-"
-          
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
+          ## Checksums
+
+          SHA256 checksums are available in `checksums.txt`.
+          INSTALL_EOF
+
+          # Output changelog
+          {
+            echo "changelog<<EOF"
+            cat /tmp/changelog.md
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
           echo "Generated version: ${NEW_TAG}"
           echo "Changelog preview:"
-          echo "$CHANGELOG" | head -20
+          head -20 /tmp/changelog.md
 
       - name: Create and push tag
         run: |
@@ -203,7 +191,7 @@ SHA256 checksums are available in \`checksums.txt\`.
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: '~> v2'
+          version: "~> v2"
           args: release --clean
           workdir: core
         env:
