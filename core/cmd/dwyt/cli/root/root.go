@@ -15,7 +15,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
-	"github.com/fvmoraes/dwyt/internal/memory"
+	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/fvmoraes/dwyt/internal/workspace"
@@ -94,6 +94,13 @@ func runDefault(projectPath string) error {
 	// ── Phase 1: env init (fast, always safe) ─────────────────────────────────
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
 
+	if !brain.ObsidianInstalled() {
+		fmt.Println("\n  ✗ Obsidian is required but not found.")
+		fmt.Println("  Install from: https://obsidian.md/download")
+		fmt.Println("  After installing, run 'dwyt .' again.\n")
+		os.Exit(1)
+	}
+
 	// ── Check if daemon is already running ────────────────────────────────────
 	// Quick probe (500ms) — if daemon responds, just switch project context
 	if daemonOK := probeDaemon(); daemonOK {
@@ -114,7 +121,7 @@ func runDefault(projectPath string) error {
 	headroomPort := startServicesAsync(e.DwytBin)
 
 	// ── Marks available tools ──────────────────────────────────────────────────
-	for _, bin := range []string{"rtk", "memstack"} {
+	for _, bin := range []string{"rtk"} {
 		if _, err := os.Stat(filepath.Join(e.DwytBin, bin)); err == nil {
 			fmt.Printf("  →  %-25s available\n", bin)
 		} else {
@@ -220,10 +227,7 @@ func startServicesAsync(dwytBin string) int {
 		fmt.Printf("  →  headroom                not installed (install via UI)\n")
 	}
 
-	memstackBin := filepath.Join(dwytBin, "memstack")
-	if _, err := os.Stat(memstackBin); err == nil {
-		fmt.Printf("  →  memstack                available\n")
-	}
+	fmt.Printf("  →  brain                   available (Obsidian)\n")
 
 	return headroomPort
 }
@@ -300,10 +304,10 @@ var statusCmd = &cobra.Command{
 
 		// Show memory status for current directory
 		cwd, _ := os.Getwd()
-		if pm, err := memory.NewProjectMemory(DwytHome, cwd); err == nil {
+		if pm, err := brain.NewProjectBrain(DwytHome, cwd); err == nil {
 			stats := pm.Stats()
-			if entries, ok := stats["total_entries"].(int); ok && entries > 0 {
-				fmt.Printf("\n  🧠 Memory: %d entries for %s\n", entries, stats["project_name"])
+			if files, ok := stats["total_files"].(int); ok && files > 0 {
+				fmt.Printf("\n  🧠 Brain: %d files for %s\n", files, stats["project_name"])
 				if summary, ok := stats["summary"].(string); ok && summary != "" {
 					if len(summary) > 120 {
 						summary = summary[:117] + "..."

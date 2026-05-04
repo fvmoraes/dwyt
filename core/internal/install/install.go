@@ -125,34 +125,6 @@ func Headroom(dwytBin, dwytHome string) error {
 	return nil
 }
 
-func MemStack(dwytBin, dwytHome string) error {
-	dir := filepath.Join(dwytHome, "memstack")
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		fmt.Println("  ✓ MemStack já existe (atualizando...)")
-		exec.Command("git", "-C", dir, "pull", "--quiet").Run()
-		return nil
-	}
-	cmd := exec.Command("git", "clone", "--depth=1", "https://github.com/cwinvestments/memstack.git", dir)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("memstack clone: %w", err)
-	}
-
-	if runtime.GOOS == "windows" {
-		// Windows: .bat launcher
-		bat := fmt.Sprintf(
-			"@echo off\r\nset MEMSTACK_HOME=%s\r\npython \"%s\\db\\memstack-db.py\" %%*\r\n",
-			dir, dir,
-		)
-		os.WriteFile(filepath.Join(dwytBin, "memstack.bat"), []byte(bat), 0644)
-	} else {
-		wrapper := fmt.Sprintf(
-			"#!/usr/bin/env bash\nMEMSTACK_HOME=%q\nexec python3 \"${MEMSTACK_HOME}/db/memstack-db.py\" \"$@\"\n",
-			dir,
-		)
-		os.WriteFile(filepath.Join(dwytBin, "memstack"), []byte(wrapper), 0755)
-	}
-	return nil
-}
 
 func fetch(url string) string {
 	resp, err := http.Get(url)

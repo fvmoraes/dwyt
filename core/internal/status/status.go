@@ -60,7 +60,7 @@ func PollAll(dwytBin string) *SystemStatus {
 	s.Tools = append(s.Tools, pollCBMCP(dwytBin))
 	s.Tools = append(s.Tools, pollRTK(dwytBin))
 	s.Tools = append(s.Tools, pollHeadroom())
-	s.Tools = append(s.Tools, pollMemStack(dwytBin))
+	s.Tools = append(s.Tools, pollBrain())
 	return s
 }
 
@@ -127,18 +127,13 @@ func pollHeadroom() ToolStatus {
 	return ts
 }
 
-func pollMemStack(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "memstack"}
-	bin := filepath.Join(dwytBin, "memstack")
-	if _, err := os.Stat(bin); err != nil {
-		ts.State = StateNotInstalled
-		return ts
-	}
-
+func pollBrain() ToolStatus {
+	ts := ToolStatus{Name: "brain"}
+	// Brain is always available if DWYT is running (it's filesystem-based)
 	ts.Running = true
 	ts.Healthy = true
 	ts.State = StateRunning
-	ts.Details = "disponível"
+	ts.Details = "Obsidian brain active"
 	return ts
 }
 
@@ -290,13 +285,8 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 		states["rtk"] = StateRunning
 	}
 
-	// memstack
-	bin = filepath.Join(dwytBin, "memstack")
-	if _, err := os.Stat(bin); err != nil {
-		states["memstack"] = StateNotInstalled
-	} else {
-		states["memstack"] = StateRunning
-	}
+	// brain (always running — filesystem-based)
+	states["brain"] = StateRunning
 
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states

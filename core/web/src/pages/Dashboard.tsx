@@ -47,14 +47,12 @@ export default function Dashboard() {
   const [indexError,   setIndexError]   = useState('')
   const [searchQuery,  setSearchQuery]  = useState('')
   const [searchResult, setSearchResult] = useState('')
-  const [memStats,     setMemStats]     = useState<any>(null)
+  const [brainStats,   setBrainStats]   = useState<any>(null)
   const [summarizing,  setSummarizing]  = useState(false)
   const [forgetting,   setForgetting]   = useState(false)
-  const [savingMemory, setSavingMemory] = useState(false)
+  const [savingBrain,  setSavingBrain]  = useState(false)
   const [saveType,     setSaveType]     = useState('note')
   const [saveContent,  setSaveContent]  = useState('')
-  const [snapshots,    setSnapshots]    = useState<any[]>([])
-  const [showSnapshots,setShowSnapshots] = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -77,12 +75,8 @@ export default function Dashboard() {
     try { setDetails(await api.getToolDetails(indexPath || undefined) || {}) } catch (_) {}
     try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch (_) {}
     try {
-      const ms = await api.getMemoryStatus()
-      if (ms.active && ms.stats) setMemStats(ms.stats)
-    } catch (_) {}
-    try {
-      const data = await api.getSnapshots()
-      if (data.snapshots) setSnapshots(data.snapshots)
+      const ms = await api.getBrainStatus()
+      if (ms.active && ms.stats) setBrainStats(ms.stats)
     } catch (_) {}
   }, [indexPath])
 
@@ -128,10 +122,6 @@ export default function Dashboard() {
     if (reloadSecs > 0) timerRef.current = setInterval(pollAll, reloadSecs * 1000)
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [reloadSecs, pollAll])
-
-  useEffect(() => {
-    if (showSnapshots) loadSnapshots()
-  }, [memStats, showSnapshots])
 
   // ── helpers ────────────────────────────────────────────────────────────────
   const getTool   = (n: string) => tools.find(tool => tool.name === n)
@@ -208,7 +198,7 @@ export default function Dashboard() {
   async function handleSearch() {
     if (!searchQuery) return
     try {
-      const d = await api.searchMemory(searchQuery)
+      const d = await api.searchBrain(searchQuery)
       if (d.results && d.results.length > 0) {
         setSearchResult(d.results.map((e: any) => `[${e.type}] ${e.content?.substring(0, 120)}...`).join('\n'))
       } else {
@@ -217,13 +207,6 @@ export default function Dashboard() {
     } catch (_) {
       setSearchResult('Search failed')
     }
-  }
-
-  async function loadSnapshots() {
-    try {
-      const data = await api.getSnapshots()
-      if (data.snapshots) setSnapshots(data.snapshots)
-    } catch (_) {}
   }
 
   // ── sub-components ─────────────────────────────────────────────────────────
@@ -296,13 +279,13 @@ export default function Dashboard() {
   const cbmcp   = getTool('codebase-memory-mcp')
   const rtkTool = getTool('rtk')
   const hr      = getTool('headroom')
-  const ms      = getTool('memstack')
+  const ms      = getTool('brain')
 
   const totalSaved = Object.values(details).reduce((a, d) => a + (d?.tokens_saved || 0), 0)
   const rtkSaved     = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
-  const memCount      = memStats?.total_entries || 0
-  const memEstimate   = memCount > 0 ? memCount * 5000 : 0
+  const brainCount      = brainStats?.total_files || 0
+  const brainEstimate   = brainCount > 0 ? brainCount * 5000 : 0
 
   function calcWithout() {
     let w = 0
@@ -369,9 +352,9 @@ export default function Dashboard() {
           <span style={{ fontSize: 10, color: '#2f9e44', fontWeight: 700 }}>🛡️</span>
           <span style={{ fontSize: 11, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
           <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>DWYT is protecting this project</span>
-          {memCount > 0 && (
+          {brainCount > 0 && (
             <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
-              🧠 {memCount} {t.memories}
+              🧠 {brainCount} brain files
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
@@ -449,7 +432,7 @@ export default function Dashboard() {
               {[
                 { label: 'RTK', saved: rtkSaved, color: '#2f9e44' },
                 { label: 'Headroom', saved: headroomSaved, color: '#3bc9db' },
-                { label: 'MemStack', saved: memEstimate, color: '#f08d49' },
+                { label: 'Brain', saved: brainEstimate, color: '#f08d49' },
                 { label: 'Codebase', saved: 0, color: '#339af0' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
@@ -574,8 +557,8 @@ export default function Dashboard() {
               <RepoRow />
               <Hr />
               <StartStop
-                onStart={async () => { await api.startHeadroom(); setTimeout(pollAll, 2000) }}
-                onStop={async () => { await api.stopHeadroom(); setTimeout(pollAll, 1000) }}
+                onStart={async () => { await api.headroomStart(); setTimeout(pollAll, 2000) }}
+                onStop={async () => { await api.headroomStop(); setTimeout(pollAll, 1000) }}
               />
               <LinkBtn label={t.openStats} onClick={async () => {
                 const r = await api.getHeadroomStatsURL()
@@ -586,21 +569,21 @@ export default function Dashboard() {
           )
         })()}
 
-        {/* ── MEMSTACK ── */}
+        {/* ── BRAIN ── */}
         {(() => {
-          const det   = getDetail('memstack')
+          const det   = getDetail('brain')
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.memoryActive} color="#f08d49" state={state} />
+              <CardHeader label={t.brainActive || 'Project Brain'} color="#f08d49" state={state} />
               <Hr />
-              <Row label={t.tokensSavedLabel} value={memEstimate > 0 ? fmtN(memEstimate) + ' est.' : '—'} />
-              <Row label={t.memories} value={memCount > 0 ? String(memCount) : t.noMemoriesYet} />
+              <Row label={t.tokensSavedLabel} value={brainEstimate > 0 ? fmtN(brainEstimate) + ' est.' : '—'} />
+              <Row label={t.memories || 'Brain files'} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet || 'No files yet'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
-              {memStats?.summary && (
+              {brainStats?.summary && (
                 <div style={{ fontSize: 9, color: 'var(--muted)', maxHeight: 30, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {memStats.summary}
+                  {brainStats.summary}
                 </div>
               )}
               <Hr />
@@ -610,18 +593,18 @@ export default function Dashboard() {
                   style={{ fontSize: 9, padding: '2px 4px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}>
                   <option value="note">note</option>
                   <option value="decision">decision</option>
-                  <option value="action">action</option>
+                  <option value="session">session</option>
                   <option value="error">error</option>
                 </select>
                 <input type="text" value={saveContent} onChange={e => setSaveContent(e.target.value)}
-                  placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 9 }} />
+                  placeholder={t.saveMemoryPlaceholder || 'Brain note...'} style={{ flex: 1, fontSize: 9 }} />
                 <button style={{ fontSize: 9, padding: '2px 6px' }} onClick={async () => {
                   if (!saveContent) return
-                  setSavingMemory(true)
-                  try { await api.saveMemory(saveType, saveContent); setSaveContent(''); pollAll() } catch (_) {}
-                  setSavingMemory(false)
-                }} disabled={savingMemory}>
-                  {savingMemory ? '...' : t.saveMemory}
+                  setSavingBrain(true)
+                  try { await api.saveBrain(saveType, saveContent); setSaveContent(''); pollAll() } catch (_) {}
+                  setSavingBrain(false)
+                }} disabled={savingBrain}>
+                  {savingBrain ? '...' : t.saveMemory || 'Save'}
                 </button>
               </div>
               {/* Search */}
@@ -635,69 +618,28 @@ export default function Dashboard() {
                 <button className="subtle-start" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
                   setSummarizing(true)
                   try {
-                    const r = await api.summarizeMemory()
-                    if (r.summary) { setMemStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
+                    const r = await api.summarizeBrain()
+                    if (r.summary) { setBrainStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
                   } catch (_) {}
                   setSummarizing(false)
                 }} disabled={summarizing}>
                   {summarizing ? '...' : t.rebuildSummary}
                 </button>
                 <button className="subtle-stop" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
-                  if (!confirm(t.forgetMemoryConfirm || 'Forget all memory for this project?')) return
+                  if (!confirm(t.forgetMemoryConfirm || 'Forget all brain data?')) return
                   setForgetting(true)
-                  try { await api.forgetMemory(); setMemStats(null); pollAll() } catch (_) {}
+                  try { await api.forgetBrain(); setBrainStats(null); pollAll() } catch (_) {}
                   setForgetting(false)
                 }} disabled={forgetting}>
                   {forgetting ? '...' : t.forgetMemory}
                 </button>
               </div>
-              {/* Snapshot timeline */}
-              <Hr />
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button className="subtle-start" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
-                  try { await api.saveSnapshot(); loadSnapshots() } catch (_) {}
-                }}>
-                  📸 Save snapshot
-                </button>
-                <button
-                  className="subtle-start" style={{ fontSize: 9, flex: 1 }}
-                  onClick={() => { setShowSnapshots(!showSnapshots); if (!showSnapshots) loadSnapshots() }}>
-                  📸 Snapshot timeline {showSnapshots ? '▲' : '▼'}
-                </button>
-              </div>
-              {showSnapshots && (
-                <div style={{ maxHeight: 160, overflow: 'auto' }}>
-                  {snapshots.length === 0 ? (
-                    <div style={{ fontSize: 9, color: 'var(--muted)', padding: '4px 0', textAlign: 'center' }}>{t.noSnapshots || 'No snapshots yet'}</div>
-                  ) : (
-                    snapshots.map((snap: any) => {
-                      const tagColor =
-                        snap.tag === 'auto-1h' ? '#339af0' :
-                        snap.tag === 'auto-24h' ? '#2f9e44' :
-                        snap.tag === 'session' ? '#f08d49' :
-                        '#9c36b5'
-                      return (
-                        <div key={snap.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 4px', borderBottom: '1px solid var(--border)', fontSize: 9 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
-                            <span style={{ background: tagColor, color: '#000', padding: '1px 5px', borderRadius: 3, fontSize: 8, fontWeight: 700 }}>{snap.tag}</span>
-                            <span style={{ color: 'var(--muted)', fontFamily: 'monospace' }}>{snap.created_at?.substring(0, 16)}</span>
-                            <span style={{ color: 'var(--text)' }}>{snap.entry_count || 0} entries</span>
-                          </div>
-                          <div style={{ display: 'flex', gap: 3 }}>
-                            <button style={{ fontSize: 8, padding: '1px 5px' }} onClick={async () => {
-                              try { await api.restoreSnapshot(snap.id); pollAll() } catch (_) {}
-                            }}>Restore</button>
-                            <button style={{ fontSize: 8, padding: '1px 5px', color: '#f03e3e' }} onClick={async () => {
-                              if (!confirm('Delete this snapshot?')) return
-                              try { await api.deleteSnapshot(snap.id); loadSnapshots() } catch (_) {}
-                            }}>Delete</button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              )}
+              {/* Open in Obsidian */}
+              <button className="primary" style={{ fontSize: 10, padding: '4px 8px', width: '100%' }} onClick={async () => {
+                try { await api.openBrain() } catch (_) {}
+              }}>
+                🧠 {t.openBrain || 'Open in Obsidian'}
+              </button>
             </div>
           )
         })()}

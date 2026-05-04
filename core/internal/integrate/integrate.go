@@ -162,17 +162,10 @@ func agentsMDTemplate(rtkBin string) string {
 		"Este projeto usa ferramentas automáticas para reduzir consumo de tokens.\n" +
 		"**Todas as integrações são transparentes: você não precisa configurar nada.**\n\n" +
 		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
-		"### 1. MemStack — Memória do Projeto (PRIMEIRA FONTE DE CONTEXTO)\n" +
-		"- **SEMPRE** comece qualquer tarefa consultando a memória do projeto:\n" +
-		"  - `GET http://127.0.0.1:2737/api/memory/search?q=<descrição da tarefa>`\n" +
-		"- Antes de pedir arquivos grandes, verifique se a memória já tem o contexto.\n" +
-		"- Antes de reconstruir raciocínio, busque decisões anteriores na memória.\n" +
-		"- Após concluir mudanças importantes, **salve** um resumo na memória:\n" +
-		"  - `POST http://127.0.0.1:2737/api/memory/save` com body:\n" +
-		"    `{\"type\":\"decision\",\"content\":\"o que foi decidido e por quê\"}`\n" +
-		"  - Tipos válidos: `command`, `decision`, `action`, `error`, `note`\n" +
-		"- **NUNCA** misture memória entre projetos. A troca é automática.\n" +
-		"- Se a busca retornar vazio, é seguro pedir arquivos ao usuário.\n\n" +
+		"### 1. Project Brain (Obsidian) — PRIMEIRA FONTE DE CONTEXTO\n" +
+		"The project brain is an Obsidian vault with markdown files.\n" +
+		"Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>\n" +
+		"Save: POST http://127.0.0.1:2737/api/brain/save\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
@@ -183,16 +176,16 @@ func agentsMDTemplate(rtkBin string) string {
 		"- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m \"msg\"`\n\n" +
 		"### 4. Codebase — Mapa do Código (SOB DEMANDA)\n" +
 		"- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.\n" +
-		"- Prefira consultar a memória do projeto antes de indexar ou navegar no código.\n" +
+		"- Prefira consultar o brain/contexto do projeto antes de indexar ou navegar no código.\n" +
 		"- Use `search_graph`, `trace_call_path`, `get_code_snippet` ao invés de grep/glob.\n"
 }
 
 const claudeMD = `# DWYT — Don't Waste Your Tokens
 
 ## Priority order (follow strictly):
-1. **MemStack FIRST** — before any file read or context rebuild:
-   - Search: GET http://127.0.0.1:2737/api/memory/search?q=your+query
-   - Save: POST http://127.0.0.1:2737/api/memory/save {"type":"decision","content":"..."}
+1. **Project Brain (Obsidian) FIRST** — before any file read or context rebuild:
+   - Search: GET http://127.0.0.1:2737/api/brain/search?q=your+query
+   - Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
    - Types: command, decision, action, error, note
    - Never mix memory between projects — isolation is automatic.
 
@@ -202,7 +195,7 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
 
 4. **Codebase MCP** — ONLY when you need structural code understanding.
-   Prefer MemStack context first. Use search_graph, trace_call_path, get_code_snippet.
+   Prefer Project Brain (Obsidian) context first. Use search_graph, trace_call_path, get_code_snippet.
 `
 
 const cursorRule = `---
@@ -211,39 +204,39 @@ alwaysApply: true
 ---
 
 ## DWYT Priority Order:
-1. **MemStack FIRST**: consult project memory before any file operation.
-   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/memory/save
+1. **Project Brain (Obsidian) FIRST**: consult project memory before any file operation.
+   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/brain/save
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
-Save important decisions to MemStack after completion.
+Save important decisions to Project Brain (Obsidian) after completion.
 `
 
 const kiroSteering = `# DWYT Steering
 
 ## Priority:
-1. **MemStack FIRST**: check project memory before reading files.
-   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/memory/save {"type":"decision","content":"..."}
+1. **Project Brain (Obsidian) FIRST**: check project memory before reading files.
+   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
-4. **Codebase MCP**: structural exploration only — use after MemStack
+4. **Codebase MCP**: structural exploration only — use after Project Brain (Obsidian)
 
-Save important decisions to MemStack after completion.
+Save important decisions to Project Brain (Obsidian) after completion.
 `
 
 const copilotMD = `# DWYT — GitHub Copilot
 
 ## Priority:
-1. **MemStack FIRST**: check project memory before heavy file reads.
-   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/memory/save
+1. **Project Brain (Obsidian) FIRST**: check project memory before heavy file reads.
+   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/brain/save
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed
 
-Save summaries after important changes via MemStack API.
+Save summaries after important changes via Project Brain (Obsidian) API.
 `
 
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"

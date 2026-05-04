@@ -42,7 +42,7 @@ type ProjectEntry struct {
 	IndexedAt  time.Time `json:"indexed_at,omitempty"`
 	Nodes      int       `json:"nodes,omitempty"`
 	Edges      int       `json:"edges,omitempty"`
-	MemorySize int       `json:"memory_size,omitempty"`
+	BrainFiles int       `json:"brain_files,omitempty"`
 }
 
 var globalState *RuntimeState
@@ -165,12 +165,12 @@ func (s *RuntimeState) SetCurrentProject(path, name string) {
 	s.maybeSave()
 }
 
-// UpdateProjectMemory updates the memory size for a project.
-func (s *RuntimeState) UpdateProjectMemory(path string, memorySize int) {
+// UpdateProjectBrain updates the brain files count for a project.
+func (s *RuntimeState) UpdateProjectBrain(path string, brainFiles int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if pe, ok := s.Projects[path]; ok {
-		pe.MemorySize = memorySize
+		pe.BrainFiles = brainFiles
 		s.Projects[path] = pe
 		s.maybeSave()
 	}

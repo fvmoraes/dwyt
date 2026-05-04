@@ -58,15 +58,6 @@ export async function indexRepo(path: string) {
   return r.json()
 }
 
-export async function searchMemstack(query: string) {
-  const r = await fetch(`${API}/memstack/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
-  })
-  return r.json()
-}
-
 export async function getCwd() {
   const r = await fetch(`${API}/cwd`)
   return r.json()
@@ -117,77 +108,72 @@ export async function getProjects(): Promise<{ projects: Array<{id: string; path
   return r.json()
 }
 
-// ── MemStack memory endpoints ─────────────────────────────────────────────
-export async function getMemoryStatus(): Promise<{ active: boolean; stats?: any; error?: string }> {
-  const r = await fetch(`${API}/memory/status`)
-  return r.json()
-}
-
-export async function searchMemory(query: string, project?: string): Promise<{ results: any[]; count: number }> {
-  const params = new URLSearchParams({ q: query })
-  if (project) params.set('project', project)
-  const r = await fetch(`${API}/memory/search?${params.toString()}`)
-  return r.json()
-}
-
-export async function saveMemory(type: string, content: string): Promise<{ status: string }> {
-  const r = await fetch(`${API}/memory/save`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, content }),
-  })
-  return r.json()
-}
-
-export async function summarizeMemory(): Promise<{ status: string; summary: string }> {
-  const r = await fetch(`${API}/memory/summarize`, { method: 'POST' })
-  return r.json()
-}
-
-export async function forgetMemory(): Promise<{ status: string }> {
-  const r = await fetch(`${API}/memory/forget`, { method: 'POST' })
-  return r.json()
-}
-
 // ── Codebase index status ─────────────────────────────────────────────────
 export async function getIndexStatus(): Promise<{ indexing: boolean; progress: string; error?: string }> {
   const r = await fetch(`${API}/codebase/index/status`)
   return r.json()
 }
 
-// ── MemStack snapshot endpoints ───────────────────────────────────────────
-export async function getSnapshots(): Promise<{ snapshots: Array<{ id: string; tag: string; summary: string; created_at: string; entry_count: number }> }> {
-  const r = await fetch(`${API}/memory/snapshots`)
+// ── Brain endpoints ────────────────────────────────────────────────────────
+export async function getBrainStatus(): Promise<{ active: boolean; stats?: any; error?: string }> {
+  const r = await fetch(`${API}/brain/status`)
   return r.json()
 }
-export async function saveSnapshot(tag?: string): Promise<{ status: string; snapshot: any }> {
-  const r = await fetch(`${API}/memory/snapshot/save`, {
+export async function searchBrain(query: string): Promise<{ results: any[]; count: number }> {
+  const params = new URLSearchParams({ q: query })
+  const r = await fetch(`${API}/brain/search?${params.toString()}`)
+  return r.json()
+}
+export async function saveBrain(type: string, content: string): Promise<{ status: string }> {
+  const r = await fetch(`${API}/brain/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tag: tag || 'manual' }),
+    body: JSON.stringify({ type, content }),
   })
   return r.json()
 }
-export async function restoreSnapshot(id: string): Promise<{ status: string }> {
-  const r = await fetch(`${API}/memory/snapshot/restore`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  })
+export async function summarizeBrain(): Promise<{ status: string; summary: string }> {
+  const r = await fetch(`${API}/brain/summarize`, { method: 'POST' })
   return r.json()
 }
-export async function deleteSnapshot(id: string): Promise<{ status: string }> {
-  const r = await fetch(`${API}/memory/snapshot/delete`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  })
+export async function forgetBrain(): Promise<{ status: string }> {
+  const r = await fetch(`${API}/brain/forget`, { method: 'POST' })
+  return r.json()
+}
+export async function openBrain(): Promise<{ status: string; error?: string }> {
+  const r = await fetch(`${API}/brain/open`, { method: 'POST' })
   return r.json()
 }
 
-// ── Headroom control ──────────────────────────────────────────────────────
-export async function startHeadroom(): Promise<{ status: string; port: number }> {
-  const r = await fetch(`${API}/headroom/start`, { method: 'POST' })
+// ── ProcessManager endpoints ───────────────────────────────────────────────
+export async function codebaseStart(): Promise<any> {
+  const r = await fetch(`${API}/services/codebase/start`, { method: 'POST' })
   return r.json()
 }
-export async function stopHeadroom(): Promise<{ status: string }> {
-  const r = await fetch(`${API}/headroom/stop`, { method: 'POST' })
+export async function codebaseStop(): Promise<any> {
+  const r = await fetch(`${API}/services/codebase/stop`, { method: 'POST' })
   return r.json()
+}
+export async function codebaseStatus(): Promise<any> {
+  const r = await fetch(`${API}/services/codebase/status`)
+  return r.json()
+}
+export async function codebaseLogs(tail?: number): Promise<any> {
+  const r = await fetch(`${API}/services/codebase/logs?tail=${tail || 50}`)
+  return r.text()
+}
+export async function headroomStart(): Promise<any> {
+  const r = await fetch(`${API}/services/headroom/start`, { method: 'POST' })
+  return r.json()
+}
+export async function headroomStop(): Promise<any> {
+  const r = await fetch(`${API}/services/headroom/stop`, { method: 'POST' })
+  return r.json()
+}
+export async function headroomStatus(): Promise<any> {
+  const r = await fetch(`${API}/services/headroom/status`)
+  return r.json()
+}
+export async function headroomLogs(tail?: number): Promise<any> {
+  const r = await fetch(`${API}/services/headroom/logs?tail=${tail || 50}`)
+  return r.text()
 }

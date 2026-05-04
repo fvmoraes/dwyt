@@ -14,7 +14,7 @@ export default function SetupWizard() {
 
   const TOOLS = [
     { id: 'cbmcp',    label: 'Codebase', desc: t.cbmcpDesc    },
-    { id: 'memstack', label: 'MemStack', desc: t.memstackDesc  },
+    { id: 'brain',    label: 'Brain (Obsidian)', desc: t.memstackDesc  },
     { id: 'headroom', label: 'Headroom', desc: t.headroomDesc  },
     { id: 'rtk',      label: 'RTK',      desc: t.rtkDesc       },
   ]
@@ -27,7 +27,7 @@ export default function SetupWizard() {
     { id: 'opencode', label: 'OpenCode',        desc: t.opencodeDesc },
   ]
 
-  const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'memstack'])
+  const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'brain'])
   const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot'])
   const [projectPath, setProjectPath] = useState('')
   const [saving,      setSaving]      = useState(false)
