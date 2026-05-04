@@ -1,19 +1,16 @@
 package cli
 
 import (
-	"os"
-
 	"github.com/fvmoraes/dwyt/cmd/dwyt/cli/root"
 )
 
+var version = "dev"
+
 func Execute() error {
+	root.SetVersion(version)
 	return root.Cmd.Execute()
 }
 
-func getHome() string {
-	h, _ := os.UserHomeDir()
-	if h == "" {
-		h = os.Getenv("HOME")
-	}
-	return h
+func SetVersion(v string) {
+	version = v
 }

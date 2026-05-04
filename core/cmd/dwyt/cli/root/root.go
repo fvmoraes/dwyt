@@ -27,12 +27,17 @@ var (
 	DwytBin  string
 	DwytHome string
 	DwytData string
+	version  = "dev"
 )
+
+func SetVersion(v string) {
+	version = v
+}
 
 var Cmd = &cobra.Command{
 	Use:   "dwyt [path]",
 	Short: "DWYT — Don't Waste Your Tokens",
-	Long:  "DWYT v3.1 — UI-First orchestrator. Use 'dwyt .' to open in current directory.",
+	Long:  "DWYT — Don't Waste Your Tokens. Use 'dwyt .' to open in current directory.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectPath := ""
@@ -325,7 +330,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("dwyt v3.1.0 — Don't Waste Your Tokens")
+		fmt.Printf("dwyt %s — Don't Waste Your Tokens\n", version)
 		return nil
 	},
 }

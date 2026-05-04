@@ -3,7 +3,7 @@
 # Installer: https://github.com/fvmoraes/dwyt
 #
 # Usage:
-#   # From GitHub (once published):
+#   # From GitHub Releases:
 #   curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 #
 #   # From a local clone:
@@ -45,6 +45,7 @@ esac
 
 INSTALL_DIR="${HOME}/.local/bin"
 DEST="${INSTALL_DIR}/dwyt"
+GITHUB_RELEASES="https://github.com/fvmoraes/dwyt/releases/latest/download"
 GITHUB_RAW="https://raw.githubusercontent.com/fvmoraes/dwyt/main"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -92,9 +93,9 @@ if [[ -f "$LOCAL_BIN" ]]; then
   success "Copied from local file"
 
 else
-  # ── Case 2: download from GitHub
-  info "Downloading from GitHub..."
-  DOWNLOAD_URL="${GITHUB_RAW}/${BINARY}"
+  # ── Case 2: download from GitHub Releases
+  info "Downloading from GitHub Releases..."
+  DOWNLOAD_URL="${GITHUB_RELEASES}/${BINARY}"
 
   DL_OK=0
   if [[ "$DOWNLOADER" == "curl" ]]; then
@@ -108,17 +109,33 @@ else
   fi
 
   if [[ $DL_OK -eq 0 ]]; then
-    # ── Case 3: GitHub not available — guide user to manual install
+    # ── Case 3: Releases not available — try raw main branch (dev)
+    info "Releases not found, trying main branch..."
+    DOWNLOAD_URL="${GITHUB_RAW}/${BINARY}"
+
+    if [[ "$DOWNLOADER" == "curl" ]]; then
+      if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST" 2>/dev/null; then
+        DL_OK=1
+      fi
+    else
+      if wget -q --show-progress "$DOWNLOAD_URL" -O "$DEST" 2>/dev/null; then
+        DL_OK=1
+      fi
+    fi
+  fi
+
+  if [[ $DL_OK -eq 0 ]]; then
+    # ── Case 4: nothing worked — guide user
     echo ""
-    warn "Could not download from GitHub (repo may not be published yet)."
+    warn "Could not download DWYT binary."
     echo ""
     echo -e "  ${BOLD}Manual install:${RESET}"
     echo ""
-    echo -e "  1. Download the binary for your platform from the release:"
+    echo -e "  1. Download the binary for your platform from:"
     echo -e "     ${CYAN}https://github.com/fvmoraes/dwyt/releases${RESET}"
     echo ""
-    echo -e "  2. Or if you have the binary locally:"
-    echo -e "     ${BOLD}cp ${BINARY} ~/.local/bin/dwyt && chmod +x ~/.local/bin/dwyt${RESET}"
+    echo -e "  2. Or build from source:"
+    echo -e "     ${BOLD}git clone https://github.com/fvmoraes/dwyt && cd dwyt/core && go build -o ~/.local/bin/dwyt .${RESET}"
     echo ""
     echo -e "  3. Then run:"
     echo -e "     ${BOLD}dwyt .${RESET}"
