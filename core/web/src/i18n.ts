@@ -34,8 +34,8 @@ export const T = {
     allRepos: 'All repositories', selectProject: 'Select a project', repoCount: 'repositories',
     openDashboard: 'Open dashboard', openBrain: 'Open in Obsidian', viewLogs: 'View Logs',
     // User-friendly tool names
-    brainActive: 'Obsidian', compressionActive: 'Active compression',
-    terminalOptimized: 'Terminal optimized', codeMap: 'Code map (optional)',
+    brainActive: 'Obsidian', compressionActive: 'Headroom',
+    terminalOptimized: 'RTK', codeMap: 'Codebase',
     // Setup
     setupTitle: 'DWYT Setup', install: 'Install →', installing: 'Installing...',
     dashboard: 'Dashboard →', loading: 'Loading...', starting: 'Starting...',
@@ -83,8 +83,8 @@ export const T = {
     allRepos: 'Todos os repositórios', selectProject: 'Selecionar projeto', repoCount: 'repositórios',
     openDashboard: 'Abrir dashboard', openBrain: 'Abrir no Obsidian', viewLogs: 'Ver Logs',
     // User-friendly tool names
-    brainActive: 'Obsidian', compressionActive: 'Compressão ativa',
-    terminalOptimized: 'Terminal otimizado', codeMap: 'Mapa do código (opcional)',
+    brainActive: 'Obsidian', compressionActive: 'Headroom',
+    terminalOptimized: 'RTK', codeMap: 'Codebase',
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',
     dashboard: 'Dashboard →', loading: 'Carregando...', starting: 'Iniciando...',
     tools: 'Ferramentas', clients: 'IAs / Clientes', project: 'Projeto',
