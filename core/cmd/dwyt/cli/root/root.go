@@ -14,7 +14,6 @@ import (
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
-	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/memory"
 	"github.com/fvmoraes/dwyt/internal/server"
@@ -94,7 +93,6 @@ func runDefault(projectPath string) error {
 
 	// ── Phase 1: env init (fast, always safe) ─────────────────────────────────
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
-	install.Wrappers(e.DwytBin, e.DwytHome)
 
 	// ── Check if daemon is already running ────────────────────────────────────
 	// Quick probe (500ms) — if daemon responds, just switch project context
@@ -217,26 +215,7 @@ func startServicesAsync(dwytBin string) int {
 	headroomPort := findFreePort(8787)
 	headroomBin := filepath.Join(dwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err == nil {
-		fmt.Printf("  →  headroom                starting on port %d...\n", headroomPort)
-		go func() {
-			cmd := exec.Command(headroomBin, "proxy", "--port", fmt.Sprintf("%d", headroomPort))
-			cmd.Stdout = nil
-			cmd.Stderr = nil
-			cmd.Stdin = nil
-			setProcAttr(cmd)
-			if err := cmd.Start(); err != nil {
-				log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": headroomPort})
-				return
-			}
-			log.Info("headroom spawned", log.Fields{"pid": cmd.Process.Pid, "port": headroomPort})
-			// Brief healthcheck to confirm it actually came up
-			healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)
-			if health.WaitForHTTP(healthURL, 5*time.Second, 500*time.Millisecond).Healthy {
-				log.Info("headroom healthy", log.Fields{"port": headroomPort})
-			} else {
-				log.Warn("headroom started but not healthy", log.Fields{"port": headroomPort})
-			}
-		}()
+		fmt.Printf("  →  headroom                will start on port %d via daemon\n", headroomPort)
 	} else {
 		fmt.Printf("  →  headroom                not installed (install via UI)\n")
 	}

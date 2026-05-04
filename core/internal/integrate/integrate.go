@@ -1,11 +1,13 @@
 package integrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/workspace"
@@ -157,40 +159,50 @@ func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
 func agentsMDTemplate(rtkBin string) string {
 	backtick := "`"
 	return "# DWYT — Don't Waste Your Tokens\n\n" +
-		"Este projeto usa um stack de ferramentas para reduzir consumo de tokens.\n" +
-		"**Todas as integrações são automáticas: use-as sempre que disponíveis.**\n\n" +
-		"## Prioridades (siga esta ordem):\n\n" +
-		"### 1. MemStack — Memória Persistente do Projeto\n" +
-		"- **SEMPRE** consulte a memória DWYT do projeto antes de começar tarefas novas.\n" +
-		"- Antes de pedir arquivos grandes ao usuário, busque contexto salvo.\n" +
-		"- Antes de reconstruir contexto, busque decisões anteriores.\n" +
-		"- Após concluir uma mudança relevante, salve um resumo curto:\n" +
-		"  - Use a API: POST /api/memory/save com type=\"decision\" ou type=\"action\"\n" +
-		"- **NUNCA** misture memória entre projetos diferentes.\n" +
-		"- A memória é isolada por projeto e carregada automaticamente.\n\n" +
-		"### 2. Codebase — Grafo Estrutural do Código\n" +
-		"- Use as tools MCP do codebase-memory-mcp para navegação estrutural.\n" +
-		"- Use search_graph, trace_call_path, get_code_snippet ao invés de grep/glob/read.\n" +
-		"- **APENAS** use codebase quando precisar entender a estrutura real do código.\n\n" +
+		"Este projeto usa ferramentas automáticas para reduzir consumo de tokens.\n" +
+		"**Todas as integrações são transparentes: você não precisa configurar nada.**\n\n" +
+		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
+		"### 1. MemStack — Memória do Projeto (PRIMEIRA FONTE DE CONTEXTO)\n" +
+		"- **SEMPRE** comece qualquer tarefa consultando a memória do projeto:\n" +
+		"  - `GET http://127.0.0.1:2737/api/memory/search?q=<descrição da tarefa>`\n" +
+		"- Antes de pedir arquivos grandes, verifique se a memória já tem o contexto.\n" +
+		"- Antes de reconstruir raciocínio, busque decisões anteriores na memória.\n" +
+		"- Após concluir mudanças importantes, **salve** um resumo na memória:\n" +
+		"  - `POST http://127.0.0.1:2737/api/memory/save` com body:\n" +
+		"    `{\"type\":\"decision\",\"content\":\"o que foi decidido e por quê\"}`\n" +
+		"  - Tipos válidos: `command`, `decision`, `action`, `error`, `note`\n" +
+		"- **NUNCA** misture memória entre projetos. A troca é automática.\n" +
+		"- Se a busca retornar vazio, é seguro pedir arquivos ao usuário.\n\n" +
+		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
+		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
+		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
+		"- Se não estiver ativo, use os endpoints padrão das APIs.\n\n" +
 		"### 3. RTK — Compressão de Terminal\n" +
-		"- **SEMPRE** prefixe comandos de terminal com " + backtick + "rtk" + backtick + "\n" +
-		"- Isto reduz o contexto em 60-90%\n\n" +
-		"### 4. Headroom — Compressão de API\n" +
-		"- Se o Headroom estiver ativo (verifique variáveis *_BASE_URL), use-o automaticamente.\n" +
-		"- Não precisa de configuração manual.\n"
+		"- **SEMPRE** prefixe comandos shell com " + backtick + "rtk" + backtick + ". Ex: `rtk git status`\n" +
+		"- Isto reduz o output em 60-90% antes de entrar no contexto.\n" +
+		"- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m \"msg\"`\n\n" +
+		"### 4. Codebase — Mapa do Código (SOB DEMANDA)\n" +
+		"- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.\n" +
+		"- Prefira consultar a memória do projeto antes de indexar ou navegar no código.\n" +
+		"- Use `search_graph`, `trace_call_path`, `get_code_snippet` ao invés de grep/glob.\n"
 }
 
 const claudeMD = `# DWYT — Don't Waste Your Tokens
-Claude Code integration.
 
-## Priority order:
-1. **MemStack first** — consult project memory before reading large files or rebuilding context
-2. **Codebase MCP** — use codebase-memory-mcp tools for structural code exploration
-3. **RTK prefix** — always prefix shell commands with rtk
-4. **Headroom** — auto-detected via *_BASE_URL env vars
+## Priority order (follow strictly):
+1. **MemStack FIRST** — before any file read or context rebuild:
+   - Search: GET http://127.0.0.1:2737/api/memory/search?q=your+query
+   - Save: POST http://127.0.0.1:2737/api/memory/save {"type":"decision","content":"..."}
+   - Types: command, decision, action, error, note
+   - Never mix memory between projects — isolation is automatic.
 
-To save context: POST http://127.0.0.1:2737/api/memory/save
-To search memory: GET http://127.0.0.1:2737/api/memory/search?q=your+query
+2. **Headroom** — auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
+   If set, use them. If not, use default API endpoints. No manual config needed.
+
+3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
+
+4. **Codebase MCP** — ONLY when you need structural code understanding.
+   Prefer MemStack context first. Use search_graph, trace_call_path, get_code_snippet.
 `
 
 const cursorRule = `---
@@ -199,26 +211,202 @@ alwaysApply: true
 ---
 
 ## DWYT Priority Order:
-1. MemStack: consult project memory before file operations. API at http://127.0.0.1:2737/api/memory/
-2. Codebase MCP: use for structural code exploration
-3. RTK: prefix shell commands with rtk
-4. Headroom: auto via env vars
+1. **MemStack FIRST**: consult project memory before any file operation.
+   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/memory/save
+2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
+3. **RTK**: prefix shell commands with rtk.
+4. **Codebase MCP**: use ONLY for structural code exploration.
+Save important decisions to MemStack after completion.
 `
 
 const kiroSteering = `# DWYT Steering
+
 ## Priority:
-1. Check MemStack (project memory) — http://127.0.0.1:2737/api/memory/search?q=<query>
-2. Use Codebase MCP for structural exploration
-3. Prefix shell commands with rtk
-4. Headroom auto-detected
+1. **MemStack FIRST**: check project memory before reading files.
+   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/memory/save {"type":"decision","content":"..."}
+2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
+3. **RTK**: prefix all shell commands with rtk
+4. **Codebase MCP**: structural exploration only — use after MemStack
+
 Save important decisions to MemStack after completion.
 `
 
 const copilotMD = `# DWYT — GitHub Copilot
+
 ## Priority:
-1. Check project memory (MemStack) at http://127.0.0.1:2737/api/memory/ before heavy file reads
-2. Use Codebase MCP tools for structural exploration  
-3. Prefix shell commands with rtk
-4. Headroom compression is automatic
-Save summaries after important changes.
+1. **MemStack FIRST**: check project memory before heavy file reads.
+   Search: GET http://127.0.0.1:2737/api/memory/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/memory/save
+2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
+3. **RTK**: prefix shell commands with rtk
+4. **Codebase MCP**: structural exploration only when needed
+
+Save summaries after important changes via MemStack API.
 `
+
+var markerStart = "<!-- dwyt:headroom-proxy-start -->"
+var markerEnd = "<!-- dwyt:headroom-proxy-end -->"
+
+func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients string) error {
+	dwytDir := filepath.Join(projectPath, ".dwyt")
+	os.MkdirAll(dwytDir, 0755)
+
+	proxyConfig := map[string]interface{}{
+		"active":     true,
+		"port":       headroomPort,
+		"started_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(proxyConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dwytDir, "headroom-proxy.json"), data, 0644); err != nil {
+		return err
+	}
+
+	block := fmt.Sprintf("%s\n**Headroom proxy is ACTIVE** on http://127.0.0.1:%d — use OPENAI_BASE_URL and ANTHROPIC_BASE_URL env vars automatically.\n%s\n", markerStart, headroomPort, markerEnd)
+
+	for _, c := range strings.Split(clients, ",") {
+		c = strings.TrimSpace(c)
+		switch c {
+		case "opencode":
+			setOpenCodeBaseURL(filepath.Join(projectPath, "opencode.json"), headroomPort)
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		case "claude":
+			appendMarkedBlock(filepath.Join(projectPath, "CLAUDE.md"), block)
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		case "codex":
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		case "copilot":
+			cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
+			os.MkdirAll(filepath.Dir(cp), 0755)
+			appendMarkedBlock(cp, block)
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		case "kiro":
+			cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
+			os.MkdirAll(filepath.Dir(cp), 0755)
+			appendMarkedBlock(cp, block)
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		case "cursor":
+			cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
+			os.MkdirAll(filepath.Dir(cp), 0755)
+			appendMarkedBlock(cp, block)
+			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+		}
+	}
+
+	return nil
+}
+
+func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
+	proxyFile := filepath.Join(projectPath, ".dwyt", "headroom-proxy.json")
+	if data, err := os.ReadFile(proxyFile); err == nil {
+		var cfg map[string]interface{}
+		if json.Unmarshal(data, &cfg) == nil {
+			cfg["active"] = false
+			if newData, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+				os.WriteFile(proxyFile, newData, 0644)
+			}
+		}
+	}
+
+	removeMarkedBlocks(filepath.Join(projectPath, "CLAUDE.md"))
+	removeMarkedBlocks(filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc"))
+	removeMarkedBlocks(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"))
+	removeMarkedBlocks(filepath.Join(projectPath, "AGENTS.md"))
+	removeMarkedBlocks(filepath.Join(projectPath, ".github", "copilot-instructions.md"))
+	removeOpenCodeBaseURL(filepath.Join(projectPath, "opencode.json"))
+
+	return nil
+}
+
+func appendMarkedBlock(filePath, block string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+	content := string(data)
+	if strings.Contains(content, markerStart) {
+		return nil
+	}
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		f.Write([]byte("\n"))
+	}
+	f.Write([]byte(block))
+	return nil
+}
+
+func removeMarkedBlocks(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+	content := string(data)
+
+	for {
+		startIdx := strings.Index(content, markerStart)
+		if startIdx == -1 {
+			break
+		}
+		endIdx := strings.Index(content, markerEnd)
+		if endIdx == -1 {
+			break
+		}
+		end := endIdx + len(markerEnd)
+		if end < len(content) && content[end] == '\n' {
+			end++
+		}
+		if startIdx > 0 && content[startIdx-1] == '\n' {
+			startIdx--
+		}
+		content = content[:startIdx] + content[end:]
+	}
+
+	if string(data) != content {
+		os.WriteFile(filePath, []byte(content), 0644)
+	}
+	return nil
+}
+
+func setOpenCodeBaseURL(filePath string, port int) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	m["baseUrl"] = fmt.Sprintf("http://127.0.0.1:%d/v1", port)
+	newData, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(filePath, newData, 0644)
+}
+
+func removeOpenCodeBaseURL(filePath string) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	if url, ok := m["baseUrl"].(string); ok && strings.Contains(url, "127.0.0.1") {
+		delete(m, "baseUrl")
+		newData, err := json.MarshalIndent(m, "", "  ")
+		if err != nil {
+			return
+		}
+		os.WriteFile(filePath, newData, 0644)
+	}
+}

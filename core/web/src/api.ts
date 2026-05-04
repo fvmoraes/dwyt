@@ -154,3 +154,40 @@ export async function getIndexStatus(): Promise<{ indexing: boolean; progress: s
   const r = await fetch(`${API}/codebase/index/status`)
   return r.json()
 }
+
+// ── MemStack snapshot endpoints ───────────────────────────────────────────
+export async function getSnapshots(): Promise<{ snapshots: Array<{ id: string; tag: string; summary: string; created_at: string; entry_count: number }> }> {
+  const r = await fetch(`${API}/memory/snapshots`)
+  return r.json()
+}
+export async function saveSnapshot(tag?: string): Promise<{ status: string; snapshot: any }> {
+  const r = await fetch(`${API}/memory/snapshot/save`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag: tag || 'manual' }),
+  })
+  return r.json()
+}
+export async function restoreSnapshot(id: string): Promise<{ status: string }> {
+  const r = await fetch(`${API}/memory/snapshot/restore`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+  return r.json()
+}
+export async function deleteSnapshot(id: string): Promise<{ status: string }> {
+  const r = await fetch(`${API}/memory/snapshot/delete`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  })
+  return r.json()
+}
+
+// ── Headroom control ──────────────────────────────────────────────────────
+export async function startHeadroom(): Promise<{ status: string; port: number }> {
+  const r = await fetch(`${API}/headroom/start`, { method: 'POST' })
+  return r.json()
+}
+export async function stopHeadroom(): Promise<{ status: string }> {
+  const r = await fetch(`${API}/headroom/stop`, { method: 'POST' })
+  return r.json()
+}

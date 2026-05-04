@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,16 @@ type MemoryEntry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// MemorySnapshot stores a versioned snapshot of project memory.
+type MemorySnapshot struct {
+	ID        string        `json:"id"`
+	Tag       string        `json:"tag"`
+	Summary   string        `json:"summary"`
+	Entries   []MemoryEntry `json:"entries"`
+	CreatedAt time.Time     `json:"created_at"`
+	ProjectID string        `json:"project_id"`
+}
+
 // ProjectMemory holds all memory data for a single project.
 type ProjectMemory struct {
 	ProjectID    string         `json:"project_id"`
@@ -33,8 +44,9 @@ type ProjectMemory struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	AIEnabled    []string       `json:"ai_enabled"`
-	ToolsEnabled []string       `json:"tools_enabled"`
-	mu           sync.RWMutex   `json:"-"`
+	ToolsEnabled []string          `json:"tools_enabled"`
+	Snapshots    []MemorySnapshot `json:"snapshots,omitempty"`
+	mu           sync.RWMutex     `json:"-"`
 	baseDir      string         `json:"-"`
 }
 
@@ -70,6 +82,9 @@ func NewProjectMemory(dwytHome, projectPath string) (*ProjectMemory, error) {
 		pm.CreatedAt = time.Now()
 	}
 	pm.UpdatedAt = time.Now()
+	if len(pm.Entries) > 0 {
+		_, _ = pm.SaveSnapshot("session-start")
+	}
 	return pm, nil
 }
 
@@ -219,10 +234,183 @@ func (pm *ProjectMemory) Forget() error {
 	if err := os.Remove(memFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("memory forget: %w", err)
 	}
+
+	snapDir := filepath.Join(pm.baseDir, "snapshots")
+	os.RemoveAll(snapDir)
+
 	pm.Entries = nil
 	pm.Summary = ""
+	pm.Snapshots = nil
 	pm.UpdatedAt = time.Now()
 	return nil
+}
+
+// SearchByType returns entries filtered by type.
+func (pm *ProjectMemory) SearchByType(entryType string) []MemoryEntry {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	var results []MemoryEntry
+	for _, e := range pm.Entries {
+		if e.Type == entryType {
+			results = append(results, e)
+		}
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].UpdatedAt.After(results[j].UpdatedAt)
+	})
+	return results
+}
+
+// GetRecentEntries returns the N most recent entries.
+func (pm *ProjectMemory) GetRecentEntries(n int) []MemoryEntry {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	if n > len(pm.Entries) {
+		n = len(pm.Entries)
+	}
+	sorted := make([]MemoryEntry, len(pm.Entries))
+	copy(sorted, pm.Entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
+	})
+	return sorted[:n]
+}
+
+// ── snapshots ─────────────────────────────────────────────────────────────
+
+func snapDir(pm *ProjectMemory) string {
+	return filepath.Join(pm.baseDir, "snapshots")
+}
+
+func generateSnapshotID() string {
+	b := make([]byte, 2)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("snap_%s_fallback", time.Now().Format("20060102_150405"))
+	}
+	return fmt.Sprintf("snap_%s_%s", time.Now().Format("20060102_150405"), hex.EncodeToString(b)[:3])
+}
+
+// SaveSnapshot saves the current memory state as a named snapshot file.
+func (pm *ProjectMemory) SaveSnapshot(tag string) (*MemorySnapshot, error) {
+	pm.mu.RLock()
+	snap := MemorySnapshot{
+		ID:        generateSnapshotID(),
+		Tag:       tag,
+		Summary:   pm.Summary,
+		Entries:   make([]MemoryEntry, len(pm.Entries)),
+		CreatedAt: time.Now(),
+		ProjectID: pm.ProjectID,
+	}
+	copy(snap.Entries, pm.Entries)
+	pm.mu.RUnlock()
+
+	dir := snapDir(pm)
+	os.MkdirAll(dir, 0755)
+
+	snapFile := filepath.Join(dir, snap.ID+".json")
+	data, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("snapshot save: %w", err)
+	}
+	if err := os.WriteFile(snapFile, data, 0644); err != nil {
+		return nil, fmt.Errorf("snapshot save: %w", err)
+	}
+	return &snap, nil
+}
+
+// LoadSnapshot restores memory state from a snapshot file.
+func (pm *ProjectMemory) LoadSnapshot(snapshotID string) error {
+	snapFile := filepath.Join(snapDir(pm), snapshotID+".json")
+	data, err := os.ReadFile(snapFile)
+	if err != nil {
+		return fmt.Errorf("snapshot load: %w", err)
+	}
+
+	var snap MemorySnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return fmt.Errorf("snapshot load: %w", err)
+	}
+
+	pm.mu.Lock()
+	pm.Entries = snap.Entries
+	pm.Summary = snap.Summary
+	pm.UpdatedAt = time.Now()
+	pm.mu.Unlock()
+
+	return pm.Save()
+}
+
+// ListSnapshots returns all snapshots sorted by creation time descending.
+func (pm *ProjectMemory) ListSnapshots() []MemorySnapshot {
+	dir := snapDir(pm)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var snaps []MemorySnapshot
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var snap MemorySnapshot
+		if err := json.Unmarshal(data, &snap); err != nil {
+			continue
+		}
+		snaps = append(snaps, snap)
+	}
+
+	sort.Slice(snaps, func(i, j int) bool {
+		return snaps[i].CreatedAt.After(snaps[j].CreatedAt)
+	})
+	return snaps
+}
+
+// DeleteSnapshot deletes a snapshot file by ID.
+func (pm *ProjectMemory) DeleteSnapshot(snapshotID string) error {
+	snapFile := filepath.Join(snapDir(pm), snapshotID+".json")
+	if err := os.Remove(snapFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("snapshot delete: %w", err)
+	}
+	return nil
+}
+
+// AutoSnapshot saves a snapshot and prunes old hourly/daily snapshots.
+func (pm *ProjectMemory) AutoSnapshot(tag string) {
+	pm.SaveSnapshot(tag)
+
+	snaps := pm.ListSnapshots()
+
+	var hourly, daily []MemorySnapshot
+	for _, s := range snaps {
+		if strings.HasPrefix(s.Tag, "auto-1h") {
+			hourly = append(hourly, s)
+		} else if strings.HasPrefix(s.Tag, "auto-24h") {
+			daily = append(daily, s)
+		}
+	}
+
+	for len(hourly) > 24 {
+		oldest := hourly[len(hourly)-1]
+		pm.DeleteSnapshot(oldest.ID)
+		hourly = hourly[:len(hourly)-1]
+	}
+	for len(daily) > 7 {
+		oldest := daily[len(daily)-1]
+		pm.DeleteSnapshot(oldest.ID)
+		daily = daily[:len(daily)-1]
+	}
+}
+
+// AutoSaveSessionEnd saves a session-end snapshot.
+func (pm *ProjectMemory) AutoSaveSessionEnd() {
+	pm.SaveSnapshot("session-end")
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -329,6 +517,9 @@ func UpdateProjectMeta(dwytHome, projectPath string, fn func(*ProjectMeta)) erro
 
 // AutoSaveCommand records a command executed via DWYT in the project memory.
 func (pm *ProjectMemory) AutoSaveCommand(command string) error {
+	if len(command) > 500 {
+		command = command[:497] + "..."
+	}
 	return pm.AddEntry("command", fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), command))
 }
 

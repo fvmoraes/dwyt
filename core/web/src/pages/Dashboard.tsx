@@ -50,6 +50,11 @@ export default function Dashboard() {
   const [memStats,     setMemStats]     = useState<any>(null)
   const [summarizing,  setSummarizing]  = useState(false)
   const [forgetting,   setForgetting]   = useState(false)
+  const [savingMemory, setSavingMemory] = useState(false)
+  const [saveType,     setSaveType]     = useState('note')
+  const [saveContent,  setSaveContent]  = useState('')
+  const [snapshots,    setSnapshots]    = useState<any[]>([])
+  const [showSnapshots,setShowSnapshots] = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -74,6 +79,10 @@ export default function Dashboard() {
     try {
       const ms = await api.getMemoryStatus()
       if (ms.active && ms.stats) setMemStats(ms.stats)
+    } catch (_) {}
+    try {
+      const data = await api.getSnapshots()
+      if (data.snapshots) setSnapshots(data.snapshots)
     } catch (_) {}
   }, [indexPath])
 
@@ -119,6 +128,10 @@ export default function Dashboard() {
     if (reloadSecs > 0) timerRef.current = setInterval(pollAll, reloadSecs * 1000)
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [reloadSecs, pollAll])
+
+  useEffect(() => {
+    if (showSnapshots) loadSnapshots()
+  }, [memStats, showSnapshots])
 
   // ── helpers ────────────────────────────────────────────────────────────────
   const getTool   = (n: string) => tools.find(tool => tool.name === n)
@@ -169,7 +182,25 @@ export default function Dashboard() {
     try {
       const r = await api.indexRepo(indexPath)
       if (r.error) setIndexError(r.error + (r.output ? '\n' + r.output : ''))
-      else { setIndexError(''); pollAll() }
+      else {
+        setIndexError('')
+        // Poll for completion
+        const pollInterval = setInterval(async () => {
+          try {
+            const s = await api.getIndexStatus()
+            if (!s.indexing) {
+              clearInterval(pollInterval)
+              setIndexing(false)
+              pollAll()
+              // Refresh context to get updated indexed_at
+              api.getContext().then(c => setProjectCtx(c)).catch(() => {})
+            }
+          } catch (_) { clearInterval(pollInterval); setIndexing(false) }
+        }, 2000)
+        // Safety timeout after 5 minutes
+        setTimeout(() => { clearInterval(pollInterval); setIndexing(false) }, 300000)
+        return // Don't setIndexing(false) yet — wait for poll
+      }
     } catch (e: any) { setIndexError(String(e)) }
     setIndexing(false)
   }
@@ -186,6 +217,13 @@ export default function Dashboard() {
     } catch (_) {
       setSearchResult('Search failed')
     }
+  }
+
+  async function loadSnapshots() {
+    try {
+      const data = await api.getSnapshots()
+      if (data.snapshots) setSnapshots(data.snapshots)
+    } catch (_) {}
   }
 
   // ── sub-components ─────────────────────────────────────────────────────────
@@ -344,6 +382,39 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* ── Global dashboard (no project selected) ── */}
+      {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
+        <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+          <div style={{ padding: '6px 12px', background: '#1e1f23', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#339af0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos || 'All repositories'}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
+            {projectCtx.projects.map((p: any) => (
+              <button key={p.id || p.path} onClick={() => {
+                setIndexPath(p.path)
+                const params = new URLSearchParams(searchParams)
+                params.set('project', p.path)
+                setSearchParams(params)
+              }} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 12px', background: 'var(--card)', border: 'none', cursor: 'pointer',
+                textAlign: 'left', width: '100%',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>📁 {p.name || p.path.split('/').pop()}</span>
+                  <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'monospace' }}>{p.path}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {p.nodes > 0 && <span style={{ fontSize: 9, color: '#f08d49' }}>🧠 {p.nodes}</span>}
+                  {p.indexed_at && <span style={{ fontSize: 9, color: '#339af0' }}>🗺️ Indexed</span>}
+                  <span style={{ fontSize: 9, color: 'var(--muted)' }}>→</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Totals banner ── */}
       <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
         {hasData ? (
@@ -421,34 +492,38 @@ export default function Dashboard() {
         {(() => {
           const det   = getDetail('codebase-memory-mcp')
           const state = toolState(cbmcp, det)
+          const isIndexed = !!projectCtx.project_state?.indexed_at
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label={t.codeMap} color="#339af0" state={state} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={'—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <Row label={t.status}          value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
               <RepoRow />
               <Hr />
-              <StartStop />
               {state === 'not_installed' ? (
                 <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.notInstalled}</span>
               ) : (
                 <>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <input type="text" value={indexPath} onChange={e => setIndexPath(e.target.value)}
-                      placeholder={t.repoPlaceholder} style={{ flex: 1 }} />
+                      placeholder={t.repoPlaceholder} style={{ flex: 1, fontSize: 9 }} />
                     <button className="primary" style={{ fontSize: 10, padding: '3px 8px' }}
                       onClick={handleIndex} disabled={indexing}>
-                      {indexing ? t.indexing : t.index}
+                      {indexing ? t.indexing : (isIndexed ? t.reindex : t.index)}
                     </button>
                   </div>
                   {indexing && (
-                    <div className="progress-bar" style={{ marginTop: 2 }}>
-                      <div className="progress-fill" style={{ width: '60%', background: '#339af0', animation: 'pulse 1.5s infinite' }} />
+                    <div style={{ marginTop: 2 }}>
+                      <div className="progress-bar">
+                        <div className="progress-fill" style={{ width: '60%', background: '#339af0', animation: 'pulse 1.5s infinite' }} />
+                      </div>
+                      <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.indexingInBg}</span>
                     </div>
                   )}
                   {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
-                  <LinkBtn label={t.openGraph} onClick={async () => {
+                  <LinkBtn label={isIndexed ? t.openGraph : t.openGraphUnavailable} onClick={async () => {
                     const r = await api.openCodebaseUI()
                     if (r.url) window.open(r.url)
                     if (r.started) setTimeout(pollAll, 2000)
@@ -491,14 +566,17 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label={t.compressionActive} color="#3bc9db" state={state} />
               <Hr />
-              <Row label={t.commands}       value={det?.requests ? String(det.requests) : '—'} />
+              <Row label={t.requests}       value={det?.requests ? String(det.requests) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
-              <Row label={t.savingsPct}     value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
+              <Row label={t.compression}    value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <Row label={t.port}           value={String(det?.proxy_port || 8787)} />
               <RepoRow />
               <Hr />
-              <StartStop />
-              <Row label={t.port} value={String(det?.proxy_port || 8787)} />
+              <StartStop
+                onStart={async () => { await api.startHeadroom(); setTimeout(pollAll, 2000) }}
+                onStop={async () => { await api.stopHeadroom(); setTimeout(pollAll, 1000) }}
+              />
               <LinkBtn label={t.openStats} onClick={async () => {
                 const r = await api.getHeadroomStatsURL()
                 if (r.url) window.open(r.url)
@@ -516,8 +594,8 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label={t.memoryActive} color="#f08d49" state={state} />
               <Hr />
-              <Row label={t.tokensSavedLabel} value={memEstimate > 0 ? fmtN(memEstimate) : '—'} />
-              <Row label={t.memories} value={memCount > 0 ? String(memCount) : '—'} />
+              <Row label={t.tokensSavedLabel} value={memEstimate > 0 ? fmtN(memEstimate) + ' est.' : '—'} />
+              <Row label={t.memories} value={memCount > 0 ? String(memCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
               {memStats?.summary && (
@@ -526,7 +604,27 @@ export default function Dashboard() {
                 </div>
               )}
               <Hr />
-              <StartStop />
+              {/* Quick save */}
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <select value={saveType} onChange={e => setSaveType(e.target.value)}
+                  style={{ fontSize: 9, padding: '2px 4px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}>
+                  <option value="note">note</option>
+                  <option value="decision">decision</option>
+                  <option value="action">action</option>
+                  <option value="error">error</option>
+                </select>
+                <input type="text" value={saveContent} onChange={e => setSaveContent(e.target.value)}
+                  placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 9 }} />
+                <button style={{ fontSize: 9, padding: '2px 6px' }} onClick={async () => {
+                  if (!saveContent) return
+                  setSavingMemory(true)
+                  try { await api.saveMemory(saveType, saveContent); setSaveContent(''); pollAll() } catch (_) {}
+                  setSavingMemory(false)
+                }} disabled={savingMemory}>
+                  {savingMemory ? '...' : t.saveMemory}
+                </button>
+              </div>
+              {/* Search */}
               <div style={{ display: 'flex', gap: 4 }}>
                 <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   placeholder={t.searchPlaceholder} style={{ flex: 1 }} />
@@ -545,7 +643,7 @@ export default function Dashboard() {
                   {summarizing ? '...' : t.rebuildSummary}
                 </button>
                 <button className="subtle-stop" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
-                  if (!confirm('Forget all memory for this project?')) return
+                  if (!confirm(t.forgetMemoryConfirm || 'Forget all memory for this project?')) return
                   setForgetting(true)
                   try { await api.forgetMemory(); setMemStats(null); pollAll() } catch (_) {}
                   setForgetting(false)
@@ -553,6 +651,53 @@ export default function Dashboard() {
                   {forgetting ? '...' : t.forgetMemory}
                 </button>
               </div>
+              {/* Snapshot timeline */}
+              <Hr />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="subtle-start" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
+                  try { await api.saveSnapshot(); loadSnapshots() } catch (_) {}
+                }}>
+                  📸 Save snapshot
+                </button>
+                <button
+                  className="subtle-start" style={{ fontSize: 9, flex: 1 }}
+                  onClick={() => { setShowSnapshots(!showSnapshots); if (!showSnapshots) loadSnapshots() }}>
+                  📸 Snapshot timeline {showSnapshots ? '▲' : '▼'}
+                </button>
+              </div>
+              {showSnapshots && (
+                <div style={{ maxHeight: 160, overflow: 'auto' }}>
+                  {snapshots.length === 0 ? (
+                    <div style={{ fontSize: 9, color: 'var(--muted)', padding: '4px 0', textAlign: 'center' }}>{t.noSnapshots || 'No snapshots yet'}</div>
+                  ) : (
+                    snapshots.map((snap: any) => {
+                      const tagColor =
+                        snap.tag === 'auto-1h' ? '#339af0' :
+                        snap.tag === 'auto-24h' ? '#2f9e44' :
+                        snap.tag === 'session' ? '#f08d49' :
+                        '#9c36b5'
+                      return (
+                        <div key={snap.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 4px', borderBottom: '1px solid var(--border)', fontSize: 9 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                            <span style={{ background: tagColor, color: '#000', padding: '1px 5px', borderRadius: 3, fontSize: 8, fontWeight: 700 }}>{snap.tag}</span>
+                            <span style={{ color: 'var(--muted)', fontFamily: 'monospace' }}>{snap.created_at?.substring(0, 16)}</span>
+                            <span style={{ color: 'var(--text)' }}>{snap.entry_count || 0} entries</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            <button style={{ fontSize: 8, padding: '1px 5px' }} onClick={async () => {
+                              try { await api.restoreSnapshot(snap.id); pollAll() } catch (_) {}
+                            }}>Restore</button>
+                            <button style={{ fontSize: 8, padding: '1px 5px', color: '#f03e3e' }} onClick={async () => {
+                              if (!confirm('Delete this snapshot?')) return
+                              try { await api.deleteSnapshot(snap.id); loadSnapshots() } catch (_) {}
+                            }}>Delete</button>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              )}
             </div>
           )
         })()}
