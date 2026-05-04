@@ -162,8 +162,8 @@ func agentsMDTemplate(rtkBin string) string {
 		"Este projeto usa ferramentas automáticas para reduzir consumo de tokens.\n" +
 		"**Todas as integrações são transparentes: você não precisa configurar nada.**\n\n" +
 		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
-		"### 1. Project Brain (Obsidian) — PRIMEIRA FONTE DE CONTEXTO\n" +
-		"The project brain is an Obsidian vault with markdown files.\n" +
+		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
+		"The project vault is an Obsidian vault with markdown files.\n" +
 		"Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>\n" +
 		"Save: POST http://127.0.0.1:2737/api/brain/save\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
@@ -183,11 +183,11 @@ func agentsMDTemplate(rtkBin string) string {
 const claudeMD = `# DWYT — Don't Waste Your Tokens
 
 ## Priority order (follow strictly):
-1. **Project Brain (Obsidian) FIRST** — before any file read or context rebuild:
+1. **Obsidian FIRST** — before any file read or context rebuild:
    - Search: GET http://127.0.0.1:2737/api/brain/search?q=your+query
    - Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
    - Types: command, decision, action, error, note
-   - Never mix memory between projects — isolation is automatic.
+   - Never mix vaults between projects — isolation is automatic.
 
 2. **Headroom** — auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
    If set, use them. If not, use default API endpoints. No manual config needed.
@@ -195,7 +195,7 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
 
 4. **Codebase MCP** — ONLY when you need structural code understanding.
-   Prefer Project Brain (Obsidian) context first. Use search_graph, trace_call_path, get_code_snippet.
+   Prefer Obsidian context first. Use search_graph, trace_call_path, get_code_snippet.
 `
 
 const cursorRule = `---
@@ -204,39 +204,39 @@ alwaysApply: true
 ---
 
 ## DWYT Priority Order:
-1. **Project Brain (Obsidian) FIRST**: consult project memory before any file operation.
+1. **Obsidian FIRST**: consult project vault before any file operation.
    Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
    Save: POST http://127.0.0.1:2737/api/brain/save
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
-Save important decisions to Project Brain (Obsidian) after completion.
+Save important decisions to Obsidian after completion.
 `
 
 const kiroSteering = `# DWYT Steering
 
 ## Priority:
-1. **Project Brain (Obsidian) FIRST**: check project memory before reading files.
+1. **Obsidian FIRST**: check project vault before reading files.
    Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
    Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
-4. **Codebase MCP**: structural exploration only — use after Project Brain (Obsidian)
+4. **Codebase MCP**: structural exploration only — use after Obsidian
 
-Save important decisions to Project Brain (Obsidian) after completion.
+Save important decisions to Obsidian after completion.
 `
 
 const copilotMD = `# DWYT — GitHub Copilot
 
 ## Priority:
-1. **Project Brain (Obsidian) FIRST**: check project memory before heavy file reads.
+1. **Obsidian FIRST**: check project vault before heavy file reads.
    Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
    Save: POST http://127.0.0.1:2737/api/brain/save
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed
 
-Save summaries after important changes via Project Brain (Obsidian) API.
+Save summaries after important changes via Obsidian API.
 `
 
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"

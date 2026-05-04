@@ -184,7 +184,7 @@ dwyt uninstall      # remove todas as ferramentas
 │  │  COMPRESSÃO         34%  │  │  REPOS  📁 meu-projeto   │        │
 │  │  UPTIME           1h 2m  │  │  ─────────────────────   │        │
 │  │  PORTA             8787  │  │  ▶ Iniciar  ■ Parar      │        │
-│  │  ─────────────────────   │  │  [Buscar brain...]  [Bsc] │        │
+│  │  ─────────────────────   │  │  [Buscar obsidian...][Bsc] │        │
 │  │  ▶ Iniciar  ■ Parar      │  └──────────────────────────┘        │
 │  └──────────────────────────┘                                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -222,7 +222,7 @@ Seletor no header: **Off / 5s / 10s**. O intervalo persiste na URL como `?reload
 │  ▾ Ferramentas              4 de 4 selecionadas         │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │ ● Codebase   Grafo de código — exploração       │    │
-│  │ ● Brain      Conhecimento do projeto — Obsidian vault │    │
+│  │ ● Obsidian      Conhecimento do projeto — Obsidian vault │    │
 │  │ ● Headroom   Compressão de chamadas à API       │    │
 │  │ ● RTK        Compressão de output de terminal   │    │
 │  └─────────────────────────────────────────────────┘    │
@@ -270,7 +270,7 @@ Todas as ferramentas são controladas pela UI do dashboard. Não há comandos ex
 ├── bin/                    # binários das ferramentas + symlink dwyt
 ├── data/                   # banco SQLite do grafo
 ├── headroom-venv/          # Python virtualenv do Headroom
-├── projects/               # per-project brain vaults (Obsidian markdown)
+├── projects/               # per-project Obsidian vaults
 ├── env.sh                  # variáveis de ambiente (source no shell RC)
 ├── config.json             # configuração salva pelo Setup
 └── state.json              # estado das ferramentas
@@ -283,7 +283,7 @@ Todas as ferramentas são controladas pela UI do dashboard. Não há comandos ex
 ├── bin\                    # binários + dwyt.exe
 ├── data\
 ├── headroom-venv\
-├── projects\               # per-project brain vaults
+├── projects\               # per-project Obsidian vaults
 ├── env.ps1                 # variáveis de ambiente (PowerShell)
 ├── config.json
 └── state.json
@@ -353,4 +353,4 @@ Python 3 e Node.js são necessários apenas para instalar as ferramentas via Set
 - [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
 - [RTK](https://github.com/rtk-ai/rtk)
 - [Headroom](https://github.com/chopratejas/headroom)
-- [Obsidian](https://obsidian.md) — Project Brain (markdown vault)
+- [Obsidian](https://obsidian.md) — Project vault (markdown knowledge base)

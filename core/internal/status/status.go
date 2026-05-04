@@ -133,7 +133,7 @@ func pollBrain() ToolStatus {
 	ts.Running = true
 	ts.Healthy = true
 	ts.State = StateRunning
-	ts.Details = "Obsidian brain active"
+	ts.Details = "Obsidian vault active"
 	return ts
 }
 

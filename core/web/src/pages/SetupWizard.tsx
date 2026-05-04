@@ -14,7 +14,7 @@ export default function SetupWizard() {
 
   const TOOLS = [
     { id: 'cbmcp',    label: 'Codebase', desc: t.cbmcpDesc    },
-    { id: 'brain',    label: 'Brain (Obsidian)', desc: t.brainDesc  },
+    { id: 'brain',    label: 'Obsidian', desc: t.brainDesc  },
     { id: 'headroom', label: 'Headroom', desc: t.headroomDesc  },
     { id: 'rtk',      label: 'RTK',      desc: t.rtkDesc       },
   ]
@@ -205,6 +205,7 @@ export default function SetupWizard() {
           {TOOLS.map(tool => (
             <Toggle key={tool.id} label={tool.label} description={tool.desc}
               checked={tools.includes(tool.id)}
+              disabled={tool.id === 'brain'}
               onChange={() => toggle(tools, tool.id, setTools)} />
           ))}
         </div>
