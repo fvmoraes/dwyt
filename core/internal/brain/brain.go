@@ -200,30 +200,30 @@ func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) erro
 
 	switch entryType {
 	case "decision":
-		return appendToDecisionsLog(pb.brainDir, content, now)
+		return pb.appendToDecisionsLogLocked(content, now)
 	case "task":
-		return appendToTasksLog(pb.brainDir, content, now)
+		return pb.appendToTasksLogLocked(content, now)
 	case "error", "command", "session":
-		return saveToLogs(pb.brainDir, entryType, content, tags, now)
+		return pb.saveToLogsLocked(entryType, content, tags, now)
 	default:
-		return saveToKnowledge(pb.brainDir, entryType, content, tags, now)
+		return pb.saveToKnowledgeLocked(entryType, content, tags, now)
 	}
 }
 
-func appendToDecisionsLog(brainDir, content string, now time.Time) error {
-	path := filepath.Join(brainDir, "decisions.md")
+func (pb *ProjectBrain) appendToDecisionsLogLocked(content string, now time.Time) error {
+	path := filepath.Join(pb.brainDir, "decisions.md")
 	entry := fmt.Sprintf("\n### %s\n\n%s\n\n*%s*\n\n---\n", now.Format("2006-01-02 15:04"), content, now.Format(time.RFC3339))
 	return appendFile(path, entry)
 }
 
-func appendToTasksLog(brainDir, content string, now time.Time) error {
-	path := filepath.Join(brainDir, "tasks.md")
+func (pb *ProjectBrain) appendToTasksLogLocked(content string, now time.Time) error {
+	path := filepath.Join(pb.brainDir, "tasks.md")
 	entry := fmt.Sprintf("\n- [ ] %s *(added %s)*\n", content, now.Format("2006-01-02 15:04"))
 	return appendFile(path, entry)
 }
 
-func saveToLogs(brainDir, entryType, content string, tags []string, now time.Time) error {
-	dir := filepath.Join(brainDir, "logs")
+func (pb *ProjectBrain) saveToLogsLocked(entryType, content string, tags []string, now time.Time) error {
+	dir := filepath.Join(pb.brainDir, "logs")
 	os.MkdirAll(dir, 0755)
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
@@ -237,8 +237,8 @@ func saveToLogs(brainDir, entryType, content string, tags []string, now time.Tim
 	return nil
 }
 
-func saveToKnowledge(brainDir, entryType, content string, tags []string, now time.Time) error {
-	dir := filepath.Join(brainDir, "knowledge")
+func (pb *ProjectBrain) saveToKnowledgeLocked(entryType, content string, tags []string, now time.Time) error {
+	dir := filepath.Join(pb.brainDir, "knowledge")
 	os.MkdirAll(dir, 0755)
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")

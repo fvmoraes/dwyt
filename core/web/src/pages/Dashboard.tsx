@@ -101,16 +101,24 @@ export default function Dashboard() {
         const data = JSON.parse(e.data)
         if (data.event === 'project_switch' && data.message) {
           if (data.message !== indexPath) {
+            // Clear cache and reload everything
+            setTools([])
+            setDetails({})
+            setBrainStats(null)
+            setSearchResult('')
+            setIndexError('')
             setIndexPath(data.message)
             const p = new URLSearchParams(searchParams)
             p.set('project', data.message)
             setSearchParams(p)
+            // Force reload after state update
+            setTimeout(pollAll, 100)
           }
         }
       } catch (_) {}
     })
     return () => { evtSource.close() }
-  }, [indexPath])
+  }, [indexPath, searchParams, setSearchParams, pollAll])
 
   // Fetch tool details + status when indexPath settles
   useEffect(() => {

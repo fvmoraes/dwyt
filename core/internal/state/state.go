@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/log"
 )
 
 // ProcessInfo tracks a single managed process.
@@ -208,7 +210,16 @@ func (s *RuntimeState) saveLocked() error {
 }
 
 func (s *RuntimeState) maybeSave() {
-	_ = s.saveLocked()
+	if err := s.saveLocked(); err != nil {
+		log.Error("failed to save state", log.Fields{"error": err.Error()})
+		// Try to save backup
+		if s.Path != "" {
+			backupPath := s.Path + ".backup"
+			if data, marshalErr := json.MarshalIndent(s, "", "  "); marshalErr == nil {
+				os.WriteFile(backupPath, data, 0644)
+			}
+		}
+	}
 }
 
 // ── Snapshot for API ──────────────────────────────────────────────────────

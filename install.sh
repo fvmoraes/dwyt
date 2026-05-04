@@ -119,10 +119,44 @@ else
 
   if [[ $DL_OK -eq 1 ]]; then
     cd "$TMP_DIR"
-    if [[ "$GOOS" == "windows" ]]; then
-      unzip -qo "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+    
+    # Download and verify checksum
+    CHECKSUM_URL="${GITHUB_RELEASES}/checksums.txt"
+    CHECKSUM_FILE="${TMP_DIR}/checksums.txt"
+    
+    if [[ "$DOWNLOADER" == "curl" ]]; then
+      curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_FILE" 2>/dev/null || true
     else
-      tar -xzf "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+      wget -q "$CHECKSUM_URL" -O "$CHECKSUM_FILE" 2>/dev/null || true
+    fi
+    
+    # Verify checksum if available
+    if [[ -f "$CHECKSUM_FILE" ]]; then
+      EXPECTED=$(grep "$RELEASE_ARCHIVE" "$CHECKSUM_FILE" | awk '{print $1}')
+      if [[ -n "$EXPECTED" ]]; then
+        if command -v sha256sum &>/dev/null; then
+          ACTUAL=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+        elif command -v shasum &>/dev/null; then
+          ACTUAL=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
+        else
+          ACTUAL=""
+        fi
+        
+        if [[ -n "$ACTUAL" && "$EXPECTED" != "$ACTUAL" ]]; then
+          warn "Checksum mismatch! Expected: $EXPECTED, Got: $ACTUAL"
+          DL_OK=0
+        else
+          info "Checksum verified"
+        fi
+      fi
+    fi
+    
+    if [[ $DL_OK -eq 1 ]]; then
+      if [[ "$GOOS" == "windows" ]]; then
+        unzip -qo "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+      else
+        tar -xzf "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+      fi
     fi
     rm -rf "$TMP_DIR"
   fi

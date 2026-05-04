@@ -318,15 +318,20 @@ func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
 func appendMarkedBlock(filePath, block string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil
+		// Create file if it doesn't exist
+		if os.IsNotExist(err) {
+			os.MkdirAll(filepath.Dir(filePath), 0755)
+			return os.WriteFile(filePath, []byte(block), 0644)
+		}
+		return err
 	}
 	content := string(data)
 	if strings.Contains(content, markerStart) {
-		return nil
+		return nil // Already injected
 	}
 	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil
+		return err
 	}
 	defer f.Close()
 	if len(content) > 0 && content[len(content)-1] != '\n' {

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -125,9 +127,13 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	if mp.HealthURL != "" {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", mp.Port, mp.HealthURL)
 		if err := waitForHealth(healthURL, 5, 10*time.Second); err != nil {
+			// Kill process that failed healthcheck
+			if proc, procErr := os.FindProcess(mp.PID); procErr == nil {
+				proc.Signal(syscall.SIGKILL)
+			}
 			mp.PID = 0
-			log.Warn("process started but healthcheck failed", log.Fields{"service": name, "error": err.Error()})
-			return &ServiceStatus{Name: name, Running: true, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, nil
+			log.Warn("process started but healthcheck failed, killed", log.Fields{"service": name, "error": err.Error()})
+			return &ServiceStatus{Name: name, Running: false, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, err
 		}
 		log.Info("process healthy", log.Fields{"service": name, "port": mp.Port})
 	}
@@ -250,10 +256,31 @@ func (mp *ManagedProcess) Running() bool {
 	}
 	proc, err := os.FindProcess(mp.PID)
 	if err != nil {
+		mp.PID = 0
 		return false
 	}
+	
+	// Check if process is not a zombie (Linux only)
+	if runtime.GOOS == "linux" {
+		statPath := fmt.Sprintf("/proc/%d/stat", mp.PID)
+		data, err := os.ReadFile(statPath)
+		if err != nil {
+			mp.PID = 0
+			return false
+		}
+		fields := strings.Fields(string(data))
+		if len(fields) > 2 && fields[2] == "Z" {
+			mp.PID = 0
+			return false
+		}
+	}
+	
 	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	if err != nil {
+		mp.PID = 0
+		return false
+	}
+	return true
 }
 
 func findFreePort(defaultPort int) int {

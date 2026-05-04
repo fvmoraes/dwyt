@@ -614,3 +614,145 @@ User runs: dwyt .
 6. **Codebase on-demand** — no automatic indexing. User controls when to index their codebase. Non-blocking if fails.
 7. **Resilience** — each tool can fail independently without crashing the dashboard. Errors are displayed in the UI and logged.
 8. **RTK preservation** — simplest and most reliable tool, left unchanged from its original design. Just prefix commands with `rtk`.
+
+---
+
+## Documentation Organization
+
+DWYT documentation follows a structured approach to maintain clarity and historical context.
+
+### Documentation Structure
+
+```
+docs/
+├── CHANGELOG.md              # Chronological list of all changes (organized by date)
+├── HOW-IT-WORKS.md          # This file - always kept up-to-date with latest architecture
+└── DDMMYYYY/                # Date-specific folders for detailed change documentation
+    ├── FIXES.md             # Technical details of fixes implemented on this date
+    ├── SUMMARY.md           # Final status, test results, and executive summary
+    └── VALIDATION.md        # Validation commands and procedures
+```
+
+### Documentation Maintenance Rules
+
+**CRITICAL:** Follow these rules when making changes to DWYT:
+
+1. **NEVER create documentation in the root directory** (except README.md and LICENSE)
+   - All documentation must be in `docs/` folder
+   - Use dated folders for change-specific documentation
+
+2. **ALWAYS update HOW-IT-WORKS.md** when making architectural changes
+   - This file is the single source of truth for current architecture
+   - Update relevant sections immediately after code changes
+   - Keep it synchronized with the actual codebase
+
+3. **ALWAYS update CHANGELOG.md** with every release
+   - Add new entries at the top (most recent first)
+   - Use date format: YYYY-MM-DD
+   - Include version number and brief description
+   - Reference the dated folder for detailed information
+
+4. **Create dated folders with EXACTLY 3 files**
+   - Format: `docs/DDMMYYYY/` (e.g., `docs/04052026/`)
+   - Required files: `FIXES.md`, `SUMMARY.md`, `VALIDATION.md`
+   - No additional files allowed - consolidate content into these 3 files
+
+### When to Create Dated Documentation
+
+Create a new dated folder (`docs/DDMMYYYY/`) when:
+- Fixing critical bugs or security issues
+- Implementing major features
+- Making architectural changes
+- Releasing a new version
+- Making changes that require validation procedures
+
+### Dated Folder Contents (EXACTLY 3 FILES)
+
+Each dated folder must contain exactly these 3 files:
+
+**FIXES.md** (Required)
+- Technical details of all fixes/changes
+- Code snippets showing before/after
+- Impact analysis for each change
+- Root cause analysis for bugs
+- Implementation details
+
+**SUMMARY.md** (Required)
+- Executive summary and ROI
+- Final status of changes
+- Test results and metrics
+- Files modified
+- Next steps and recommendations
+- Suggested commit message
+- Lessons learned
+
+**VALIDATION.md** (Required)
+- Commands to validate the changes
+- Manual testing procedures
+- Expected results
+- Troubleshooting guide
+- Performance testing
+- Debugging commands
+
+### Example Workflow
+
+When implementing changes:
+
+```bash
+# 1. Make code changes
+vim core/internal/procman/procman.go
+
+# 2. Create dated folder
+mkdir -p docs/$(date +%d%m%Y)
+
+# 3. Document changes (EXACTLY 3 files)
+vim docs/$(date +%d%m%Y)/FIXES.md       # Technical details
+vim docs/$(date +%d%m%Y)/SUMMARY.md     # Status + executive summary + commit message
+vim docs/$(date +%d%m%Y)/VALIDATION.md  # Validation commands
+
+# 4. Update main documentation
+vim docs/HOW-IT-WORKS.md      # Update architecture sections
+vim docs/CHANGELOG.md          # Add entry at the top
+
+# 5. Commit everything together
+git add .
+git commit -m "fix: critical stability improvements (v3.1.0)"
+```
+
+### Documentation Best Practices
+
+1. **Be specific and technical** in dated folders
+   - Include code snippets
+   - Show before/after comparisons
+   - Explain root causes
+
+2. **Keep HOW-IT-WORKS.md current** 
+   - Update immediately after changes
+   - Remove outdated information
+   - Add new sections as needed
+
+3. **Make CHANGELOG.md scannable**
+   - Use consistent formatting
+   - Group related changes
+   - Link to dated folders for details
+
+4. **Consolidate content properly**
+   - FIXES.md: Technical implementation details
+   - SUMMARY.md: Executive summary, ROI, status, commit message, lessons learned
+   - VALIDATION.md: All testing and validation procedures
+
+5. **Write for different audiences**
+   - FIXES.md: developers and code reviewers
+   - SUMMARY.md: team leads, QA, and management
+   - VALIDATION.md: QA engineers and testers
+   - HOW-IT-WORKS.md: new developers and contributors
+
+### Finding Documentation
+
+**For current architecture:** Read `docs/HOW-IT-WORKS.md`
+
+**For recent changes:** Check `docs/CHANGELOG.md` (top entries)
+
+**For specific date:** Navigate to `docs/DDMMYYYY/` folder
+
+**For historical context:** Browse dated folders chronologically

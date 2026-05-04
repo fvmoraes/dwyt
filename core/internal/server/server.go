@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -70,6 +71,8 @@ type DashboardServer struct {
 		progress string
 		error    string
 	}
+	codebaseIndexCancel context.CancelFunc
+	headroomStartMu sync.Mutex
 }
 
 func New(port int, dwytBin, dwytHome string) *DashboardServer {
@@ -341,11 +344,20 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 
 	ds.codebaseProgress.mu.Lock()
 	if ds.codebaseProgress.indexing {
-		proj := ds.indexProject
-		ds.codebaseProgress.mu.Unlock()
-		c.JSON(200, gin.H{"status": "already_indexing", "progress": ds.codebaseProgress.progress, "path": proj})
-		return
+		// Cancel previous indexing if different project
+		if ds.indexProject != body.Path && ds.codebaseIndexCancel != nil {
+			log.Info("canceling previous indexing", log.Fields{"old": ds.indexProject, "new": body.Path})
+			ds.codebaseIndexCancel()
+		} else {
+			proj := ds.indexProject
+			ds.codebaseProgress.mu.Unlock()
+			c.JSON(200, gin.H{"status": "already_indexing", "progress": ds.codebaseProgress.progress, "path": proj})
+			return
+		}
 	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ds.codebaseIndexCancel = cancel
 	ds.codebaseProgress.indexing = true
 	ds.codebaseProgress.progress = "starting"
 	ds.codebaseProgress.error = ""
@@ -356,6 +368,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 
 	// Run indexing in background
 	go func() {
+		defer cancel()
 		defer func() {
 			ds.codebaseProgress.mu.Lock()
 			ds.codebaseProgress.indexing = false
@@ -363,7 +376,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		}()
 
 		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
-		cmd := exec.Command(bin, "cli", "index_repository",
+		cmd := exec.CommandContext(ctx, bin, "cli", "index_repository",
 			fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
 
 		ds.codebaseProgress.mu.Lock()
@@ -376,7 +389,15 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		ds.codebaseProgress.mu.Lock()
 		defer ds.codebaseProgress.mu.Unlock()
 
-		if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			ds.codebaseProgress.error = "timeout after 10 minutes"
+			ds.codebaseProgress.progress = "failed: timeout"
+			log.Error("codebase index timeout", log.Fields{"path": body.Path})
+		} else if ctx.Err() == context.Canceled {
+			ds.codebaseProgress.error = "canceled"
+			ds.codebaseProgress.progress = "canceled"
+			log.Info("codebase index canceled", log.Fields{"path": body.Path})
+		} else if err != nil {
 			ds.codebaseProgress.error = err.Error()
 			ds.codebaseProgress.progress = fmt.Sprintf("failed after %s: %s", time.Since(start).Round(time.Second), ds.codebaseProgress.error)
 			log.Error("codebase index failed", log.Fields{"path": body.Path, "error": err.Error(), "output": string(out)})
@@ -1451,6 +1472,9 @@ func (ds *DashboardServer) apiHeadroomLogsPM(c *gin.Context) {
 
 // startHeadroomIfNeeded starts headroom proxy in background if installed.
 func (ds *DashboardServer) startHeadroomIfNeeded() {
+	ds.headroomStartMu.Lock()
+	defer ds.headroomStartMu.Unlock()
+
 	headroomBin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err != nil {
 		return // not installed

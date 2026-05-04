@@ -227,6 +227,12 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
+	
+	// Check if RTK is initialized in this project
+	if _, err := os.Stat(filepath.Join(projectPath, ".rtk")); err != nil {
+		return nil // RTK not initialized in this project
+	}
+	
 	cmd := exec.Command(bin, "gain", "--project")
 	cmd.Dir = projectPath
 	out, err := cmd.Output()
