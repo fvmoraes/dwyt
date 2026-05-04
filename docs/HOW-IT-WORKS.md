@@ -529,16 +529,48 @@ go build -o dwyt .         # embeds frontend via //go:embed
 cp dwyt ~/.local/bin/dwyt
 ```
 
-### CI Release
+### Automated Releases
 
-Push to `main` or a `v*` tag triggers `.github/workflows/release.yml`:
+DWYT uses **automatic releases on every commit** to `main`. See [RELEASE-PROCESS.md](RELEASE-PROCESS.md) for details.
+
+**Quick Summary:**
+- Every push to `main` triggers a release
+- Version is auto-calculated from commit messages (SemVer)
+- Changelog is auto-generated and categorized
+- Binaries built for 5 platforms (Linux, macOS, Windows)
+
+**Commit Message Convention:**
+```bash
+feat: new feature        # Minor version bump (0.x.0)
+fix: bug fix            # Patch version bump (0.0.x)
+breaking: breaking change # Major version bump (x.0.0)
+docs: documentation     # Patch bump
+chore: maintenance      # Patch bump
+```
+
+**Example:**
+```bash
+git commit -m "fix: resolve race condition in ProcessManager"
+git push origin main
+# → Automatically creates release with version bump and changelog
+```
+
+### CI Release (Automated)
+
+Push to `main` triggers `.github/workflows/release.yml`:
 
 1. Checkout + setup Go 1.25 + Node 22
 2. `npm ci && npm run build` (frontend)
-3. Generate changelog from `git log`
-4. GoReleaser: build for 5 platforms (linux/darwin/windows × amd64, linux arm64)
-5. Create GitHub Release (draft) with archives + checksums
-6. Append changelog to release body
+3. Calculate version from commit messages (SemVer)
+4. Generate categorized changelog
+5. Create and push version tag
+6. GoReleaser: build for 5 platforms (linux/darwin/windows × amd64, linux arm64)
+7. Create GitHub Release with:
+   - Version tag
+   - Categorized changelog
+   - Binary archives
+   - SHA256 checksums
+   - Installation instructions
 
 ### GoReleaser Config
 

@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'core/**'
       - 'install.sh'
@@ -38,18 +37,167 @@ jobs:
           npm ci
           npm run build
 
-      - name: Generate changelog
-        id: changelog
+      - name: Generate version and changelog
+        id: version
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            LOG=$(git log --pretty=format:"- %s (%an)" --no-merges)
+          # Get previous tag or start from v0.0.0
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          
+          # Get commit messages since last tag
+          if [ "$PREV_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s" --no-merges)
           else
-            LOG=$(git log --pretty=format:"- %s (%an)" --no-merges "${PREV_TAG}..HEAD")
+            COMMITS=$(git log --pretty=format:"%s" --no-merges "${PREV_TAG}..HEAD")
           fi
+          
+          # Determine version bump based on commit messages
+          # feat: or feature: -> minor bump
+          # fix: or bugfix: -> patch bump
+          # BREAKING CHANGE: or breaking: -> major bump
+          # Default: patch bump
+          
+          MAJOR=0
+          MINOR=0
+          PATCH=0
+          
+          if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
+            MAJOR=1
+          elif echo "$COMMITS" | grep -qiE "^(feat|feature):"; then
+            MINOR=1
+          else
+            PATCH=1
+          fi
+          
+          # Parse previous version
+          PREV_VERSION=${PREV_TAG#v}
+          IFS='.' read -r PREV_MAJOR PREV_MINOR PREV_PATCH <<< "$PREV_VERSION"
+          
+          # Calculate new version
+          if [ $MAJOR -eq 1 ]; then
+            NEW_VERSION="$((PREV_MAJOR + 1)).0.0"
+          elif [ $MINOR -eq 1 ]; then
+            NEW_VERSION="${PREV_MAJOR}.$((PREV_MINOR + 1)).0"
+          else
+            NEW_VERSION="${PREV_MAJOR}.${PREV_MINOR}.$((PREV_PATCH + 1))"
+          fi
+          
+          NEW_TAG="v${NEW_VERSION}"
+          
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+          
+          # Generate structured changelog
+          CHANGELOG="# Release ${NEW_TAG}
+
+**Released:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+**Previous version:** ${PREV_TAG}
+
+## Changes
+
+"
+          
+          # Categorize commits
+          BREAKING=""
+          FEATURES=""
+          FIXES=""
+          DOCS=""
+          CHORES=""
+          OTHER=""
+          
+          while IFS= read -r commit; do
+            if echo "$commit" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
+              BREAKING="${BREAKING}- ${commit#*: }
+"
+            elif echo "$commit" | grep -qiE "^(feat|feature):"; then
+              FEATURES="${FEATURES}- ${commit#*: }
+"
+            elif echo "$commit" | grep -qiE "^(fix|bugfix):"; then
+              FIXES="${FIXES}- ${commit#*: }
+"
+            elif echo "$commit" | grep -qiE "^(docs|doc):"; then
+              DOCS="${DOCS}- ${commit#*: }
+"
+            elif echo "$commit" | grep -qiE "^(chore|build|ci):"; then
+              CHORES="${CHORES}- ${commit#*: }
+"
+            else
+              OTHER="${OTHER}- ${commit}
+"
+            fi
+          done <<< "$COMMITS"
+          
+          # Build changelog sections
+          if [ -n "$BREAKING" ]; then
+            CHANGELOG="${CHANGELOG}### 🚨 Breaking Changes
+
+${BREAKING}
+"
+          fi
+          
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="${CHANGELOG}### ✨ Features
+
+${FEATURES}
+"
+          fi
+          
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes
+
+${FIXES}
+"
+          fi
+          
+          if [ -n "$DOCS" ]; then
+            CHANGELOG="${CHANGELOG}### 📚 Documentation
+
+${DOCS}
+"
+          fi
+          
+          if [ -n "$CHORES" ]; then
+            CHANGELOG="${CHANGELOG}### 🔧 Chores
+
+${CHORES}
+"
+          fi
+          
+          if [ -n "$OTHER" ]; then
+            CHANGELOG="${CHANGELOG}### 📝 Other Changes
+
+${OTHER}
+"
+          fi
+          
+          # Add installation instructions
+          CHANGELOG="${CHANGELOG}
+## Installation
+
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/\${{ github.repository }}/main/install.sh | bash
+\`\`\`
+
+Or download the binary for your platform from the assets below.
+
+## Checksums
+
+SHA256 checksums are available in \`checksums.txt\`.
+"
+          
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$LOG" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "Generated version: ${NEW_TAG}"
+          echo "Changelog preview:"
+          echo "$CHANGELOG" | head -20
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.new_tag }}" -m "Release ${{ steps.version.outputs.new_tag }}"
+          git push origin "${{ steps.version.outputs.new_tag }}"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -64,10 +212,9 @@ jobs:
       - name: Update release with changelog
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            ## Changelog
-
-            ${{ steps.changelog.outputs.changelog }}
-          append_body: true
+          tag_name: ${{ steps.version.outputs.new_tag }}
+          body: ${{ steps.version.outputs.changelog }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

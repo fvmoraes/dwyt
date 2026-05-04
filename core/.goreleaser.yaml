@@ -9,8 +9,8 @@ before:
 
 builds:
   - id: linux-amd64
-    goos: [linux]
-    goarch: [amd64]
+    goos: [ linux ]
+    goarch: [ amd64 ]
     main: ./main.go
     binary: dwyt
     env:
@@ -21,8 +21,8 @@ builds:
       - -s -w -X main.version={{.Version}}
 
   - id: linux-arm64
-    goos: [linux]
-    goarch: [arm64]
+    goos: [ linux ]
+    goarch: [ arm64 ]
     main: ./main.go
     binary: dwyt
     env:
@@ -33,8 +33,8 @@ builds:
       - -s -w -X main.version={{.Version}}
 
   - id: darwin-amd64
-    goos: [darwin]
-    goarch: [amd64]
+    goos: [ darwin ]
+    goarch: [ amd64 ]
     main: ./main.go
     binary: dwyt
     env:
@@ -45,8 +45,8 @@ builds:
       - -s -w -X main.version={{.Version}}
 
   - id: darwin-arm64
-    goos: [darwin]
-    goarch: [arm64]
+    goos: [ darwin ]
+    goarch: [ arm64 ]
     main: ./main.go
     binary: dwyt
     env:
@@ -57,8 +57,8 @@ builds:
       - -s -w -X main.version={{.Version}}
 
   - id: windows-amd64
-    goos: [windows]
-    goarch: [amd64]
+    goos: [ windows ]
+    goarch: [ amd64 ]
     main: ./main.go
     binary: dwyt
     env:
@@ -69,16 +69,18 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - formats: [tar.gz]
+  - formats: [ tar.gz ]
     name_template: "dwyt_{{.Os}}_{{.Arch}}"
   - id: windows
-    formats: [zip]
+    formats: [ zip ]
     name_template: "dwyt_{{.Os}}_{{.Arch}}"
-    builds: [windows-amd64]
+    builds: [ windows-amd64 ]
 
 checksum:
   name_template: "checksums.txt"
 
 release:
-  draft: true
-  replace_existing_draft: true
+  draft: false
+  replace_existing_draft: false
+  prerelease: auto
+  name_template: "Release {{.Tag}}"

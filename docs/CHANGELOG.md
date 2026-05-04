@@ -2,6 +2,8 @@
 
 All notable changes to DWYT are documented here, organized by date.
 
+**Note:** Starting from 2026-05-04, releases are automatically generated on every commit to `main`. See [RELEASE-PROCESS.md](RELEASE-PROCESS.md) for details on the automated release process and commit message conventions.
+
 ---
 
 ## 2026-05-04 - Critical Stability Fixes (v3.1.0)
