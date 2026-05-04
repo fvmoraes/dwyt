@@ -88,6 +88,9 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		log.Error("failed to open db", log.Fields{"error": err.Error()})
 	}
 
+	// Migrate old MemStack memory dirs to Brain markdown (one-time)
+	brain.MigrateOldMemoryDirs(dwytHome)
+
 	// Initialize runtime state (PID tracking, errors, current project)
 	rs := state.Init(dwytHome)
 	rs.SetCurrentProject(project, filepath.Base(project))

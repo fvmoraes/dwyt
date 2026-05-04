@@ -154,10 +154,23 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 		return pm.statusLocked(mp), nil
 	}
 
-	if err := proc.Kill(); err != nil {
-		log.Warn("failed to kill process", log.Fields{"service": name, "pid": mp.PID, "error": err.Error()})
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		log.Info("SIGTERM failed, using SIGKILL", log.Fields{"service": name, "pid": mp.PID})
+		proc.Signal(syscall.SIGKILL)
+	} else {
+		done := make(chan struct{})
+		go func() {
+			proc.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			log.Warn("process didn't exit on SIGTERM, sending SIGKILL", log.Fields{"service": name, "pid": mp.PID})
+			proc.Signal(syscall.SIGKILL)
+			<-done
+		}
 	}
-	proc.Wait()
 
 	mp.PID = 0
 	log.Info("process stopped", log.Fields{"service": name})

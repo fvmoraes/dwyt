@@ -39,13 +39,17 @@ type ProjectBrain struct {
 	brainDir     string       `json:"-"`
 }
 
+type BrainManager struct {
+	Current *ProjectBrain
+}
+
 func NewProjectBrain(dwytHome, projectPath string) (*ProjectBrain, error) {
 	id := hashPath(projectPath)
 	baseDir := filepath.Join(dwytHome, "projects", id)
 	brainDir := filepath.Join(baseDir, "brain")
 	os.MkdirAll(brainDir, 0755)
 
-	dirs := []string{"sessions", "decisions", "errors", "notes", ".obsidian"}
+	dirs := []string{"knowledge", "logs"}
 	for _, d := range dirs {
 		os.MkdirAll(filepath.Join(brainDir, d), 0755)
 	}
@@ -71,7 +75,121 @@ func NewProjectBrain(dwytHome, projectPath string) (*ProjectBrain, error) {
 	}
 
 	ensureBrainJSON(baseDir, projectPath)
+	ensureSeedFiles(brainDir)
 	return pb, nil
+}
+
+func ensureSeedFiles(brainDir string) {
+	seeds := map[string]string{
+		"index.md": `---
+type: index
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [project, index]
+---
+
+# Project Index
+
+Welcome to the Project Brain. This vault contains the knowledge base for your project.
+
+## Structure
+- **context.md** — Full project summary
+- **decisions.md** — Architecture and design decisions
+- **tasks.md** — Active tasks and progress
+- **knowledge/** — Knowledge base articles
+- **logs/** — Session logs and command history
+`,
+		"decisions.md": `---
+type: decisions
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [decisions, architecture]
+---
+
+# Decisions Log
+
+## Recent Decisions
+`,
+		"tasks.md": `---
+type: tasks
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [tasks, progress]
+---
+
+# Tasks
+
+## Active
+`,
+	}
+	for name, content := range seeds {
+		path := filepath.Join(brainDir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			os.WriteFile(path, []byte(content), 0644)
+		}
+	}
+}
+
+func MigrateOldMemoryDirs(dwytHome string) error {
+	projectsDir := filepath.Join(dwytHome, "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		memoryDir := filepath.Join(projectsDir, entry.Name(), "memory")
+		if info, err := os.Stat(memoryDir); err == nil && info.IsDir() {
+			memoryFile := filepath.Join(memoryDir, "memory.json")
+			if data, err := os.ReadFile(memoryFile); err == nil && len(data) > 2 {
+				brainDir := filepath.Join(projectsDir, entry.Name(), "brain")
+				os.MkdirAll(filepath.Join(brainDir, "knowledge"), 0755)
+				os.MkdirAll(filepath.Join(brainDir, "logs"), 0755)
+				ensureSeedFiles(brainDir)
+				var pm struct {
+					Entries []struct {
+						Type    string `json:"type"`
+						Content string `json:"content"`
+					} `json:"entries"`
+				}
+				if err := json.Unmarshal(data, &pm); err == nil {
+					for _, e := range pm.Entries {
+						appendToMarkdown(brainDir, e.Type, e.Content)
+					}
+				}
+			}
+			os.RemoveAll(memoryDir)
+		}
+	}
+	return nil
+}
+
+func appendToMarkdown(brainDir, entryType, content string) {
+	var targetFile string
+	switch entryType {
+	case "decision":
+		targetFile = filepath.Join(brainDir, "decisions.md")
+	case "task":
+		targetFile = filepath.Join(brainDir, "tasks.md")
+	case "error", "command":
+		targetFile = filepath.Join(brainDir, "logs", entryType+"-"+time.Now().Format("2006-01-02")+".md")
+	default:
+		targetFile = filepath.Join(brainDir, "knowledge", entryType+"-"+time.Now().Format("150405")+".md")
+	}
+
+	frontmatter := fmt.Sprintf(`---
+type: %s
+date: %s
+migrated: true
+---
+
+`, entryType, time.Now().Format(time.RFC3339))
+
+	existing := ""
+	if data, err := os.ReadFile(targetFile); err == nil {
+		existing = string(data)
+	}
+	entry := fmt.Sprintf("%s## %s\n\n%s\n\n---\n\n", frontmatter, entryType, content)
+	os.WriteFile(targetFile, []byte(existing+entry), 0644)
 }
 
 func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) error {
@@ -79,29 +197,73 @@ func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) erro
 	defer pb.mu.Unlock()
 
 	now := time.Now()
-	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
-	title := content
-	if len(title) > 60 {
-		title = title[:57] + "..."
+
+	switch entryType {
+	case "decision":
+		return appendToDecisionsLog(pb.brainDir, content, now)
+	case "task":
+		return appendToTasksLog(pb.brainDir, content, now)
+	case "error", "command", "session":
+		return saveToLogs(pb.brainDir, entryType, content, tags, now)
+	default:
+		return saveToKnowledge(pb.brainDir, entryType, content, tags, now)
 	}
+}
 
-	dir := filepath.Join(pb.brainDir, entryType+"s")
+func appendToDecisionsLog(brainDir, content string, now time.Time) error {
+	path := filepath.Join(brainDir, "decisions.md")
+	entry := fmt.Sprintf("\n### %s\n\n%s\n\n*%s*\n\n---\n", now.Format("2006-01-02 15:04"), content, now.Format(time.RFC3339))
+	return appendFile(path, entry)
+}
+
+func appendToTasksLog(brainDir, content string, now time.Time) error {
+	path := filepath.Join(brainDir, "tasks.md")
+	entry := fmt.Sprintf("\n- [ ] %s *(added %s)*\n", content, now.Format("2006-01-02 15:04"))
+	return appendFile(path, entry)
+}
+
+func saveToLogs(brainDir, entryType, content string, tags []string, now time.Time) error {
+	dir := filepath.Join(brainDir, "logs")
 	os.MkdirAll(dir, 0755)
-
-	fileName := id + ".md"
-	filePath := filepath.Join(dir, fileName)
-
-	f, err := os.Create(filePath)
+	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
+	path := filepath.Join(dir, id+".md")
+	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("brain save: %w", err)
 	}
 	defer f.Close()
-
 	writeFrontmatter(f, entryType, tags, now)
-	fmt.Fprintf(f, "# %s\n\n%s\n", title, content)
-
-	pb.UpdatedAt = now
+	fmt.Fprintf(f, "# %s\n\n%s\n", entryType, content)
 	return nil
+}
+
+func saveToKnowledge(brainDir, entryType, content string, tags []string, now time.Time) error {
+	dir := filepath.Join(brainDir, "knowledge")
+	os.MkdirAll(dir, 0755)
+	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
+	path := filepath.Join(dir, id+".md")
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("brain save: %w", err)
+	}
+	defer f.Close()
+	writeFrontmatter(f, entryType, tags, now)
+	title := content
+	if len(title) > 60 {
+		title = title[:57] + "..."
+	}
+	fmt.Fprintf(f, "# %s\n\n%s\n", title, content)
+	return nil
+}
+
+func appendFile(path, content string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(content)
+	return err
 }
 
 func (pb *ProjectBrain) Search(query string) []BrainEntry {
@@ -121,12 +283,7 @@ func (pb *ProjectBrain) Search(query string) []BrainEntry {
 		}
 		content := string(data)
 		if strings.Contains(strings.ToLower(content), query) {
-			entryType := "note"
-			relPath, _ := filepath.Rel(pb.brainDir, path)
-			parts := strings.Split(relPath, string(filepath.Separator))
-			if len(parts) >= 2 {
-				entryType = strings.TrimSuffix(parts[0], "s")
-			}
+			entryType := detectType(pb.brainDir, path)
 			results = append(results, BrainEntry{
 				ID:        info.Name(),
 				Type:      entryType,
@@ -142,10 +299,27 @@ func (pb *ProjectBrain) Search(query string) []BrainEntry {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].CreatedAt.After(results[j].CreatedAt)
 	})
-	if len(results) > 20 {
-		results = results[:20]
+	if len(results) > 30 {
+		results = results[:30]
 	}
 	return results
+}
+
+func detectType(brainDir, path string) string {
+	rel, _ := filepath.Rel(brainDir, path)
+	base := filepath.Base(path)
+	switch {
+	case base == "decisions.md":
+		return "decision"
+	case base == "tasks.md":
+		return "task"
+	case strings.HasPrefix(rel, "logs/"):
+		return "log"
+	case strings.HasPrefix(rel, "knowledge/"):
+		return "knowledge"
+	default:
+		return "note"
+	}
 }
 
 func (pb *ProjectBrain) RebuildSummary() string {
@@ -159,12 +333,7 @@ func (pb *ProjectBrain) RebuildSummary() string {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
-		entryType := "note"
-		relPath, _ := filepath.Rel(pb.brainDir, path)
-		parts2 := strings.Split(relPath, string(filepath.Separator))
-		if len(parts2) >= 2 {
-			entryType = strings.TrimSuffix(parts2[0], "s")
-		}
+		entryType := detectType(pb.brainDir, path)
 		typeCount[entryType]++
 
 		data, _ := os.ReadFile(path)
@@ -178,10 +347,10 @@ func (pb *ProjectBrain) RebuildSummary() string {
 	summary := fmt.Sprintf("# %s — Project Brain\n\n", pb.ProjectName)
 	summary += fmt.Sprintf("**Last updated:** %s\n\n", time.Now().Format(time.RFC3339))
 	summary += fmt.Sprintf("## Summary\n\n%d entries: %s\n\n", totalCount(typeCount), formatTypeCount(typeCount))
-	summary += "## Recent\n\n"
+	summary += "## Recent Activity\n\n"
 	recent := parts
-	if len(recent) > 5 {
-		recent = recent[len(recent)-5:]
+	if len(recent) > 8 {
+		recent = recent[len(recent)-8:]
 	}
 	for _, p := range recent {
 		summary += fmt.Sprintf("- %s\n", p)
@@ -205,12 +374,7 @@ func (pb *ProjectBrain) Stats() map[string]interface{} {
 			return nil
 		}
 		totalFiles++
-		entryType := "note"
-		relPath, _ := filepath.Rel(pb.brainDir, path)
-		parts := strings.Split(relPath, string(filepath.Separator))
-		if len(parts) >= 2 {
-			entryType = strings.TrimSuffix(parts[0], "s")
-		}
+		entryType := detectType(pb.brainDir, path)
 		typeCount[entryType]++
 		return nil
 	})
@@ -243,15 +407,11 @@ func (pb *ProjectBrain) Forget() error {
 
 	entries, _ := os.ReadDir(pb.brainDir)
 	for _, e := range entries {
-		if e.Name() == ".obsidian" {
-			continue
-		}
 		os.RemoveAll(filepath.Join(pb.brainDir, e.Name()))
 	}
-	os.MkdirAll(filepath.Join(pb.brainDir, "sessions"), 0755)
-	os.MkdirAll(filepath.Join(pb.brainDir, "decisions"), 0755)
-	os.MkdirAll(filepath.Join(pb.brainDir, "errors"), 0755)
-	os.MkdirAll(filepath.Join(pb.brainDir, "notes"), 0755)
+	os.MkdirAll(filepath.Join(pb.brainDir, "knowledge"), 0755)
+	os.MkdirAll(filepath.Join(pb.brainDir, "logs"), 0755)
+	ensureSeedFiles(pb.brainDir)
 	pb.Summary = ""
 	pb.UpdatedAt = time.Now()
 	return nil
@@ -261,7 +421,6 @@ func (pb *ProjectBrain) OpenInObsidian() error {
 	if !ObsidianInstalled() {
 		return fmt.Errorf("obsidian is not installed")
 	}
-
 	vaultPath := pb.brainDir
 	if runtime.GOOS == "windows" {
 		vaultPath = strings.ReplaceAll(vaultPath, "\\", "/")
@@ -294,7 +453,6 @@ func ObsidianInstalled() bool {
 	if _, err := exec.LookPath("obsidian"); err == nil {
 		return true
 	}
-
 	home, _ := os.UserHomeDir()
 	locations := []string{
 		filepath.Join(home, ".local", "bin", "obsidian"),
@@ -346,8 +504,7 @@ func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Tim
 }
 
 func extractTitle(content string) string {
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(content, "\n") {
 		if strings.HasPrefix(line, "# ") {
 			return strings.TrimPrefix(line, "# ")
 		}
@@ -356,22 +513,21 @@ func extractTitle(content string) string {
 }
 
 func extractContent(content string) string {
-	lines := strings.Split(content, "\n")
-	inFrontmatter := false
+	inFM := false
 	fmCount := 0
 	var body []string
-	for _, line := range lines {
+	for _, line := range strings.Split(content, "\n") {
 		if line == "---" {
 			fmCount++
 			if fmCount == 1 {
-				inFrontmatter = true
+				inFM = true
 				continue
-			} else if inFrontmatter {
-				inFrontmatter = false
+			} else if inFM {
+				inFM = false
 				continue
 			}
 		}
-		if !inFrontmatter {
+		if !inFM {
 			body = append(body, line)
 		}
 	}
@@ -418,20 +574,17 @@ type ProjectMeta struct {
 
 func ensureBrainJSON(baseDir, projectPath string) {
 	projFile := filepath.Join(baseDir, "project.json")
-
 	meta := ProjectMeta{
 		Name:      filepath.Base(projectPath),
 		Path:      projectPath,
 		CreatedAt: time.Now(),
 		LastOpen:  time.Now(),
 	}
-
 	if data, err := os.ReadFile(projFile); err == nil {
 		json.Unmarshal(data, &meta)
 		meta.LastOpen = time.Now()
 		meta.Path = projectPath
 	}
-
 	data, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(projFile, data, 0644)
 }
