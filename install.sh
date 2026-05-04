@@ -27,18 +27,18 @@ OS="$(uname -s)"; ARCH="$(uname -m)"
 case "$OS" in
   Linux)
     case "$ARCH" in
-      x86_64)  BINARY="dwyt-linux-amd64" ;;
-      aarch64|arm64) die "Linux ARM64 not yet supported. Build from source." ;;
+      x86_64)  GOOS="linux";  GOARCH="amd64" ;;
+      aarch64|arm64) GOOS="linux"; GOARCH="arm64" ;;
       *) die "Unsupported architecture: $ARCH" ;;
     esac ;;
   Darwin)
     case "$ARCH" in
-      x86_64) BINARY="dwyt-darwin-amd64" ;;
-      arm64)  BINARY="dwyt-darwin-arm64" ;;
+      x86_64) GOOS="darwin"; GOARCH="amd64" ;;
+      arm64)  GOOS="darwin"; GOARCH="arm64" ;;
       *) die "Unsupported macOS architecture: $ARCH" ;;
     esac ;;
   MINGW*|MSYS*|CYGWIN*)
-    BINARY="dwyt-windows-amd64.exe" ;;
+    GOOS="windows"; GOARCH="amd64" ;;
   *)
     die "Unsupported OS: $OS" ;;
 esac
@@ -47,6 +47,13 @@ INSTALL_DIR="${HOME}/.local/bin"
 DEST="${INSTALL_DIR}/dwyt"
 GITHUB_RELEASES="https://github.com/fvmoraes/dwyt/releases/latest/download"
 GITHUB_RAW="https://raw.githubusercontent.com/fvmoraes/dwyt/main"
+
+RELEASE_ARCHIVE="dwyt_${GOOS}_${GOARCH}.tar.gz"
+RELEASE_BINARY="dwyt"
+if [[ "$GOOS" == "windows" ]]; then
+  RELEASE_ARCHIVE="dwyt_${GOOS}_${GOARCH}.zip"
+  RELEASE_BINARY="dwyt.exe"
+fi
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
@@ -75,13 +82,13 @@ fi
 # ── Locate binary ─────────────────────────────────────────────────────────────
 header "Locating binary..."
 
-info "Platform : $OS $ARCH"
-info "Binary   : $BINARY"
+info "Platform : $OS $ARCH ($GOOS/$GOARCH)"
+info "Archive  : $RELEASE_ARCHIVE"
 info "Dest     : $DEST"
 
 # Script directory — works whether piped or run directly
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/stdin}")" 2>/dev/null && pwd || echo "")"
-LOCAL_BIN="${SCRIPT_DIR}/${BINARY}"
+LOCAL_BIN="${SCRIPT_DIR}/${RELEASE_BINARY}"
 
 mkdir -p "$INSTALL_DIR"
 
@@ -95,23 +102,35 @@ if [[ -f "$LOCAL_BIN" ]]; then
 else
   # ── Case 2: download from GitHub Releases
   info "Downloading from GitHub Releases..."
-  DOWNLOAD_URL="${GITHUB_RELEASES}/${BINARY}"
+  DOWNLOAD_URL="${GITHUB_RELEASES}/${RELEASE_ARCHIVE}"
+  TMP_DIR="$(mktemp -d)"
+  TMP_FILE="${TMP_DIR}/${RELEASE_ARCHIVE}"
 
   DL_OK=0
   if [[ "$DOWNLOADER" == "curl" ]]; then
-    if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST" 2>/dev/null; then
+    if curl -fsSL -L --progress-bar "$DOWNLOAD_URL" -o "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
       DL_OK=1
     fi
   else
-    if wget -q --show-progress "$DOWNLOAD_URL" -O "$DEST" 2>/dev/null; then
+    if wget -q --show-progress "$DOWNLOAD_URL" -O "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
       DL_OK=1
     fi
+  fi
+
+  if [[ $DL_OK -eq 1 ]]; then
+    cd "$TMP_DIR"
+    if [[ "$GOOS" == "windows" ]]; then
+      unzip -qo "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+    else
+      tar -xzf "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+    fi
+    rm -rf "$TMP_DIR"
   fi
 
   if [[ $DL_OK -eq 0 ]]; then
     # ── Case 3: Releases not available — try raw main branch (dev)
     info "Releases not found, trying main branch..."
-    DOWNLOAD_URL="${GITHUB_RAW}/${BINARY}"
+    DOWNLOAD_URL="${GITHUB_RAW}/dwyt-${GOOS}-${GOARCH}"
 
     if [[ "$DOWNLOADER" == "curl" ]]; then
       if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST" 2>/dev/null; then
