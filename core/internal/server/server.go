@@ -585,11 +585,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		}
 	}
 	if service == "" || service == "brain" {
-		if _, err := os.Stat(filepath.Join(ds.DwytBin, "brain")); err == nil {
-			logs["brain"] = "brain: disponível (ferramenta CLI)"
-		} else {
-			logs["brain"] = "brain: não instalado"
-		}
+		logs["brain"] = "brain: active (Obsidian vault)"
 	}
 
 	c.JSON(200, gin.H{"logs": logs})
@@ -1121,10 +1117,11 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 
 	// Check which tools are installed
 	toolsInstalled := map[string]bool{}
-	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom", "brain"} {
+	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom"} {
 		_, err := os.Stat(filepath.Join(ds.DwytBin, t))
 		toolsInstalled[t] = err == nil
 	}
+	toolsInstalled["brain"] = true // brain is built-in, no binary needed
 	anyInstalled := toolsInstalled["codebase-memory-mcp"] ||
 		toolsInstalled["rtk"] ||
 		toolsInstalled["headroom"] ||
