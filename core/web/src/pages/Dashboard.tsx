@@ -210,16 +210,21 @@ export default function Dashboard() {
   }
 
   // ── sub-components ─────────────────────────────────────────────────────────
-  function CardHeader({ label, color, state }: { label: string; color: string; state: ToolState }) {
+  function CardHeader({ label, color, state, description }: { label: string; color: string; state: ToolState; description?: string }) {
     const b = badge(state)
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color }}>{label}</span>
-          <span style={{ fontSize: 11 }}>{b.icon}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, color: b.color }}>{b.text}</span>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color }}>{label}</span>
+            <span style={{ fontSize: 11 }}>{b.icon}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: b.color }}>{b.text}</span>
+          </div>
+          <span className={`status-dot ${dotClass(state)}`} />
         </div>
-        <span className={`status-dot ${dotClass(state)}`} />
+        {description && (
+          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>{description}</div>
+        )}
       </div>
     )
   }
@@ -478,7 +483,7 @@ export default function Dashboard() {
           const isIndexed = !!projectCtx.project_state?.indexed_at
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.codeMap} color="#339af0" state={state} />
+              <CardHeader label={t.codeMap} color="#339af0" state={state} description={t.cbmcpDesc} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={'—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
@@ -523,7 +528,7 @@ export default function Dashboard() {
           const state = toolState(rtkTool, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.terminalOptimized} color="#2f9e44" state={state} />
+              <CardHeader label={t.terminalOptimized} color="#2f9e44" state={state} description={t.rtkDesc} />
               <Hr />
               <Row label={t.commands}       value={det?.total_commands ? String(det.total_commands) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -547,7 +552,7 @@ export default function Dashboard() {
           const state = toolState(hr, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.compressionActive} color="#3bc9db" state={state} />
+              <CardHeader label={t.compressionActive} color="#3bc9db" state={state} description={t.headroomDesc} />
               <Hr />
               <Row label={t.requests}       value={det?.requests ? String(det.requests) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -575,7 +580,7 @@ export default function Dashboard() {
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.brainActive || 'Project Brain'} color="#f08d49" state={state} />
+              <CardHeader label={t.brainActive || 'Obsidian'} color="#f08d49" state={state} description={t.brainDesc} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={brainEstimate > 0 ? fmtN(brainEstimate) + ' est.' : '—'} />
               <Row label={t.memories || 'Obsidian files'} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet || 'No files yet'} />
