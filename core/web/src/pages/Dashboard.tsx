@@ -432,7 +432,7 @@ export default function Dashboard() {
               {[
                 { label: 'RTK', saved: rtkSaved, color: '#2f9e44' },
                 { label: 'Headroom', saved: headroomSaved, color: '#3bc9db' },
-                { label: 'Brain', saved: brainEstimate, color: '#f08d49' },
+                { label: 'Obsidian', saved: brainEstimate, color: '#f08d49' },
                 { label: 'Codebase', saved: 0, color: '#339af0' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
@@ -578,7 +578,7 @@ export default function Dashboard() {
               <CardHeader label={t.brainActive || 'Project Brain'} color="#f08d49" state={state} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={brainEstimate > 0 ? fmtN(brainEstimate) + ' est.' : '—'} />
-              <Row label={t.memories || 'Brain files'} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet || 'No files yet'} />
+              <Row label={t.memories || 'Obsidian files'} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet || 'No files yet'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
               {brainStats?.summary && (
