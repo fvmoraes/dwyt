@@ -410,6 +410,9 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 	config.Configured = true
 	config.LastSetup = time.Now().Format(time.RFC3339)
 
+	config.Tools = migrateToolList(config.Tools)
+	config.Ias = migrateToolList(config.Ias)
+
 	data, _ := json.Marshal(config)
 	if ds.Store != nil {
 		ds.Store.SetConfig("setup", string(data))
@@ -429,7 +432,34 @@ func (ds *DashboardServer) apiSetupLoad(c *gin.Context) {
 	}
 	var config Config
 	json.Unmarshal([]byte(raw), &config)
+
+	config.Tools = migrateToolList(config.Tools)
+	config.Ias = migrateToolList(config.Ias)
+
 	c.JSON(200, config)
+}
+
+func migrateToolList(list []string) []string {
+	var migrated []string
+	for _, t := range list {
+		if t == "memstack" || t == "memStack" {
+			if !contains(migrated, "brain") {
+				migrated = append(migrated, "brain")
+			}
+		} else {
+			migrated = append(migrated, t)
+		}
+	}
+	return migrated
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 func (ds *DashboardServer) apiSetupStatus(c *gin.Context) {

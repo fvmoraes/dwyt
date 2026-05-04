@@ -100,10 +100,10 @@ func runDefault(projectPath string) error {
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
 
 	if !brain.ObsidianInstalled() {
-		fmt.Println("\n  ✗ Obsidian is required but not found.")
-		fmt.Println("  Install from: https://obsidian.md/download")
-		fmt.Println("  After installing, run 'dwyt .' again.\n")
-		os.Exit(1)
+		fmt.Println("  →  obsidian               not found (brain will use file manager)")
+		fmt.Println("     Install Obsidian for visual navigation: https://obsidian.md/download")
+	} else {
+		fmt.Println("  →  obsidian               detected")
 	}
 
 	// ── Check if daemon is already running ────────────────────────────────────
