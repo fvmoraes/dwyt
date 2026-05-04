@@ -176,7 +176,7 @@ dwyt uninstall      # remove todas as ferramentas
 │  │  Abrir Grafo →           │  └──────────────────────────┘        │
 │  └──────────────────────────┘                                       │
 │  ┌──────────────────────────┐  ┌──────────────────────────┐        │
-│  │  HEADROOM            🟢  │  │  MEMSTACK            🟢  │        │
+│  │  HEADROOM            🟢  │  │  BRAIN               🟢  │        │
 │  │  🟢 OK                   │  │  🟢 OK                   │        │
 │  │  ─────────────────────   │  │  ─────────────────────   │        │
 │  │  TOKENS ECONOMIZADOS 8M  │  │  TOKENS ECONOMIZADOS var │        │
@@ -184,7 +184,7 @@ dwyt uninstall      # remove todas as ferramentas
 │  │  COMPRESSÃO         34%  │  │  REPOS  📁 meu-projeto   │        │
 │  │  UPTIME           1h 2m  │  │  ─────────────────────   │        │
 │  │  PORTA             8787  │  │  ▶ Iniciar  ■ Parar      │        │
-│  │  ─────────────────────   │  │  [Buscar memória...][Bsc] │        │
+│  │  ─────────────────────   │  │  [Buscar brain...]  [Bsc] │        │
 │  │  ▶ Iniciar  ■ Parar      │  └──────────────────────────┘        │
 │  └──────────────────────────┘                                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -222,7 +222,7 @@ Seletor no header: **Off / 5s / 10s**. O intervalo persiste na URL como `?reload
 │  ▾ Ferramentas              4 de 4 selecionadas         │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │ ● Codebase   Grafo de código — exploração       │    │
-│  │ ● MemStack   Memória persistente entre sessões  │    │
+│  │ ● Brain      Conhecimento do projeto — Obsidian vault │    │
 │  │ ● Headroom   Compressão de chamadas à API       │    │
 │  │ ● RTK        Compressão de output de terminal   │    │
 │  └─────────────────────────────────────────────────┘    │
@@ -255,7 +255,7 @@ Seletor no header: **Off / 5s / 10s**. O intervalo persiste na URL como `?reload
 | **[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)** | Grafo do código — respostas estruturais sem grep arquivo por arquivo | ~99% por consulta |
 | **[RTK](https://github.com/rtk-ai/rtk)** | Comprime output de terminal antes de entrar no contexto | 60–98% por comando |
 | **[Headroom](https://github.com/chopratejas/headroom)** | Proxy que comprime chamadas à API em trânsito | ~34% por requisição |
-| **[MemStack](https://github.com/cwinvestments/memstack)** | Memória persistente entre sessões — elimina reconstrução de contexto | variável |
+| **[Obsidian](https://obsidian.md)** | Conhecimento do projeto em markdown — vault local com busca e navegação visual | variável |
 
 Todas as ferramentas são controladas pela UI do dashboard. Não há comandos externos para gerenciá-las.
 
@@ -270,7 +270,7 @@ Todas as ferramentas são controladas pela UI do dashboard. Não há comandos ex
 ├── bin/                    # binários das ferramentas + symlink dwyt
 ├── data/                   # banco SQLite do grafo
 ├── headroom-venv/          # Python virtualenv do Headroom
-├── memstack/               # MemStack clonado
+├── projects/               # per-project brain vaults (Obsidian markdown)
 ├── env.sh                  # variáveis de ambiente (source no shell RC)
 ├── config.json             # configuração salva pelo Setup
 └── state.json              # estado das ferramentas
@@ -283,7 +283,7 @@ Todas as ferramentas são controladas pela UI do dashboard. Não há comandos ex
 ├── bin\                    # binários + dwyt.exe
 ├── data\
 ├── headroom-venv\
-├── memstack\
+├── projects\               # per-project brain vaults
 ├── env.ps1                 # variáveis de ambiente (PowerShell)
 ├── config.json
 └── state.json
@@ -353,4 +353,4 @@ Python 3 e Node.js são necessários apenas para instalar as ferramentas via Set
 - [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
 - [RTK](https://github.com/rtk-ai/rtk)
 - [Headroom](https://github.com/chopratejas/headroom)
-- [MemStack](https://github.com/cwinvestments/memstack)
+- [Obsidian](https://obsidian.md) — Project Brain (markdown vault)

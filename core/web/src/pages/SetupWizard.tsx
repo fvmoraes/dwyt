@@ -14,7 +14,7 @@ export default function SetupWizard() {
 
   const TOOLS = [
     { id: 'cbmcp',    label: 'Codebase', desc: t.cbmcpDesc    },
-    { id: 'brain',    label: 'Brain (Obsidian)', desc: t.memstackDesc  },
+    { id: 'brain',    label: 'Brain (Obsidian)', desc: t.brainDesc  },
     { id: 'headroom', label: 'Headroom', desc: t.headroomDesc  },
     { id: 'rtk',      label: 'RTK',      desc: t.rtkDesc       },
   ]

@@ -46,7 +46,7 @@ export const T = {
     toolsInstalling: 'Installing tools in background. Please wait.',
     // Tool descriptions
     cbmcpDesc: 'Code graph — structural exploration',
-    memstackDesc: 'Obsidian vault — project knowledge base',
+    brainDesc: 'Obsidian vault — project knowledge base',
     headroomDesc: 'API call compression',
     rtkDesc: 'Terminal output compression',
     claudeDesc: 'CLAUDE.md + .claude/',
@@ -93,7 +93,7 @@ export const T = {
     goUp: '← Subir',
     toolsInstalling: 'Ferramentas sendo instaladas em background. Aguarde.',
     cbmcpDesc: 'Grafo de código — exploração estrutural',
-    memstackDesc: 'Vault Obsidian — base de conhecimento do projeto',
+    brainDesc: 'Vault Obsidian — base de conhecimento do projeto',
     headroomDesc: 'Compressão de chamadas à API',
     rtkDesc: 'Compressão de output de terminal',
     claudeDesc: 'CLAUDE.md + .claude/',
