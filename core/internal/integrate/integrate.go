@@ -150,10 +150,9 @@ func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
     "edit": "allow",
     "webfetch": "allow",
     "skill": "allow"
-  },
-  "rtkBin": %q
+  }
 }
-`, cbmcpBin, rtkBin)
+`, cbmcpBin)
 }
 
 func agentsMDTemplate(rtkBin string) string {
@@ -266,7 +265,6 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 		c = strings.TrimSpace(c)
 		switch c {
 		case "opencode":
-			setOpenCodeBaseURL(filepath.Join(projectPath, "opencode.json"), headroomPort)
 			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
 		case "claude":
 			appendMarkedBlock(filepath.Join(projectPath, "CLAUDE.md"), block)
@@ -312,7 +310,7 @@ func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
 	removeMarkedBlocks(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"))
 	removeMarkedBlocks(filepath.Join(projectPath, "AGENTS.md"))
 	removeMarkedBlocks(filepath.Join(projectPath, ".github", "copilot-instructions.md"))
-	removeOpenCodeBaseURL(filepath.Join(projectPath, "opencode.json"))
+	removeMarkedBlocks(filepath.Join(projectPath, "opencode.json"))
 
 	return nil
 }
