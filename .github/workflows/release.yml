@@ -57,29 +57,20 @@ jobs:
             COMMITS=$(git log --pretty=format:"%s" --no-merges "${PREV_TAG}..HEAD")
           fi
 
-          # Check if there are any commits
-          if [ -z "$COMMITS" ]; then
-            echo "No new commits since last release"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
           # Determine version bump
           MAJOR=0
           MINOR=0
-          PATCH=0
 
           if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
             MAJOR=1
           elif echo "$COMMITS" | grep -qiE "^(feat|feature):"; then
             MINOR=1
-          else
-            PATCH=1
           fi
 
           # Parse previous version
           PREV_VERSION=${PREV_TAG#v}
           IFS='.' read -r PREV_MAJOR PREV_MINOR PREV_PATCH <<< "$PREV_VERSION"
+          PREV_PATCH=${PREV_PATCH:-0}
 
           # Calculate new version
           if [ $MAJOR -eq 1 ]; then
@@ -92,7 +83,13 @@ jobs:
 
           NEW_TAG="v${NEW_VERSION}"
 
-          echo "skip=false" >> $GITHUB_OUTPUT
+          # If tag already exists, keep bumping patch until we find a free one
+          while git rev-parse "$NEW_TAG" >/dev/null 2>&1; do
+            PREV_PATCH=$((PREV_PATCH + 1))
+            NEW_VERSION="${PREV_MAJOR}.${PREV_MINOR}.$((PREV_PATCH + 1))"
+            NEW_TAG="v${NEW_VERSION}"
+          done
+
           echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
           echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
 
@@ -114,6 +111,7 @@ jobs:
           OTHER=""
 
           while IFS= read -r commit; do
+            [ -z "$commit" ] && continue
             if echo "$commit" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
               BREAKING="${BREAKING}- ${commit#*: }"$'\n'
             elif echo "$commit" | grep -qiE "^(feat|feature):"; then
@@ -129,44 +127,37 @@ jobs:
             fi
           done <<< "$COMMITS"
 
-          # Build changelog sections
           if [ -n "$BREAKING" ]; then
             echo "### 🚨 Breaking Changes" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$BREAKING" >> /tmp/changelog.md
           fi
-
           if [ -n "$FEATURES" ]; then
             echo "### ✨ Features" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$FEATURES" >> /tmp/changelog.md
           fi
-
           if [ -n "$FIXES" ]; then
             echo "### 🐛 Bug Fixes" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$FIXES" >> /tmp/changelog.md
           fi
-
           if [ -n "$DOCS" ]; then
             echo "### 📚 Documentation" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$DOCS" >> /tmp/changelog.md
           fi
-
           if [ -n "$CHORES" ]; then
             echo "### 🔧 Chores" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$CHORES" >> /tmp/changelog.md
           fi
-
           if [ -n "$OTHER" ]; then
             echo "### 📝 Other Changes" >> /tmp/changelog.md
             echo "" >> /tmp/changelog.md
             echo "$OTHER" >> /tmp/changelog.md
           fi
 
-          # Add installation instructions
           echo "" >> /tmp/changelog.md
           echo "## Installation" >> /tmp/changelog.md
           echo "" >> /tmp/changelog.md
@@ -180,7 +171,6 @@ jobs:
           echo "" >> /tmp/changelog.md
           echo "SHA256 checksums are available in \`checksums.txt\`." >> /tmp/changelog.md
 
-          # Output changelog
           {
             echo "changelog<<EOF"
             cat /tmp/changelog.md
@@ -188,11 +178,8 @@ jobs:
           } >> $GITHUB_OUTPUT
 
           echo "Generated version: ${NEW_TAG}"
-          echo "Changelog preview:"
-          head -20 /tmp/changelog.md
 
       - name: Create and push tag
-        if: steps.version.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -200,11 +187,9 @@ jobs:
           git push origin "${{ steps.version.outputs.new_tag }}"
 
       - name: Wait for tag to propagate
-        if: steps.version.outputs.skip != 'true'
         run: sleep 5
 
       - name: Run GoReleaser
-        if: steps.version.outputs.skip != 'true'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -215,7 +200,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update release with changelog
-        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.new_tag }}
