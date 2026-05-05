@@ -14,7 +14,7 @@ export default function SetupWizard() {
 
   const TOOLS = [
     { id: 'cbmcp',    label: t.toolCodebase, desc: t.cbmcpDesc    },
-    { id: 'brain',    label: t.toolObsidian, desc: t.brainDesc  },
+    { id: 'obsidian',    label: t.toolObsidian, desc: t.obsidianDesc  },
     { id: 'headroom', label: t.toolHeadroom, desc: t.headroomDesc  },
     { id: 'rtk',      label: t.toolRTK,      desc: t.rtkDesc       },
   ]
@@ -27,7 +27,7 @@ export default function SetupWizard() {
     { id: 'opencode', label: 'OpenCode',        desc: t.opencodeDesc },
   ]
 
-  const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'brain'])
+  const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'obsidian'])
   const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot'])
   const [projectPath, setProjectPath] = useState('')
   const [saving,      setSaving]      = useState(false)
@@ -98,6 +98,19 @@ export default function SetupWizard() {
   }
 
   // ── Installing screen ──────────────────────────────────────────────────────
+  // Map internal tool IDs to user-friendly display names
+  const TOOL_LABELS: Record<string, string> = {
+    'cbmcp':    t.toolCodebase,
+    'obsidian': t.toolObsidian,
+    'headroom': t.toolHeadroom,
+    'rtk':      t.toolRTK,
+    'integrate': 'Setup',
+    'index':    'Index',
+  }
+  function toolLabel(id: string): string {
+    return TOOL_LABELS[id] || id
+  }
+
   if (installing) {
     const pct = calcProgress(installProgress)
     const total = Object.keys(installProgress).length
@@ -162,7 +175,7 @@ export default function SetupWizard() {
                   fontSize: 11,
                   color: isActive ? 'var(--cyan)' : isOk ? 'var(--text)' : isErr ? 'var(--red)' : 'var(--muted)',
                   fontWeight: isActive ? 600 : 400,
-                }}>{tool}</span>
+                }}>{toolLabel(tool)}</span>
                 <span style={{
                   fontSize: 10,
                   color: isOk ? 'var(--green)' : isErr ? 'var(--red)' : isActive ? 'var(--cyan)' : 'var(--muted)',
@@ -205,7 +218,7 @@ export default function SetupWizard() {
           {TOOLS.map(tool => (
             <Toggle key={tool.id} label={tool.label} description={tool.desc}
               checked={tools.includes(tool.id)}
-              disabled={tool.id === 'brain'}
+              disabled={tool.id === 'obsidian'}
               onChange={() => toggle(tools, tool.id, setTools)} />
           ))}
         </div>

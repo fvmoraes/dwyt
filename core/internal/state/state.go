@@ -44,7 +44,7 @@ type ProjectEntry struct {
 	IndexedAt  time.Time `json:"indexed_at,omitempty"`
 	Nodes      int       `json:"nodes,omitempty"`
 	Edges      int       `json:"edges,omitempty"`
-	BrainFiles int       `json:"brain_files,omitempty"`
+	ObsidianFiles int       `json:"obsidian_files,omitempty"`
 }
 
 var globalState *RuntimeState
@@ -167,12 +167,12 @@ func (s *RuntimeState) SetCurrentProject(path, name string) {
 	s.maybeSave()
 }
 
-// UpdateProjectBrain updates the brain files count for a project.
-func (s *RuntimeState) UpdateProjectBrain(path string, brainFiles int) {
+// UpdateProjectObsidian updates the brain files count for a project.
+func (s *RuntimeState) UpdateProjectObsidian(path string, brainFiles int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if pe, ok := s.Projects[path]; ok {
-		pe.BrainFiles = brainFiles
+		pe.ObsidianFiles = brainFiles
 		s.Projects[path] = pe
 		s.maybeSave()
 	}

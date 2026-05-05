@@ -3,3 +3,11 @@ AGENTS.md
 .codex
 .vscode/
 .dwyt/
+
+# dwyt
+.claude/
+.mcp.json
+opencode.json
+.cursor/
+.kiro/
+.github/copilot-instructions.md

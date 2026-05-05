@@ -47,7 +47,7 @@ export default function Dashboard() {
   const [indexError,   setIndexError]   = useState('')
   const [searchQuery,  setSearchQuery]  = useState('')
   const [searchResult, setSearchResult] = useState('')
-  const [brainStats,   setBrainStats]   = useState<any>(null)
+  const [obsidianStats, setObsidianStats]   = useState<any>(null)
   const [summarizing,  setSummarizing]  = useState(false)
   const [forgetting,   setForgetting]   = useState(false)
   const [savingBrain,  setSavingBrain]  = useState(false)
@@ -76,7 +76,7 @@ export default function Dashboard() {
     try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch (_) {}
     try {
       const ms = await api.getBrainStatus()
-      if (ms.active && ms.stats) setBrainStats(ms.stats)
+      if (ms.active && ms.stats) setObsidianStats(ms.stats)
     } catch (_) {}
   }, [indexPath])
 
@@ -104,7 +104,7 @@ export default function Dashboard() {
             // Clear cache and reload everything
             setTools([])
             setDetails({})
-            setBrainStats(null)
+            setObsidianStats(null)
             setSearchResult('')
             setIndexError('')
             setIndexPath(data.message)
@@ -292,13 +292,13 @@ export default function Dashboard() {
   const cbmcp   = getTool('codebase-memory-mcp')
   const rtkTool = getTool('rtk')
   const hr      = getTool('headroom')
-  const ms      = getTool('brain')
+  const ms      = getTool('obsidian')
 
   const totalSaved = Object.values(details).reduce((a, d) => a + (d?.tokens_saved || 0), 0)
   const rtkSaved     = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
-  const brainCount      = brainStats?.total_files || 0
-  const brainEstimate   = brainCount > 0 ? brainCount * 5000 : 0
+  const obsidianCount      = obsidianStats?.total_files || 0
+  const obsidianEstimate   = obsidianCount > 0 ? obsidianCount * 5000 : 0
 
   function calcWithout() {
     let w = 0
@@ -365,9 +365,9 @@ export default function Dashboard() {
           <span style={{ fontSize: 10, color: '#2f9e44', fontWeight: 700 }}>🛡️</span>
           <span style={{ fontSize: 11, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
           <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>{t.protecting}</span>
-          {brainCount > 0 && (
+          {obsidianCount > 0 && (
             <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
-              🧠 {brainCount} {t.memories}
+              🧠 {obsidianCount} {t.memories}
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
@@ -445,12 +445,14 @@ export default function Dashboard() {
               {[
                 { label: t.terminalOptimized, saved: rtkSaved, color: '#2f9e44' },
                 { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
-                { label: t.brainActive, saved: brainEstimate, color: '#f08d49' },
+                { label: t.obsidianActive, saved: obsidianEstimate, color: '#f08d49' },
                 { label: t.codeMap, saved: 0, color: '#339af0' },
               ].map(tool => (
-                <div key={tool.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 9, color: tool.color, fontWeight: 600 }}>{tool.label}</span>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--muted)' }}>{fmtN(tool.saved)}</span>
+                <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ fontSize: 9, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
+                  <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color: tool.saved > 0 ? tool.color : 'var(--muted)' }}>
+                    {tool.saved > 0 ? fmtN(tool.saved) : '—'}
+                  </span>
                 </div>
               ))}
             </div>
@@ -478,6 +480,12 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+          {obsidianStats?.summary && (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700 }}>obsidian: </span>
+              <span style={{ fontSize: 10, color: 'var(--text)', fontFamily: 'monospace' }}>{obsidianStats.summary}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -566,7 +574,6 @@ export default function Dashboard() {
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
               <Row label={t.compression}    value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
-              <Row label={t.port}           value={String(det?.proxy_port || 8787)} />
               <RepoRow />
               <Hr />
               <StartStop
@@ -584,21 +591,16 @@ export default function Dashboard() {
 
         {/* ── BRAIN ── */}
         {(() => {
-          const det   = getDetail('brain')
+          const det   = getDetail('obsidian')
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.brainActive} color="#f08d49" state={state} description={t.brainDesc} />
+              <CardHeader label={t.obsidianActive} color="#f08d49" state={state} description={t.obsidianDesc} />
               <Hr />
-              <Row label={t.tokensSavedLabel} value={brainEstimate > 0 ? fmtN(brainEstimate) + ' est.' : '—'} />
-              <Row label={t.memories} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet} />
+              <Row label={t.tokensSavedLabel} value={obsidianEstimate > 0 ? fmtN(obsidianEstimate) + ' est.' : '—'} />
+              <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
-              {brainStats?.summary && (
-                <div style={{ fontSize: 9, color: 'var(--muted)', maxHeight: 30, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {brainStats.summary}
-                </div>
-              )}
               <Hr />
               {/* Quick save */}
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -628,27 +630,27 @@ export default function Dashboard() {
               </div>
               {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
               <div style={{ display: 'flex', gap: 4 }}>
-                <button className="subtle-start" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
+                <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
                   setSummarizing(true)
                   try {
                     const r = await api.summarizeBrain()
-                    if (r.summary) { setBrainStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
+                    if (r.summary) { setObsidianStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
                   } catch (_) {}
                   setSummarizing(false)
                 }} disabled={summarizing}>
                   {summarizing ? '...' : t.rebuildSummary}
                 </button>
-                <button className="subtle-stop" style={{ fontSize: 9, flex: 1 }} onClick={async () => {
-                  if (!confirm(t.forgetMemoryConfirm || 'Forget all brain data?')) return
+                <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
+                  if (!confirm(t.forgetMemoryConfirm || 'Forget all Obsidian data?')) return
                   setForgetting(true)
-                  try { await api.forgetBrain(); setBrainStats(null); pollAll() } catch (_) {}
+                  try { await api.forgetBrain(); setObsidianStats(null); pollAll() } catch (_) {}
                   setForgetting(false)
                 }} disabled={forgetting}>
                   {forgetting ? '...' : t.forgetMemory}
                 </button>
               </div>
               {/* Open in Obsidian */}
-              <button className="primary" style={{ fontSize: 10, padding: '4px 8px', width: '100%' }} onClick={async () => {
+              <button style={{ fontSize: 10, padding: '4px 8px', width: '100%' }} onClick={async () => {
                 try { await api.openBrain() } catch (_) {}
               }}>
                 🧠 {t.openBrain || 'Open in Obsidian'}

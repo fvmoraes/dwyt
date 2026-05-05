@@ -309,7 +309,7 @@ var statusCmd = &cobra.Command{
 
 		// Show memory status for current directory
 		cwd, _ := os.Getwd()
-		if pm, err := brain.NewProjectBrain(DwytHome, cwd); err == nil {
+		if pm, err := brain.NewProjectObsidian(DwytHome, cwd); err == nil {
 			stats := pm.Stats()
 			if files, ok := stats["total_files"].(int); ok && files > 0 {
 				fmt.Printf("\n  🧠 Obsidian: %d files for %s\n", files, stats["project_name"])

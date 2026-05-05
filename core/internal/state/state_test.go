@@ -134,19 +134,19 @@ func TestRuntimeState_SetCurrentProject(t *testing.T) {
 	}
 }
 
-func TestRuntimeState_UpdateProjectBrain(t *testing.T) {
+func TestRuntimeState_UpdateProjectObsidian(t *testing.T) {
 	tmpDir := t.TempDir()
 	state := Init(tmpDir)
 
 	state.SetCurrentProject("/tmp/project", "project")
-	state.UpdateProjectBrain("/tmp/project", 42)
+	state.UpdateProjectObsidian("/tmp/project", 42)
 
 	proj, ok := state.Projects["/tmp/project"]
 	if !ok {
 		t.Fatal("Project not found")
 	}
-	if proj.BrainFiles != 42 {
-		t.Errorf("Expected 42 brain files, got %d", proj.BrainFiles)
+	if proj.ObsidianFiles != 42 {
+		t.Errorf("Expected 42 brain files, got %d", proj.ObsidianFiles)
 	}
 }
 

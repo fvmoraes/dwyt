@@ -25,7 +25,7 @@ type BrainEntry struct {
 	FilePath  string    `json:"file_path,omitempty"`
 }
 
-type ProjectBrain struct {
+type ProjectObsidian struct {
 	ProjectID    string       `json:"project_id"`
 	ProjectName  string       `json:"project_name"`
 	ProjectPath  string       `json:"project_path"`
@@ -40,13 +40,23 @@ type ProjectBrain struct {
 }
 
 type BrainManager struct {
-	Current *ProjectBrain
+	Current *ProjectObsidian
 }
 
-func NewProjectBrain(dwytHome, projectPath string) (*ProjectBrain, error) {
+func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
 	id := hashPath(projectPath)
 	baseDir := filepath.Join(dwytHome, "projects", id)
-	brainDir := filepath.Join(baseDir, "brain")
+
+	// Migrate old "brain" folder to "obsidian" if it exists
+	oldDir := filepath.Join(baseDir, "brain")
+	newDir := filepath.Join(baseDir, "obsidian")
+	if _, err := os.Stat(oldDir); err == nil {
+		if _, err2 := os.Stat(newDir); os.IsNotExist(err2) {
+			os.Rename(oldDir, newDir)
+		}
+	}
+
+	brainDir := newDir
 	os.MkdirAll(brainDir, 0755)
 
 	dirs := []string{"knowledge", "logs"}
@@ -54,7 +64,7 @@ func NewProjectBrain(dwytHome, projectPath string) (*ProjectBrain, error) {
 		os.MkdirAll(filepath.Join(brainDir, d), 0755)
 	}
 
-	pb := &ProjectBrain{
+	pb := &ProjectObsidian{
 		ProjectID:   id,
 		ProjectName: filepath.Base(projectPath),
 		ProjectPath: projectPath,
@@ -141,7 +151,7 @@ func MigrateOldMemoryDirs(dwytHome string) error {
 		if info, err := os.Stat(memoryDir); err == nil && info.IsDir() {
 			memoryFile := filepath.Join(memoryDir, "memory.json")
 			if data, err := os.ReadFile(memoryFile); err == nil && len(data) > 2 {
-				brainDir := filepath.Join(projectsDir, entry.Name(), "brain")
+				brainDir := filepath.Join(projectsDir, entry.Name(), "obsidian")
 				os.MkdirAll(filepath.Join(brainDir, "knowledge"), 0755)
 				os.MkdirAll(filepath.Join(brainDir, "logs"), 0755)
 				ensureSeedFiles(brainDir)
@@ -192,7 +202,7 @@ migrated: true
 	os.WriteFile(targetFile, []byte(existing+entry), 0644)
 }
 
-func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) error {
+func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
@@ -210,26 +220,26 @@ func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) erro
 	}
 }
 
-func (pb *ProjectBrain) appendToDecisionsLogLocked(content string, now time.Time) error {
+func (pb *ProjectObsidian) appendToDecisionsLogLocked(content string, now time.Time) error {
 	path := filepath.Join(pb.brainDir, "decisions.md")
 	entry := fmt.Sprintf("\n### %s\n\n%s\n\n*%s*\n\n---\n", now.Format("2006-01-02 15:04"), content, now.Format(time.RFC3339))
 	return appendFile(path, entry)
 }
 
-func (pb *ProjectBrain) appendToTasksLogLocked(content string, now time.Time) error {
+func (pb *ProjectObsidian) appendToTasksLogLocked(content string, now time.Time) error {
 	path := filepath.Join(pb.brainDir, "tasks.md")
 	entry := fmt.Sprintf("\n- [ ] %s *(added %s)*\n", content, now.Format("2006-01-02 15:04"))
 	return appendFile(path, entry)
 }
 
-func (pb *ProjectBrain) saveToLogsLocked(entryType, content string, tags []string, now time.Time) error {
+func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []string, now time.Time) error {
 	dir := filepath.Join(pb.brainDir, "logs")
 	os.MkdirAll(dir, 0755)
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("brain save: %w", err)
+		return fmt.Errorf("obsidian save: %w", err)
 	}
 	defer f.Close()
 	writeFrontmatter(f, entryType, tags, now)
@@ -237,14 +247,14 @@ func (pb *ProjectBrain) saveToLogsLocked(entryType, content string, tags []strin
 	return nil
 }
 
-func (pb *ProjectBrain) saveToKnowledgeLocked(entryType, content string, tags []string, now time.Time) error {
+func (pb *ProjectObsidian) saveToKnowledgeLocked(entryType, content string, tags []string, now time.Time) error {
 	dir := filepath.Join(pb.brainDir, "knowledge")
 	os.MkdirAll(dir, 0755)
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
 	f, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("brain save: %w", err)
+		return fmt.Errorf("obsidian save: %w", err)
 	}
 	defer f.Close()
 	writeFrontmatter(f, entryType, tags, now)
@@ -266,7 +276,7 @@ func appendFile(path, content string) error {
 	return err
 }
 
-func (pb *ProjectBrain) Search(query string) []BrainEntry {
+func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
 
@@ -322,7 +332,7 @@ func detectType(brainDir, path string) string {
 	}
 }
 
-func (pb *ProjectBrain) RebuildSummary() string {
+func (pb *ProjectObsidian) RebuildSummary() string {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
@@ -362,7 +372,7 @@ func (pb *ProjectBrain) RebuildSummary() string {
 	return summary
 }
 
-func (pb *ProjectBrain) Stats() map[string]interface{} {
+func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
 
@@ -390,18 +400,18 @@ func (pb *ProjectBrain) Stats() map[string]interface{} {
 		"last_updated":   pb.UpdatedAt.Format(time.RFC3339),
 		"ai_enabled":     pb.AIEnabled,
 		"tools_enabled":  pb.ToolsEnabled,
-		"brain_dir":      pb.brainDir,
+		"obsidian_dir":      pb.brainDir,
 	}
 }
 
-func (pb *ProjectBrain) SetConfig(aiEnabled, toolsEnabled []string) {
+func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	pb.AIEnabled = aiEnabled
 	pb.ToolsEnabled = toolsEnabled
 }
 
-func (pb *ProjectBrain) Forget() error {
+func (pb *ProjectObsidian) Forget() error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
@@ -417,7 +427,7 @@ func (pb *ProjectBrain) Forget() error {
 	return nil
 }
 
-func (pb *ProjectBrain) OpenInObsidian() error {
+func (pb *ProjectObsidian) OpenInObsidian() error {
 	if !ObsidianInstalled() {
 		return fmt.Errorf("obsidian is not installed")
 	}
@@ -435,7 +445,7 @@ func (pb *ProjectBrain) OpenInObsidian() error {
 	return cmd.Start()
 }
 
-func (pb *ProjectBrain) OpenBrainDir() error {
+func (pb *ProjectObsidian) OpenBrainDir() error {
 	cmd := exec.Command("xdg-open", pb.brainDir)
 	if runtime.GOOS == "darwin" {
 		cmd = exec.Command("open", pb.brainDir)
@@ -445,7 +455,7 @@ func (pb *ProjectBrain) OpenBrainDir() error {
 	return cmd.Start()
 }
 
-func (pb *ProjectBrain) GetBrainDir() string {
+func (pb *ProjectObsidian) GetBrainDir() string {
 	return pb.brainDir
 }
 
@@ -470,22 +480,22 @@ func ObsidianInstalled() bool {
 	return false
 }
 
-func AutoSaveSession(pb *ProjectBrain, tag string) error {
+func AutoSaveSession(pb *ProjectObsidian, tag string) error {
 	content := fmt.Sprintf("Session %s at %s\n\nProject: %s\nPath: %s",
 		tag, time.Now().Format(time.RFC3339), pb.ProjectName, pb.ProjectPath)
 	return pb.SaveEntry("session", content, []string{"dwyt", "session", tag})
 }
 
-func AutoSaveDecision(pb *ProjectBrain, decision string) error {
+func AutoSaveDecision(pb *ProjectObsidian, decision string) error {
 	return pb.SaveEntry("decision", decision, []string{"dwyt", "decision"})
 }
 
-func AutoSaveError(pb *ProjectBrain, errStr, solution string) error {
+func AutoSaveError(pb *ProjectObsidian, errStr, solution string) error {
 	content := fmt.Sprintf("Error: %s\n\nSolution: %s", errStr, solution)
 	return pb.SaveEntry("error", content, []string{"dwyt", "error"})
 }
 
-func AutoSaveCommand(pb *ProjectBrain, command string) error {
+func AutoSaveCommand(pb *ProjectObsidian, command string) error {
 	if len(command) > 500 {
 		command = command[:497] + "..."
 	}
@@ -569,7 +579,7 @@ type ProjectMeta struct {
 	LastOpen     time.Time `json:"last_open"`
 	ToolsEnabled []string  `json:"tools_enabled"`
 	AIEnabled    []string  `json:"ai_enabled"`
-	BrainFiles   int       `json:"brain_files"`
+	ObsidianFiles   int       `json:"obsidian_files"`
 }
 
 func ensureBrainJSON(baseDir, projectPath string) {

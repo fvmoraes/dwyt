@@ -116,31 +116,31 @@ export async function getIndexStatus(): Promise<{ indexing: boolean; progress: s
 
 // ── Brain endpoints ────────────────────────────────────────────────────────
 export async function getBrainStatus(): Promise<{ active: boolean; stats?: any; error?: string }> {
-  const r = await fetch(`${API}/brain/status`)
+  const r = await fetch(`${API}/obsidian/status`)
   return r.json()
 }
 export async function searchBrain(query: string): Promise<{ results: any[]; count: number }> {
   const params = new URLSearchParams({ q: query })
-  const r = await fetch(`${API}/brain/search?${params.toString()}`)
+  const r = await fetch(`${API}/obsidian/search?${params.toString()}`)
   return r.json()
 }
 export async function saveBrain(type: string, content: string): Promise<{ status: string }> {
-  const r = await fetch(`${API}/brain/save`, {
+  const r = await fetch(`${API}/obsidian/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, content }),
   })
   return r.json()
 }
 export async function summarizeBrain(): Promise<{ status: string; summary: string }> {
-  const r = await fetch(`${API}/brain/summarize`, { method: 'POST' })
+  const r = await fetch(`${API}/obsidian/summarize`, { method: 'POST' })
   return r.json()
 }
 export async function forgetBrain(): Promise<{ status: string }> {
-  const r = await fetch(`${API}/brain/forget`, { method: 'POST' })
+  const r = await fetch(`${API}/obsidian/forget`, { method: 'POST' })
   return r.json()
 }
 export async function openBrain(): Promise<{ status: string; error?: string }> {
-  const r = await fetch(`${API}/brain/open`, { method: 'POST' })
+  const r = await fetch(`${API}/obsidian/open`, { method: 'POST' })
   return r.json()
 }
 

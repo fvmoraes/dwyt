@@ -54,7 +54,7 @@ type DashboardServer struct {
 	StartCwd       string
 	DefaultProject string
 	Store          *db.Store
-	ProjectBrain   *brain.ProjectBrain
+	ProjectObsidian   *brain.ProjectObsidian
 	ProcMan        *procman.ProcessManager
 	RuntimeState   *state.RuntimeState
 	HeadroomPort   int
@@ -99,10 +99,10 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	rs.SetCurrentProject(project, filepath.Base(project))
 
 	// Initialize project brain
-	pb, brainErr := brain.NewProjectBrain(dwytHome, project)
+	pb, brainErr := brain.NewProjectObsidian(dwytHome, project)
 	if brainErr != nil {
-		log.Error("failed to init project brain", log.Fields{"error": brainErr.Error()})
-		rs.ToolErrors["brain"] = brainErr.Error()
+		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
+		rs.ToolErrors["obsidian"] = brainErr.Error()
 	} else {
 		// Load saved AI/tools config into brain
 		if store != nil {
@@ -119,7 +119,7 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		// Sync brain file count to state
 		stats := pb.Stats()
 		if c, ok := stats["total_files"].(int); ok {
-			rs.UpdateProjectBrain(project, c)
+			rs.UpdateProjectObsidian(project, c)
 		}
 	}
 
@@ -151,7 +151,7 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 		StartCwd:       project,
 		DefaultProject: project,
 		Store:          store,
-		ProjectBrain:   pb,
+		ProjectObsidian:   pb,
 		ProcMan:        procmanInstance,
 		RuntimeState:   rs,
 		HeadroomPort:   headroomPort,
@@ -233,12 +233,12 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/projects", ds.apiProjectsList)
 		api.GET("/projects/current", ds.apiProjectsCurrent)
 		// Brain endpoints
-		api.GET("/brain/status", ds.apiBrainStatus)
-		api.GET("/brain/search", ds.apiBrainSearch)
-		api.POST("/brain/save", ds.apiBrainSave)
-		api.POST("/brain/summarize", ds.apiBrainSummarize)
-		api.POST("/brain/forget", ds.apiBrainForget)
-		api.POST("/brain/open", ds.apiBrainOpen)
+		api.GET("/obsidian/status", ds.apiObsidianStatus)
+		api.GET("/obsidian/search", ds.apiObsidianSearch)
+		api.POST("/obsidian/save", ds.apiObsidianSave)
+		api.POST("/obsidian/summarize", ds.apiObsidianSummarize)
+		api.POST("/obsidian/forget", ds.apiObsidianForget)
+		api.POST("/obsidian/open", ds.apiObsidianOpen)
 		// ProcessManager routes
 		api.POST("/services/codebase/start", ds.apiCodebaseStart)
 		api.POST("/services/codebase/stop", ds.apiCodebaseStop)
@@ -467,8 +467,8 @@ func migrateToolList(list []string) []string {
 	var migrated []string
 	for _, t := range list {
 		if t == "memstack" || t == "memStack" {
-			if !contains(migrated, "brain") {
-				migrated = append(migrated, "brain")
+			if !contains(migrated, "obsidian") {
+				migrated = append(migrated, "obsidian")
 			}
 		} else {
 			migrated = append(migrated, t)
@@ -561,7 +561,7 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 	}
 
 	results["rtk"] = "available"
-	results["brain"] = "available"
+	results["obsidian"] = "available"
 
 	c.JSON(200, gin.H{"status": "started", "services": results})
 }
@@ -608,8 +608,8 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 			logs["rtk"] = "rtk: não instalado"
 		}
 	}
-	if service == "" || service == "brain" {
-		logs["brain"] = "obsidian: active (Obsidian vault)"
+	if service == "" || service == "obsidian" {
+		logs["obsidian"] = "obsidian: active (Obsidian vault)"
 	}
 
 	c.JSON(200, gin.H{"logs": logs})
@@ -661,7 +661,7 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 				err = install.RTK(ds.DwytBin)
 			case "headroom":
 				err = install.Headroom(ds.DwytBin, ds.DwytHome)
-		case "brain":
+		case "obsidian":
 			err = nil // brain is built-in, no external install needed
 			}
 			if err != nil {
@@ -760,14 +760,14 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	workspace.Touch(body.Path)
 
 	// Reload project brain
-	pb, brainErr := brain.NewProjectBrain(ds.DwytHome, body.Path)
+	pb, brainErr := brain.NewProjectObsidian(ds.DwytHome, body.Path)
 	if brainErr != nil {
-		log.Error("failed to load project brain on switch", log.Fields{"error": brainErr.Error()})
-		ds.RuntimeState.ToolErrors["brain"] = brainErr.Error()
-		ds.ProjectBrain = nil // clear stale brain from old project
+		log.Error("failed to load Obsidian vault on switch", log.Fields{"error": brainErr.Error()})
+		ds.RuntimeState.ToolErrors["obsidian"] = brainErr.Error()
+		ds.ProjectObsidian = nil // clear stale brain from old project
 	} else {
-		ds.ProjectBrain = pb
-		delete(ds.RuntimeState.ToolErrors, "brain")
+		ds.ProjectObsidian = pb
+		delete(ds.RuntimeState.ToolErrors, "obsidian")
 		// Load saved AI/tools config into brain for this project
 		if ds.Store != nil {
 			if raw, err := ds.Store.GetConfig("setup"); err == nil {
@@ -780,7 +780,7 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		// Sync brain file count to state
 		stats := pb.Stats()
 		if c, ok := stats["total_files"].(int); ok {
-			ds.RuntimeState.UpdateProjectBrain(body.Path, c)
+			ds.RuntimeState.UpdateProjectObsidian(body.Path, c)
 		}
 	}
 
@@ -822,7 +822,7 @@ func (ds *DashboardServer) apiProjectsCurrent(c *gin.Context) {
 			result["edges"] = p.Edges
 		}
 		// Add brain stats
-		result["brain"] = ds.brainStats()
+		result["obsidian"] = ds.obsidianStats()
 	} else {
 		result = map[string]interface{}{
 			"path":   project,
@@ -896,7 +896,7 @@ func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
 		"codebase-memory-mcp": ds.detailCBMCP(),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(),
-		"brain":               ds.detailBrain(),
+		"obsidian": ds.detailObsidian(),
 	}
 	c.JSON(200, out)
 }
@@ -963,13 +963,13 @@ func installedSince(binPath string) (int64, string) {
 	return secs, fmtUptime(secs)
 }
 
-func (ds *DashboardServer) brainStats() map[string]interface{} {
-	if ds.ProjectBrain == nil {
+func (ds *DashboardServer) obsidianStats() map[string]interface{} {
+	if ds.ProjectObsidian == nil {
 		return map[string]interface{}{"active": false}
 	}
 	return map[string]interface{}{
 		"active": true,
-		"stats":  ds.ProjectBrain.Stats(),
+		"stats":  ds.ProjectObsidian.Stats(),
 	}
 }
 
@@ -1099,14 +1099,14 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	return d
 }
 
-func (ds *DashboardServer) detailBrain() *ToolDetail {
+func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
-	if ds.ProjectBrain == nil {
+	if ds.ProjectObsidian == nil {
 		d.UptimeSecs = -1
 		return d
 	}
 
-	stats := ds.ProjectBrain.Stats()
+	stats := ds.ProjectObsidian.Stats()
 	if files, ok := stats["total_files"].(int); ok {
 		d.MemoryCount = files
 	}
@@ -1145,11 +1145,11 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		_, err := os.Stat(filepath.Join(ds.DwytBin, t))
 		toolsInstalled[t] = err == nil
 	}
-	toolsInstalled["brain"] = true // brain is built-in, no binary needed
+	toolsInstalled["obsidian"] = true // brain is built-in, no binary needed
 	anyInstalled := toolsInstalled["codebase-memory-mcp"] ||
 		toolsInstalled["rtk"] ||
 		toolsInstalled["headroom"] ||
-		toolsInstalled["brain"]
+		toolsInstalled["obsidian"]
 
 	// Load saved config from db
 	var cfg Config
@@ -1189,17 +1189,17 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 					item["edges"] = p.Edges
 				}
 				// Load per-project brain stats
-				if pb, err := brain.NewProjectBrain(ds.DwytHome, p.Path); err == nil {
+				if pb, err := brain.NewProjectObsidian(ds.DwytHome, p.Path); err == nil {
 					stats := pb.Stats()
-					item["brain_count"] = stats["total_files"]
+					item["obsidian_count"] = stats["total_files"]
 					if count, ok := stats["total_files"].(int); ok && count > 0 {
-						item["has_brain"] = true
+						item["has_obsidian"] = true
 					} else {
-						item["has_brain"] = false
+						item["has_obsidian"] = false
 					}
 				} else {
-					item["brain_count"] = 0
-					item["has_brain"] = false
+					item["obsidian_count"] = 0
+					item["has_obsidian"] = false
 				}
 				// Per-project RTK metrics
 				if rtkMetrics := status.GetRTKMetricsForPath(ds.DwytBin, p.Path); rtkMetrics != nil {
@@ -1237,7 +1237,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		"config":           cfg,
 		"project_state":    projectState,
 		"projects":         projectsList,
-		"brain_stats":      ds.brainStats(),
+		"obsidian_stats":      ds.obsidianStats(),
 	})
 }
 
@@ -1311,31 +1311,31 @@ func (ds *DashboardServer) apiState(c *gin.Context) {
 
 // ── Brain API handlers ─────────────────────────────────────────────────────
 
-func (ds *DashboardServer) apiBrainStatus(c *gin.Context) {
-	if ds.ProjectBrain == nil {
-		c.JSON(200, gin.H{"active": false, "error": "no project brain loaded"})
+func (ds *DashboardServer) apiObsidianStatus(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(200, gin.H{"active": false, "error": "no Obsidian vault loaded"})
 		return
 	}
-	c.JSON(200, gin.H{"active": true, "stats": ds.ProjectBrain.Stats()})
+	c.JSON(200, gin.H{"active": true, "stats": ds.ProjectObsidian.Stats()})
 }
 
-func (ds *DashboardServer) apiBrainSearch(c *gin.Context) {
+func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
 		c.JSON(400, gin.H{"error": "query parameter 'q' is required"})
 		return
 	}
-	if ds.ProjectBrain == nil {
-		c.JSON(200, gin.H{"results": []interface{}{}, "note": "no project brain"})
+	if ds.ProjectObsidian == nil {
+		c.JSON(200, gin.H{"results": []interface{}{}, "note": "no Obsidian vault"})
 		return
 	}
-	results := ds.ProjectBrain.Search(query)
+	results := ds.ProjectObsidian.Search(query)
 	c.JSON(200, gin.H{"results": results, "count": len(results)})
 }
 
-func (ds *DashboardServer) apiBrainSave(c *gin.Context) {
-	if ds.ProjectBrain == nil {
-		c.JSON(400, gin.H{"error": "no project brain loaded"})
+func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
 	var body struct {
@@ -1353,41 +1353,41 @@ func (ds *DashboardServer) apiBrainSave(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "content is required"})
 		return
 	}
-	if err := ds.ProjectBrain.SaveEntry(body.Type, body.Content, nil); err != nil {
+	if err := ds.ProjectObsidian.SaveEntry(body.Type, body.Content, nil); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(200, gin.H{"status": "saved"})
 }
 
-func (ds *DashboardServer) apiBrainSummarize(c *gin.Context) {
-	if ds.ProjectBrain == nil {
-		c.JSON(400, gin.H{"error": "no project brain loaded"})
+func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	summary := ds.ProjectBrain.RebuildSummary()
+	summary := ds.ProjectObsidian.RebuildSummary()
 	c.JSON(200, gin.H{"status": "summarized", "summary": summary})
 }
 
-func (ds *DashboardServer) apiBrainForget(c *gin.Context) {
-	if ds.ProjectBrain == nil {
-		c.JSON(400, gin.H{"error": "no project brain loaded"})
+func (ds *DashboardServer) apiObsidianForget(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	if err := ds.ProjectBrain.Forget(); err != nil {
+	if err := ds.ProjectObsidian.Forget(); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(200, gin.H{"status": "forgotten"})
 }
 
-func (ds *DashboardServer) apiBrainOpen(c *gin.Context) {
-	if ds.ProjectBrain == nil {
-		c.JSON(400, gin.H{"error": "no project brain loaded"})
+func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	if err := ds.ProjectBrain.OpenInObsidian(); err != nil {
-		if err2 := ds.ProjectBrain.OpenBrainDir(); err2 != nil {
+	if err := ds.ProjectObsidian.OpenInObsidian(); err != nil {
+		if err2 := ds.ProjectObsidian.OpenBrainDir(); err2 != nil {
 			c.JSON(500, gin.H{"error": "failed to open: " + err2.Error()})
 			return
 		}

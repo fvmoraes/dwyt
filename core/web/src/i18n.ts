@@ -34,7 +34,7 @@ export const T = {
     allRepos: 'All repositories', selectProject: 'Select a project', repoCount: 'repositories',
     openDashboard: 'Open dashboard', openBrain: 'Open in Obsidian', viewLogs: 'View Logs',
     // User-friendly tool names
-    brainActive: 'Obsidian', compressionActive: 'Headroom',
+    obsidianActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',
     // Tool names for setup
     toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
@@ -52,7 +52,7 @@ export const T = {
     toolsInstalling: 'Installing tools in background. Please wait.',
     // Tool descriptions
     cbmcpDesc: 'Code graph — structural exploration',
-    brainDesc: 'Obsidian vault — project knowledge base',
+    obsidianDesc: 'Obsidian vault — project knowledge base',
     headroomDesc: 'API call compression',
     rtkDesc: 'Terminal output compression',
     claudeDesc: 'CLAUDE.md + .claude/',
@@ -89,7 +89,7 @@ export const T = {
     allRepos: 'Todos os repositórios', selectProject: 'Selecionar projeto', repoCount: 'repositórios',
     openDashboard: 'Abrir dashboard', openBrain: 'Abrir no Obsidian', viewLogs: 'Ver Logs',
     // User-friendly tool names
-    brainActive: 'Obsidian', compressionActive: 'Headroom',
+    obsidianActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',
     // Tool names for setup
     toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
@@ -105,7 +105,7 @@ export const T = {
     goUp: '← Subir',
     toolsInstalling: 'Ferramentas sendo instaladas em background. Aguarde.',
     cbmcpDesc: 'Grafo de código — exploração estrutural',
-    brainDesc: 'Vault Obsidian — base de conhecimento do projeto',
+    obsidianDesc: 'Vault Obsidian — base de conhecimento do projeto',
     headroomDesc: 'Compressão de chamadas à API',
     rtkDesc: 'Compressão de output de terminal',
     claudeDesc: 'CLAUDE.md + .claude/',
