@@ -143,11 +143,14 @@ func (r *Registry) SyncClaudeDesktop() error {
 	if _, ok := existing["mcpServers"]; !ok {
 		existing["mcpServers"] = make(map[string]interface{})
 	}
-	servers := existing["mcpServers"].(map[string]interface{})
+	servers, ok := existing["mcpServers"].(map[string]interface{})
+	if !ok {
+		servers = make(map[string]interface{})
+		existing["mcpServers"] = servers
+	}
 	for name, entry := range claudeConfig {
 		servers[name] = entry
 	}
-	existing["mcpServers"] = servers
 
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
@@ -193,7 +196,12 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 		return fmt.Errorf("mcp registry save failed: %w", err)
 	}
 
-	// Sync to global agent configs
+	// Save a backup before modifying external configs
+	backup := make(map[string]MCPServerEntry, len(r.MCPServers))
+	for k, v := range r.MCPServers {
+		backup[k] = v
+	}
+
 	errors := []string{}
 	if err := r.SyncClaudeDesktop(); err != nil {
 		errors = append(errors, "claude: "+err.Error())
@@ -207,7 +215,10 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf("sync errors: %v", errors)
+		// Rollback: restore registry to pre-sync state
+		r.MCPServers = backup
+		r.Save()
+		return fmt.Errorf("sync errors (registry rolled back): %v", errors)
 	}
 
 	log.Info("mcp configs synced", log.Fields{"project": projectPath})

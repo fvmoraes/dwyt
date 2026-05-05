@@ -123,12 +123,19 @@ func Headroom(dwytBin, dwytHome string) error {
 
 func ObsidianMCP(dwytBin string) error {
 	binPath := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
-	if _, err := os.Stat(binPath); err == nil {
-		return nil
+	os.MkdirAll(dwytBin, 0755)
+	// The binary is part of the DWYT release bundle — copy from the parent DWYT binary
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("obsidian-mcp: cannot locate DWYT binary: %w", err)
 	}
-	// The binary is part of the DWYT release bundle.
-	// If it's not found, it will be auto-installed on next DWYT update.
-	return fmt.Errorf("dwyt-obsidian-mcp not installed (run DWYT update or contact support)")
+	src := filepath.Join(filepath.Dir(exe), "dwyt-obsidian-mcp")
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		// Not bundled — must be installed via DWYT update
+		return fmt.Errorf("dwyt-obsidian-mcp not installed (run DWYT update or contact support)")
+	}
+	return os.WriteFile(binPath, srcData, 0755)
 }
 
 func fetch(url string) string {

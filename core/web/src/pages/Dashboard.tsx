@@ -50,6 +50,7 @@ export default function Dashboard() {
   const [obsidianStats, setObsidianStats]   = useState<any>(null)
   const [summarizing,  setSummarizing]  = useState(false)
   const [savingBrain,  setSavingBrain]  = useState(false)
+  const [openingBrain, setOpeningBrain] = useState(false)
   const [saveType,     setSaveType]     = useState('note')
   const [saveContent,  setSaveContent]  = useState('')
   const [mcpRegistry,  setMCPRegistry]  = useState<Record<string, { status: string; port: number; installed: boolean; enabled: boolean }>>({})
@@ -628,7 +629,7 @@ export default function Dashboard() {
           )
         })()}
 
-        {/* ── BRAIN ── */}
+        {/* ── OBSIDIAN ── */}
         {(() => {
           const det   = getDetail('obsidian')
           const state = toolState(ms, det)
@@ -652,20 +653,18 @@ export default function Dashboard() {
                 </select>
                 <input type="text" value={saveContent} onChange={e => setSaveContent(e.target.value)}
                   placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 9 }} />
-                <button style={{ fontSize: 9, padding: '2px 6px' }} onClick={async () => {
+                <Btn variant="blue" label={savingBrain ? '...' : (t.saveMemory || 'Save')} onClick={async () => {
                   if (!saveContent) return
                   setSavingBrain(true)
                   try { await api.saveBrain(saveType, saveContent); setSaveContent(''); pollAll() } catch (_) {}
                   setSavingBrain(false)
-                }} disabled={savingBrain}>
-                  {savingBrain ? '...' : t.saveMemory || 'Save'}
-                </button>
+                }} />
               </div>
               {/* Search */}
               <div style={{ display: 'flex', gap: 4 }}>
                 <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   placeholder={t.searchPlaceholder} style={{ flex: 1 }} />
-                <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
+                <Btn variant="blue" label={t.search} onClick={handleSearch} />
               </div>
               {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
               <Btn variant="blue" label={configuringMCP === 'obsidian' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
@@ -674,21 +673,19 @@ export default function Dashboard() {
                 setConfiguringMCP('')
               }} />
               <div style={{ display: 'flex', gap: 4 }}>
-                <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
+                <Btn variant="blue" label={summarizing ? '...' : t.rebuildSummary} onClick={async () => {
                   setSummarizing(true)
                   try {
                     const r = await api.summarizeBrain()
                     if (r.summary) { setObsidianStats((s: any) => s ? {...s, summary: r.summary} : s); pollAll() }
                   } catch (_) {}
                   setSummarizing(false)
-                }} disabled={summarizing}>
-                  {summarizing ? '...' : t.rebuildSummary}
-                </button>
-                <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
+                }} />
+                <Btn variant="blue" label={openingBrain ? '...' : (t.openBrain || 'Open Vault')} onClick={async () => {
+                  setOpeningBrain(true)
                   try { await api.openBrain() } catch (_) {}
-                }}>
-                  🧠 {t.openBrain || 'Open Vault'}
-                </button>
+                  setOpeningBrain(false)
+                }} />
               </div>
             </div>
           )

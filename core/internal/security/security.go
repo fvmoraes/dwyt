@@ -92,6 +92,49 @@ func SafeRemove(dwytHome, path string) error {
 	return os.RemoveAll(path)
 }
 
+// CleanHome removes all contents from dwytHome except protected paths.
+func CleanHome(dwytHome string) {
+	cfg := Load(dwytHome)
+	entries, err := os.ReadDir(dwytHome)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		entryPath := filepath.Join(dwytHome, entry.Name())
+		if cfg.IsProtected(dwytHome, entryPath) {
+			continue
+		}
+		os.RemoveAll(entryPath)
+	}
+}
+
+// IsSafeHome validates that a path looks like a legitimate DWYT home directory.
+func IsSafeHome(dwytHome string) bool {
+	if dwytHome == "/" || dwytHome == "" {
+		return false
+	}
+	abs, err := filepath.Abs(dwytHome)
+	if err != nil {
+		return false
+	}
+	// Must be within user's home directory or be an explicit DWYT_HOME override
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		homeAbs, _ := filepath.Abs(home)
+		if strings.HasPrefix(abs, homeAbs+string(os.PathSeparator)) || abs == homeAbs {
+			return true
+		}
+	}
+	// Allow explicit DWYT_HOME override if set
+	if dwytHomeEnv := os.Getenv("DWYT_HOME"); dwytHomeEnv != "" {
+		absOverride, _ := filepath.Abs(dwytHomeEnv)
+		if abs == absOverride {
+			return true
+		}
+	}
+	return false
+}
+
 // InitObsidianConfig creates the Obsidian API config if it doesn't exist.
 func InitObsidianConfig(dwytHome string) {
 	dataDir := filepath.Join(dwytHome, "data", "obsidian")

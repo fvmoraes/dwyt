@@ -70,12 +70,15 @@ type CallToolRequest struct {
 
 type CallToolResult struct {
 	Content []TextContent `json:"content"`
+	IsError *bool         `json:"isError,omitempty"`
 }
 
 type TextContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 type ToolHandler func(args map[string]interface{}) (string, error)
 
@@ -177,6 +180,7 @@ func (s *Server) handleRequest(req *JSONRPCRequest) {
 		if err != nil {
 			s.sendResult(req.ID, CallToolResult{
 				Content: []TextContent{{Type: "text", Text: "Error: " + err.Error()}},
+				IsError: boolPtr(true),
 			})
 			return
 		}

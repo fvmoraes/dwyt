@@ -710,7 +710,7 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 
 			// Trigger index after install
 			setStatus("index", "installing")
-			indexCmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
+			indexCmd := exec.Command(filepath.Join(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository",
 				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath))
 			indexCmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
 			err := indexCmd.Run()
@@ -1415,10 +1415,8 @@ func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
 		return
 	}
 	if err := ds.ProjectObsidian.OpenInObsidian(); err != nil {
-		if err2 := ds.ProjectObsidian.OpenBrainDir(); err2 != nil {
-			c.JSON(500, gin.H{"error": "failed to open: " + err2.Error()})
-			return
-		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
 	c.JSON(200, gin.H{"status": "opened"})
 }

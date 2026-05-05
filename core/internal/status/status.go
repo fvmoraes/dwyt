@@ -71,23 +71,36 @@ func pollCBMCP(dwytBin string) ToolStatus {
 		return ts
 	}
 
-	// Binary exists — verify it's functional
+	// Binary exists — verify it's functional with --version
 	if _, err := exec.Command(bin, "--version").Output(); err != nil {
 		ts.State = StateFailed
 		ts.Error = "binary is present but not responding"
 		return ts
 	}
 
-	ts.State = StateRunning
-	ts.Running = true
-	ts.Healthy = true
-	ts.Port = 9749
-
-	// Check if the HTTP UI is actually running
+	// Check if the HTTP UI is actually running on expected port
 	if health.ProbeURL("http://127.0.0.1:9749/health") {
+		ts.State = StateRunning
+		ts.Running = true
+		ts.Healthy = true
+		ts.Port = 9749
 		ts.Details = "UI on port 9749"
 	} else {
-		ts.Details = "installed (launch on demand)"
+		if health.ProbePort(9749) {
+			// Port is occupied by something else — service may be misconfigured
+			ts.State = StateRunning
+			ts.Running = false
+			ts.Healthy = false
+			ts.Port = 9749
+			ts.Details = "port 9749 occupied but healthcheck failed"
+		} else {
+			// Binary works, server not running — installed but not active
+			ts.State = StateRunning
+			ts.Running = true
+			ts.Healthy = true
+			ts.Port = 9749
+			ts.Details = "installed (launch on demand)"
+		}
 	}
 	return ts
 }
@@ -310,7 +323,12 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	if _, err := os.Stat(bin); err != nil {
 		states["codebase-memory-mcp"] = StateNotInstalled
 	} else if _, err := exec.Command(bin, "--version").Output(); err == nil {
-		states["codebase-memory-mcp"] = StateRunning
+		// Binary is functional. Check if HTTP UI is actually serving.
+		if health.ProbeURL("http://127.0.0.1:9749/health") {
+			states["codebase-memory-mcp"] = StateRunning
+		} else {
+			states["codebase-memory-mcp"] = StateNotInstalled // installed but not running
+		}
 	} else {
 		states["codebase-memory-mcp"] = StateFailed
 	}

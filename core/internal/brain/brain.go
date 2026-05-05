@@ -433,7 +433,6 @@ func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {
-	// Try Obsidian URI scheme first: obsidian://open?path=<vault>
 	vaultURI := "obsidian://open?path=" + url.PathEscape(pb.brainDir)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "darwin" {
@@ -443,11 +442,10 @@ func (pb *ProjectObsidian) OpenInObsidian() error {
 	} else {
 		cmd = exec.Command("xdg-open", vaultURI)
 	}
-	if err := cmd.Run(); err == nil {
-		return nil
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("obsidian: failed to open vault via URI: %w", err)
 	}
-	// Fallback: open the brain directory in file manager
-	return pb.OpenBrainDir()
+	return nil
 }
 
 func (pb *ProjectObsidian) OpenBrainDir() error {
