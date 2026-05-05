@@ -377,5 +377,5 @@ Potential enhancements:
 
 ---
 
-**Last Updated:** 2026-05-04  
+**Last Updated:** 2026-05-05 — v4.0.0  
 **Maintained By:** DWYT Team

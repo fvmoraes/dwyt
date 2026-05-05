@@ -1,12 +1,72 @@
 # DWYT Changelog
 
-All notable changes to DWYT are documented here, organized by date.
-
-**Note:** Starting from 2026-05-04, releases are automatically generated on every commit to `main`. See [RELEASE-PROCESS.md](RELEASE-PROCESS.md) for details on the automated release process and commit message conventions.
+All notable changes to DWYT are documented here.
 
 ---
 
-## 2026-05-04 - Critical Stability Fixes + Full Uninstall (v3.1.0)
+## v4.0.0 — Obsidian Brain, ProcessManager, Headroom Auto-Proxy (2026-05-04)
+
+### 🚨 Breaking Changes
+
+- **MemStack removed entirely** — replaced by Obsidian-based vault system. All `/api/memory/*` routes removed.
+- **CLI wrappers removed** — `dwyt-codex`, `dwyt-opencode`, `dwyt-ui` no longer exist. Headroom config is auto-injected via `env.sh` and client config files.
+- **`/api/memory/*` → `/api/brain/*`** — all memory endpoints renamed.
+- **`opencode.json` keys `rtkBin` and `baseUrl` removed** — they are not in the OpenCode schema. RTK is CLI-only, Headroom proxy uses env vars.
+
+### ✨ Features
+
+- **Obsidian Project Vault** — each project gets an Obsidian-compatible vault at `~/.dwyt/projects/<id>/brain/` with `index.md`, `context.md`, `decisions.md`, `tasks.md`, `knowledge/`, `logs/`. Frontmatter YAML format.
+- **ProcessManager** — centralized process lifecycle for Codebase and Headroom with healthcheck (5 retries, exponential backoff, 10s timeout), log capture (`~/.dwyt/logs/<service>-*.log`), start/stop/restart/status.
+- **Headroom Auto-Proxy** — `env.sh` exports `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL`. Proxy config injected/removed automatically in client files.
+- **Global Dashboard** — opening `http://localhost:2737` without a project shows all repositories with brain stats, RTK metrics, and indexing status.
+- **GitHub Actions Release** — GoReleaser builds for 5 platforms with auto-generated changelog from commit messages.
+- **Obsidian mandatory** — pre-selected and cannot be unchecked in Setup Wizard. Other tools remain optional.
+
+### 🐛 Bug Fixes
+
+- `obsidian://open?path=` replaced with native `obsidian://open?vault=` + `xdg-open` fallback (Advanced URI plugin no longer required)
+- `ProcMan.Running()` uses `syscall.Signal(0)` instead of broken `os.Signal(nil)`
+- Log paths use stored `pm.logDir` instead of fragile relative path
+- OpenBrainDir uses `cmd.Start()` (non-blocking) instead of `cmd.Run()`
+- Duplicate Headroom handlers consolidated (old `/headroom/start` → ProcMan version)
+- Frontend `total_entries` → `total_files` to match Brain stats
+- Unsafe type assertions with `ok` check in apiContext
+- Brain always marked as installed (no binary check needed — filesystem-based)
+- `CBM_CACHE_DIR` set to `~/.dwyt/codebase` for centralized data storage
+- Codebase "Open Graph" button detects UI via port probe (not `/health` endpoint)
+- Old daemon showing stale `memstack` in status API — killed and reinstalled
+
+### 📚 Documentation
+
+- README fully rewritten for v4.0.0
+- HOW_THIS_WORK.md updated with architecture overview
+- docs/HOW-IT-WORKS.md: comprehensive 818-line technical reference
+- docs/RELEASE-PROCESS.md: CI/CD workflow and commit conventions
+- docs/CHANGELOG.md: this file
+
+### 🔧 Chores
+
+- 539 lines of `internal/memory/memory.go` deleted
+- 5 pre-built binaries removed from repo root
+- MemStack references removed from README, i18n, SetupWizard, Dashboard
+- Templates updated: "Project Brain (Obsidian)" → "Obsidian FIRST" in all 5 client files
+- Card descriptions added to Dashboard headers
+- ProcessManager signal handling: SIGTERM → 5s wait → SIGKILL
+
+### 📦 Assets
+
+| File | Platform |
+|------|----------|
+| `dwyt_linux_amd64.tar.gz` | Linux 64-bit |
+| `dwyt_linux_arm64.tar.gz` | Linux ARM64 |
+| `dwyt_darwin_amd64.tar.gz` | macOS Intel |
+| `dwyt_darwin_arm64.tar.gz` | macOS Apple Silicon |
+| `dwyt_windows_amd64.zip` | Windows 64-bit |
+| `checksums.txt` | SHA256 checksums |
+
+---
+
+## v3.1.0 — Critical Stability Fixes + Full Uninstall (2026-05-04)
 
 ### 🔴 Critical Fixes
 
