@@ -200,7 +200,7 @@ curl -X POST http://127.0.0.1:2737/api/services/stop-all | jq
 # (processo inicia mas healthcheck falha)
 
 # Verificar que processo é morto
-ps aux | grep codebase-memory-mcp
+ps aux | grep Codebase
 
 # Verificar logs
 tail -f ~/.dwyt/dwyt.log | grep "healthcheck failed"
@@ -277,9 +277,28 @@ ps aux | grep "headroom proxy"
 - Apenas 1 instância do Headroom
 - Segunda chamada detecta que já está rodando
 
----
+### 6. UI Naming Validation
 
-## 📊 Validação de Performance
+```bash
+# Iniciar DWYT e abrir UI
+dwyt .
+xdg-open http://localhost:2737
+```
+
+**Validar na UI (Dashboard):**
+- [ ] Card superior esquerdo mostra **"CODEBASE"** (não "CODE MAP")
+- [ ] Card superior direito mostra **"RTK"** (não "TERMINAL OPTIMIZED")
+- [ ] Card inferior esquerdo mostra **"HEADROOM"** (não "ACTIVE COMPRESSION")
+- [ ] Card inferior direito mostra **"OBSIDIAN"** ✅
+- [ ] Barra de projeto mostra "DWYT is protecting this project"
+- [ ] Contador de arquivos usa "Obsidian files" (não "brain files")
+- [ ] Totals banner mostra: RTK, Headroom, Obsidian, Codebase
+
+**Validar em PT (trocar idioma):**
+- [ ] Mesmos nomes em português
+- [ ] "DWYT está protegendo este projeto"
+
+---
 
 ### Benchmark
 
@@ -374,7 +393,7 @@ ps aux | grep "dwyt.*daemon"
 
 # Service PIDs
 ps aux | grep headroom
-ps aux | grep codebase-memory-mcp
+ps aux | grep Codebase
 
 # Ports
 netstat -tlnp | grep 2737
@@ -479,7 +498,7 @@ ls -la ~/.dwyt/projects/
 df -h
 
 # Verificar logs
-grep "brain save" ~/.dwyt/dwyt.log
+grep "Obsidian save" ~/.dwyt/dwyt.log
 ```
 
 ### Serviços não iniciam

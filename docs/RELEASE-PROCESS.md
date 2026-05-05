@@ -93,7 +93,7 @@ git commit -m "BREAKING CHANGE: change config file format"
 **Features:**
 ```bash
 git commit -m "feat: add support for multiple projects"
-git commit -m "feature: implement brain search API"
+git commit -m "feature: implement Obsidian search API"
 ```
 
 **Bug Fixes:**
@@ -117,7 +117,7 @@ git commit -m "ci: add automated tests"
 
 **Other:**
 ```bash
-git commit -m "refactor: simplify brain save logic"
+git commit -m "refactor: simplify Obsidian save logic"
 git commit -m "style: format code with gofmt"
 git commit -m "test: add unit tests for state package"
 ```
@@ -139,7 +139,7 @@ git commit -m "breaking: change API response format for /api/status"
 git commit -m "feat: add project switching API
 
 - Implement /api/project/switch endpoint
-- Add brain isolation per project
+- Add Obsidian isolation per project
 - Update frontend to handle project changes"
 ```
 
@@ -175,7 +175,7 @@ git checkout main
 git pull origin main
 
 # Make changes
-vim core/internal/brain/brain.go
+vim core/internal/brain/brain.go (Obsidian)
 
 # Commit with proper format
 git add .
@@ -289,7 +289,7 @@ Make small, focused commits:
 ```bash
 # Good
 git commit -m "fix: resolve race condition in ProcessManager"
-git commit -m "feat: add brain search API"
+git commit -m "feat: add Obsidian search API"
 
 # Bad
 git commit -m "fix: multiple bugs and add features"

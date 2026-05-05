@@ -364,15 +364,15 @@ export default function Dashboard() {
         <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid #2f9e44', background: 'linear-gradient(135deg, #1a2a1a 0%, #1e1f23 100%)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 10, color: '#2f9e44', fontWeight: 700 }}>🛡️</span>
           <span style={{ fontSize: 11, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
-          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>DWYT is protecting this project</span>
+          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>{t.protecting}</span>
           {brainCount > 0 && (
             <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
-              🧠 {brainCount} brain files
+              🧠 {brainCount} {t.memories}
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: '#339af0', marginLeft: 'auto' }}>
-              🗺️ Indexed
+            <span style={{ fontSize: 10, color: '#339af0', marginLeft: 'auto' }}>
+              {t.indexedLabel}
             </span>
           )}
         </div>
@@ -382,7 +382,7 @@ export default function Dashboard() {
       {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
         <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
           <div style={{ padding: '6px 12px', background: '#1e1f23', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#339af0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos || 'All repositories'}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#339af0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
           </div>
           <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
             {projectCtx.projects.map((p: any) => (
@@ -443,10 +443,10 @@ export default function Dashboard() {
             {/* Per-tool breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '4px 10px', background: '#1a1b1f', gap: 8 }}>
               {[
-                { label: 'RTK', saved: rtkSaved, color: '#2f9e44' },
-                { label: 'Headroom', saved: headroomSaved, color: '#3bc9db' },
-                { label: 'Obsidian', saved: brainEstimate, color: '#f08d49' },
-                { label: 'Codebase', saved: 0, color: '#339af0' },
+                { label: t.terminalOptimized, saved: rtkSaved, color: '#2f9e44' },
+                { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
+                { label: t.brainActive, saved: brainEstimate, color: '#f08d49' },
+                { label: t.codeMap, saved: 0, color: '#339af0' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
                   <span style={{ fontSize: 9, color: tool.color, fontWeight: 600 }}>{tool.label}</span>
@@ -588,10 +588,10 @@ export default function Dashboard() {
           const state = toolState(ms, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.brainActive || 'Obsidian'} color="#f08d49" state={state} description={t.brainDesc} />
+              <CardHeader label={t.brainActive} color="#f08d49" state={state} description={t.brainDesc} />
               <Hr />
               <Row label={t.tokensSavedLabel} value={brainEstimate > 0 ? fmtN(brainEstimate) + ' est.' : '—'} />
-              <Row label={t.memories || 'Obsidian files'} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet || 'No files yet'} />
+              <Row label={t.memories} value={brainCount > 0 ? String(brainCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />
               {brainStats?.summary && (
@@ -610,7 +610,7 @@ export default function Dashboard() {
                   <option value="error">error</option>
                 </select>
                 <input type="text" value={saveContent} onChange={e => setSaveContent(e.target.value)}
-                  placeholder={t.saveMemoryPlaceholder || 'Brain note...'} style={{ flex: 1, fontSize: 9 }} />
+                  placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 9 }} />
                 <button style={{ fontSize: 9, padding: '2px 6px' }} onClick={async () => {
                   if (!saveContent) return
                   setSavingBrain(true)

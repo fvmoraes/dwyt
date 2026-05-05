@@ -246,7 +246,7 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 	dwytDir := filepath.Join(projectPath, ".dwyt")
 	os.MkdirAll(dwytDir, 0755)
 
-	proxyConfig := map[string]interface{}{
+	proxyConfig := map[string]any{
 		"active":     true,
 		"port":       headroomPort,
 		"started_at": time.Now().UTC().Format(time.RFC3339),
@@ -296,7 +296,7 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
 	proxyFile := filepath.Join(projectPath, ".dwyt", "headroom-proxy.json")
 	if data, err := os.ReadFile(proxyFile); err == nil {
-		var cfg map[string]interface{}
+		var cfg map[string]any
 		if json.Unmarshal(data, &cfg) == nil {
 			cfg["active"] = false
 			if newData, err := json.MarshalIndent(cfg, "", "  "); err == nil {
@@ -378,7 +378,7 @@ func setOpenCodeBaseURL(filePath string, port int) {
 	if err != nil {
 		return
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return
 	}
@@ -395,7 +395,7 @@ func removeOpenCodeBaseURL(filePath string) {
 	if err != nil {
 		return
 	}
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return
 	}

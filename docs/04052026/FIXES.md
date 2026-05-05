@@ -66,7 +66,7 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 
 ---
 
-### 3. Brain Save sem Lock ✅
+### 3. Obsidian Save sem Lock ✅
 
 **Problema:** Lock era liberado antes do write no arquivo, causando corrupção de dados.
 
@@ -75,7 +75,7 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 - Write no arquivo acontece antes do `defer unlock`
 
 ```go
-func (pb *ProjectBrain) SaveEntry(entryType, content string, tags []string) error {
+func (pb *Obsidian) SaveEntry(entryType, content string, tags []string) error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	
@@ -221,9 +221,31 @@ func appendMarkedBlock(filePath, block string) error {
 
 **Impacto:** Configuração de clientes mais confiável.
 
+### 10. UI Naming Consistency ✅
+
+**Problema:** Nomes das ferramentas hardcoded na UI, inconsistentes com o i18n e com strings em inglês não traduzíveis.
+
+**Correção:** `core/web/src/pages/Dashboard.tsx`, `core/web/src/pages/SetupWizard.tsx`, `core/web/src/i18n.ts`
+- Removidos todos os strings hardcoded de nomes de ferramentas
+- Adicionadas chaves i18n: `toolCodebase`, `toolObsidian`, `toolHeadroom`, `toolRTK`
+- Adicionadas chaves i18n: `protecting`, `indexedLabel`
+- Substituídos fallbacks desnecessários (`|| 'Obsidian'`, `|| 'Brain note...'`)
+- Totals banner agora usa `t.terminalOptimized`, `t.compressionActive`, `t.brainActive`, `t.codeMap`
+
+**Impacto:** UI totalmente internacionalizada, nomes consistentes em EN e PT.
+
 ---
 
-## 🧪 Testes Implementados
+### 11. Code Quality — interface{} → any ✅
+
+**Problema:** Uso de `interface{}` obsoleto em Go moderno.
+
+**Correção:** `core/internal/status/status.go`, `core/internal/integrate/integrate.go`
+- Substituído `interface{}` por `any` (alias moderno desde Go 1.18)
+
+**Impacto:** Código mais limpo e idiomático.
+
+---
 
 ### Testes Unitários
 
@@ -242,14 +264,14 @@ func appendMarkedBlock(filePath, block string) error {
 - ✅ `TestRuntimeState_SetProcessHealthy` - Atualização de health
 - ✅ `TestRuntimeState_RemoveProcess` - Remoção de processo
 - ✅ `TestRuntimeState_SetCurrentProject` - Troca de projeto
-- ✅ `TestRuntimeState_UpdateProjectBrain` - Atualização de brain
+- ✅ `TestRuntimeState_UpdateObsidian` - Atualização de brain
 - ✅ `TestRuntimeState_Persistence` - Persistência em disco
 - ✅ `TestRuntimeState_SaveFailureBackup` - Backup em caso de falha
 - ✅ `TestRuntimeState_Snapshot` - Snapshot para API
 
 ### Testes E2E (`core/test-e2e.sh`)
 - ✅ Daemon startup e health
-- ✅ Brain save, search e summarize
+- ✅ Obsidian save, search e summarize
 - ✅ Project switching
 - ✅ Brain isolation entre projetos
 - ✅ State persistence após restart
@@ -275,7 +297,7 @@ cd core
 |----------|-----------|---------|--------|
 | ProcessManager Race Condition | 🔴 Crítico | Elimina loops infinitos | ✅ |
 | Headroom Start Race | 🔴 Crítico | Previne múltiplas instâncias | ✅ |
-| Brain Save Lock | 🔴 Crítico | Elimina corrupção de dados | ✅ |
+| Obsidian Save Lock | 🔴 Crítico | Elimina corrupção de dados | ✅ |
 | Codebase Index Cancel | 🔴 Crítico | Permite cancelamento | ✅ |
 | State Save Error | 🔴 Crítico | Previne perda de estado | ✅ |
 | Install Checksum | 🟡 Importante | Segurança na instalação | ✅ |

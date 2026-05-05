@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
-	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/fvmoraes/dwyt/internal/workspace"
@@ -350,12 +350,211 @@ var reinstallCmd = &cobra.Command{
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove all DWYT tools and config",
+	Short: "Remove all DWYT tools, data and config",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
-		os.RemoveAll(e.DwytHome)
-		log.Info("uninstall: removed dwyt home", log.Fields{"path": e.DwytHome})
-		fmt.Println("  ✓ Desinstalação concluída.")
+
+		fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
+		fmt.Printf("  ║  DWYT — Uninstall                   ║\n")
+		fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
+
+		// ── 1. Stop all running processes ─────────────────────────────────────
+		fmt.Println("  → Stopping all DWYT processes...")
+		health.StopAll()
+		exe, _ := os.Executable()
+		exec.Command("pkill", "-f", exe+" daemon").Run()
+		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+		exec.Command("pkill", "-f", "codebase-memory-mcp").Run()
+		exec.Command("pkill", "-f", "headroom proxy").Run()
+		time.Sleep(500 * time.Millisecond)
+		fmt.Println("  ✓ Processes stopped")
+
+		// ── 2. Remove ~/.dwyt (bins, SQLite, state.json, brain vaults, logs) ──
+		fmt.Printf("  → Removing DWYT home: %s\n", e.DwytHome)
+		if err := os.RemoveAll(e.DwytHome); err != nil {
+			fmt.Printf("  ✗ Failed to remove %s: %v\n", e.DwytHome, err)
+		} else {
+			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, brain vaults, logs)")
+		}
+
+		// ── 3. Remove symlinks from ~/.local/bin ──────────────────────────────
+		if runtime.GOOS != "windows" {
+			home, _ := os.UserHomeDir()
+			localBin := filepath.Join(home, ".local", "bin")
+			for _, name := range []string{"dwyt", "rtk", "headroom", "codebase-memory-mcp"} {
+				link := filepath.Join(localBin, name)
+				if _, err := os.Lstat(link); err == nil {
+					os.Remove(link)
+					fmt.Printf("  ✓ Removed symlink: %s\n", link)
+				}
+			}
+		}
+
+		// ── 4. Remove Windows PATH entry ──────────────────────────────────────
+		if runtime.GOOS == "windows" {
+			removeFromWindowsUserPath(e.DwytBin)
+			fmt.Println("  ✓ Removed from Windows PATH")
+		}
+
+		// ── 5. Clean shell RC files (.zshrc, .bashrc, .zprofile, .profile) ────
+		fmt.Println("  → Cleaning shell RC files...")
+		rcFiles := []string{e.ShellRC, e.LoginRC}
+		for _, rc := range rcFiles {
+			if rc == "" {
+				continue
+			}
+			if cleaned := removeFromRC(rc); cleaned {
+				fmt.Printf("  ✓ Cleaned: %s\n", rc)
+			}
+		}
+
+		// ── 6. Remove PowerShell profile entry (Windows) ──────────────────────
+		if runtime.GOOS == "windows" {
+			home, _ := os.UserHomeDir()
+			psProfile := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+			if cleaned := removeFromRC(psProfile); cleaned {
+				fmt.Printf("  ✓ Cleaned PowerShell profile: %s\n", psProfile)
+			}
+		}
+
+		// ── 7. Remove .dwyt/ folders from all tracked projects ────────────────
+		fmt.Println("  → Scanning for project .dwyt/ folders...")
+		removed := removeProjectDwytFolders()
+		if removed > 0 {
+			fmt.Printf("  ✓ Removed .dwyt/ from %d project(s)\n", removed)
+		}
+
+		fmt.Printf("\n  ✓ DWYT fully uninstalled.\n")
+		fmt.Printf("  ℹ  Restart your terminal to apply shell changes.\n\n")
 		return nil
 	},
+}
+
+// removeFromRC removes the DWYT block (# dwyt:source + source line) from a shell RC file.
+func removeFromRC(rcFile string) bool {
+	data, err := os.ReadFile(rcFile)
+	if err != nil {
+		return false
+	}
+	original := string(data)
+	lines := strings.Split(original, "\n")
+	filtered := make([]string, 0, len(lines))
+	skip := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "# dwyt:source" {
+			skip = true
+			continue
+		}
+		if skip {
+			// Skip the source/. line that follows the marker
+			skip = false
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	result := strings.Join(filtered, "\n")
+	// Collapse multiple trailing blank lines into one
+	for strings.Contains(result, "\n\n\n") {
+		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	}
+	if result == original {
+		return false
+	}
+	os.WriteFile(rcFile, []byte(result), 0644)
+	return true
+}
+
+// removeProjectDwytFolders walks common project locations and removes .dwyt/ subdirs.
+func removeProjectDwytFolders() int {
+	home, _ := os.UserHomeDir()
+	count := 0
+
+	// Scan home directory up to 3 levels deep for .dwyt/ folders
+	searchRoots := []string{
+		home,
+		filepath.Join(home, "Documents"),
+		filepath.Join(home, "Projects"),
+		filepath.Join(home, "dev"),
+		filepath.Join(home, "code"),
+		filepath.Join(home, "workspace"),
+		filepath.Join(home, "src"),
+	}
+
+	seen := map[string]bool{}
+	for _, root := range searchRoots {
+		if _, err := os.Stat(root); err != nil {
+			continue
+		}
+		walkDepth(root, 3, func(path string) {
+			if seen[path] {
+				return
+			}
+			seen[path] = true
+			if err := os.RemoveAll(path); err == nil {
+				count++
+				fmt.Printf("  ✓ Removed: %s\n", path)
+			}
+		})
+	}
+	return count
+}
+
+// walkDepth walks dir up to maxDepth levels looking for .dwyt/ subdirectories.
+func walkDepth(dir string, maxDepth int, fn func(string)) {
+	if maxDepth < 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		fullPath := filepath.Join(dir, entry.Name())
+		if entry.Name() == ".dwyt" {
+			fn(fullPath)
+			continue // don't recurse into .dwyt itself
+		}
+		// Skip hidden dirs and common non-project dirs
+		if strings.HasPrefix(entry.Name(), ".") ||
+			entry.Name() == "node_modules" ||
+			entry.Name() == "vendor" ||
+			entry.Name() == "__pycache__" {
+			continue
+		}
+		walkDepth(fullPath, maxDepth-1, fn)
+	}
+}
+
+// removeFromWindowsUserPath removes dwytBin from HKCU\Environment\PATH.
+func removeFromWindowsUserPath(dwytBin string) {
+	out, err := exec.Command("reg", "query", `HKCU\Environment`, "/v", "PATH").Output()
+	if err != nil {
+		return
+	}
+	currentPath := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(line), "PATH") {
+			parts := strings.SplitN(line, "    ", 3)
+			if len(parts) == 3 {
+				currentPath = strings.TrimSpace(parts[2])
+			}
+		}
+	}
+	if currentPath == "" {
+		return
+	}
+	segments := strings.Split(currentPath, ";")
+	filtered := make([]string, 0, len(segments))
+	for _, s := range segments {
+		if !strings.EqualFold(strings.TrimSpace(s), dwytBin) {
+			filtered = append(filtered, s)
+		}
+	}
+	newPath := strings.Join(filtered, ";")
+	exec.Command("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f").Run()
 }

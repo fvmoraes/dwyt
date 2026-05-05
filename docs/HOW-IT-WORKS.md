@@ -64,7 +64,7 @@ Vite outputs to `core/internal/server/dashboard/dist/`. At build time, GoRelease
 │  │ └────────┘ └────────┘ └────────┘ └───────────┘  │   │
 │  │ ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────┐  │   │
 │  │ │ status │ │ health │ │  env   │ │  install   │  │   │
-│  │ │polling │ │probes  │ │env.sh  │ │cbmcp/rtk/  │  │   │
+│  │ │polling │ │probes  │ │env.sh  │ │Codebase/rtk/  │  │   │
 │  │ │        │ │        │ │PATH    │ │headroom    │  │   │
 │  │ └────────┘ └────────┘ └────────┘ └───────────┘  │   │
 │  └──────────────────────────────────────────────────┘   │
@@ -83,7 +83,7 @@ Vite outputs to `core/internal/server/dashboard/dist/`. At build time, GoRelease
 | `internal/state` | `state.go` | RuntimeState: PID tracking, errors, current project |
 | `internal/status` | `status.go` | Tool health polling, RTK/Headroom metrics parsing |
 | `internal/health` | `health.go` | HTTP health probes, service start/stop helpers |
-| `internal/install` | `install.go` | Tool installers: CBMCP, RTK, Headroom |
+| `internal/install` | `install.go` | Tool installers: Codebase, RTK, Headroom |
 | `internal/env` | `env.go` | Shell RC injection, env.sh, PATH symlinks |
 | `internal/db` | `db.go` | SQLite store: projects table, config key-value |
 | `internal/detect` | `detect.go` | OS/Shell/Home detection |
@@ -119,7 +119,7 @@ dwyt daemon
   │   ├─ db.New()                 → open/create ~/.dwyt/dwyt.db (SQLite)
   │   ├─ brain.MigrateOldMemoryDirs()  → convert old memory.json → .md files
   │   ├─ state.Init()             → load/create ~/.dwyt/state.json
-  │   ├─ brain.NewProjectBrain()  → create/load Obsidian vault
+  │   ├─ brain.NewObsidian()  → create/load Obsidian vault
   │   ├─ procman.New()            → create ProcessManager
   │   ├─ procman.Register("codebase", ...) → register Codebase service
   │   ├─ procman.Register("headroom", ...) → register Headroom service
@@ -136,7 +136,7 @@ dwyt daemon
 
 ---
 
-## Obsidian Brain (ProjectBrain)
+## Obsidian Vault (Knowledge Base)
 
 ### Structure
 
@@ -268,7 +268,7 @@ Client config injection (via `integrate.WriteHeadroomProxyConfig()`):
 
 ---
 
-## Codebase (codebase-memory-mcp)
+## Codebase (Codebase)
 
 MCP server that provides a knowledge graph of the codebase.
 
@@ -286,7 +286,7 @@ Indexing is **on-demand only**. No automatic indexing on startup or project swit
 ### Indexing flow
 
 1. User clicks "Index" → `POST /api/codebase/index {"path":"..."}`
-2. Backend spawns `codebase-memory-mcp cli index_repository` in goroutine
+2. Backend spawns `Codebase cli index_repository` in goroutine
 3. Frontend polls `GET /api/codebase/index/status` every 2s
 4. On completion: marks project as indexed in SQLite
 
@@ -457,7 +457,7 @@ Component mounts
 │   ├── dwyt                      # symlink to binary
 │   ├── rtk
 │   ├── headroom
-│   └── codebase-memory-mcp
+│   └── Codebase
 ├── data/                         # (reserved)
 ├── headroom-venv/                # Python virtualenv
 ├── logs/                         # ProcessManager captured logs
@@ -490,7 +490,7 @@ The Setup creates these files in the user's project directory:
 
 ```
 <project>/
-├── .mcp.json                     # codebase-memory-mcp MCP config
+├── .mcp.json                     # Codebase MCP config
 ├── AGENTS.md                     # instructions for Codex, Kiro, Cursor, OpenCode
 ├── CLAUDE.md                     # instructions for Claude Code
 ├── opencode.json                 # OpenCode config
@@ -647,9 +647,27 @@ User runs: dwyt .
 7. **Resilience** — each tool can fail independently without crashing the dashboard. Errors are displayed in the UI and logged.
 8. **RTK preservation** — simplest and most reliable tool, left unchanged from its original design. Just prefix commands with `rtk`.
 
----
+## Uninstall
 
-## Documentation Organization
+To completely remove DWYT from your system:
+
+```bash
+dwyt uninstall
+```
+
+This command performs a **full cleanup** in order:
+
+1. **Stops all running processes** — daemon, Headroom, Codebase, RTK
+2. **Removes `~/.dwyt/`** — bins, SQLite database, `state.json`, Obsidian brain vaults, logs, `env.sh`
+3. **Removes symlinks** from `~/.local/bin/` — `dwyt`, `rtk`, `headroom`, `codebase-memory-mcp`
+4. **Cleans shell RC files** — removes the `# dwyt:source` block from `.zshrc`, `.bashrc`, `.zprofile`, `.profile`
+5. **Scans project directories** — removes `.dwyt/` folders found up to 3 levels deep under `~`, `~/Documents`, `~/Projects`, `~/dev`, `~/code`, `~/workspace`, `~/src`
+
+After uninstall, restart your terminal to apply shell changes.
+
+> **Windows:** also removes the `dwytBin` entry from `HKCU\Environment\PATH` and cleans the PowerShell profile.
+
+---
 
 DWYT documentation follows a structured approach to maintain clarity and historical context.
 

@@ -58,7 +58,7 @@ Todas as correções críticas foram **implementadas**, **testadas** e **validad
 ✅ TestRuntimeState_SetProcessHealthy
 ✅ TestRuntimeState_RemoveProcess
 ✅ TestRuntimeState_SetCurrentProject
-✅ TestRuntimeState_UpdateProjectBrain
+✅ TestRuntimeState_UpdateObsidian
 ✅ TestRuntimeState_SetClients
 ✅ TestRuntimeState_Persistence
 ✅ TestRuntimeState_SaveFailureBackup
@@ -85,7 +85,7 @@ Todas as correções críticas foram **implementadas**, **testadas** e **validad
    - Verificação dupla dentro do lock
    - **Validado:** Code review + testes manuais
 
-3. ✅ **Brain Save sem Lock**
+3. ✅ **Obsidian Save sem Lock**
    - Métodos `*Locked` executam dentro do lock
    - Write acontece antes do unlock
    - **Validado:** Code review + testes de concorrência
@@ -168,16 +168,19 @@ Todas as correções críticas foram **implementadas**, **testadas** e **validad
 
 ## 🚀 Arquivos Modificados
 
-### Código (9 arquivos)
+### Código (11 arquivos)
 ```
 ✅ core/internal/procman/procman.go
 ✅ core/internal/state/state.go
 ✅ core/internal/brain/brain.go
 ✅ core/internal/server/server.go
-✅ core/internal/status/status.go
-✅ core/internal/integrate/integrate.go
-✅ core/web/src/pages/Dashboard.tsx
+✅ core/internal/status/status.go       (+ interface{} → any)
+✅ core/internal/integrate/integrate.go (+ interface{} → any)
+✅ core/web/src/pages/Dashboard.tsx     (+ UI naming, i18n)
+✅ core/web/src/pages/SetupWizard.tsx   (+ i18n tool names)
+✅ core/web/src/i18n.ts                 (+ new keys)
 ✅ install.sh
+✅ core/internal/server/dashboard/dist/ (frontend rebuilt)
 ```
 
 ### Testes (3 arquivos)
@@ -254,7 +257,7 @@ Todas as correções críticas foram **implementadas**, **testadas** e **validad
    - Release automático
 
 2. **Mais Testes**
-   - Brain package: 80% coverage
+   - Obsidian package: 80% coverage
    - Server package: 70% coverage
    - Integrate package: 60% coverage
 

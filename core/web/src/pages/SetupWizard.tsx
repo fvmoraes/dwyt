@@ -13,10 +13,10 @@ export default function SetupWizard() {
   const { t } = useLang()
 
   const TOOLS = [
-    { id: 'cbmcp',    label: 'Codebase', desc: t.cbmcpDesc    },
-    { id: 'brain',    label: 'Obsidian', desc: t.brainDesc  },
-    { id: 'headroom', label: 'Headroom', desc: t.headroomDesc  },
-    { id: 'rtk',      label: 'RTK',      desc: t.rtkDesc       },
+    { id: 'cbmcp',    label: t.toolCodebase, desc: t.cbmcpDesc    },
+    { id: 'brain',    label: t.toolObsidian, desc: t.brainDesc  },
+    { id: 'headroom', label: t.toolHeadroom, desc: t.headroomDesc  },
+    { id: 'rtk',      label: t.toolRTK,      desc: t.rtkDesc       },
   ]
   const IAS = [
     { id: 'claude',   label: 'Claude Code',    desc: t.claudeDesc   },

@@ -36,6 +36,12 @@ export const T = {
     // User-friendly tool names
     brainActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',
+    // Tool names for setup
+    toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
+    toolHeadroom: 'Headroom', toolRTK: 'RTK',
+    // Project bar
+    protecting: 'DWYT is protecting this project',
+    indexedLabel: '🗺️ Indexed',
     // Setup
     setupTitle: 'DWYT Setup', install: 'Install →', installing: 'Installing...',
     dashboard: 'Dashboard →', loading: 'Loading...', starting: 'Starting...',
@@ -85,6 +91,12 @@ export const T = {
     // User-friendly tool names
     brainActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',
+    // Tool names for setup
+    toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
+    toolHeadroom: 'Headroom', toolRTK: 'RTK',
+    // Project bar
+    protecting: 'DWYT está protegendo este projeto',
+    indexedLabel: '🗺️ Indexado',
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',
     dashboard: 'Dashboard →', loading: 'Carregando...', starting: 'Iniciando...',
     tools: 'Ferramentas', clients: 'IAs / Clientes', project: 'Projeto',

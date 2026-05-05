@@ -6,7 +6,7 @@ All notable changes to DWYT are documented here, organized by date.
 
 ---
 
-## 2026-05-04 - Critical Stability Fixes (v3.1.0)
+## 2026-05-04 - Critical Stability Fixes + Full Uninstall (v3.1.0)
 
 ### 🔴 Critical Fixes
 
@@ -23,7 +23,7 @@ All notable changes to DWYT are documented here, organized by date.
 - Double-check inside lock to prevent race condition
 - Impact: Prevents multiple Headroom instances
 
-**Brain**
+**Obsidian (Knowledge Base)**
 - Fixed lock released before file write
 - Append functions moved to `*Locked` methods
 - Write happens inside lock
@@ -99,6 +99,23 @@ All notable changes to DWYT are documented here, organized by date.
 ### 🔧 Breaking Changes
 
 None. All fixes are backward compatible.
+
+**Uninstall Command**
+- Rewrote `dwyt uninstall` to perform complete cleanup:
+  - Stops all running processes (daemon, Headroom, Codebase, RTK)
+  - Removes `~/.dwyt/` (bins, SQLite, state, brain vaults, logs, env.sh)
+  - Removes symlinks from `~/.local/bin/`
+  - Cleans `# dwyt:source` block from `.zshrc`, `.bashrc`, `.zprofile`, `.profile`
+  - Scans and removes `.dwyt/` folders from project directories (3 levels deep)
+  - Windows: removes PATH registry entry and PowerShell profile entry
+
+**UI Naming Consistency**
+- All tool names now use i18n keys — no more hardcoded strings
+- Added keys: `toolCodebase`, `toolObsidian`, `toolHeadroom`, `toolRTK`, `protecting`, `indexedLabel`
+- Totals banner uses `t.terminalOptimized`, `t.compressionActive`, `t.brainActive`, `t.codeMap`
+
+**Code Quality**
+- Replaced `interface{}` with `any` in `status.go` and `integrate.go`
 
 ### 📦 Files Modified
 
