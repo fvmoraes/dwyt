@@ -128,6 +128,9 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
+	// Route Codebase data to DWYT home instead of ~/.cache
+	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
+
 	// Read headroom port from env
 	headroomPort := 8787
 	if hp := os.Getenv("DWYT_HEADROOM_PORT"); hp != "" {
