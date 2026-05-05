@@ -175,7 +175,7 @@ git checkout main
 git pull origin main
 
 # Make changes
-vim core/internal/brain/brain.go (Obsidian)
+vim core/internal/brain/brain.go  # Obsidian vault package
 
 # Commit with proper format
 git add .

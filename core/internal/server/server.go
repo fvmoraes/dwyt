@@ -378,6 +378,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
 		cmd := exec.CommandContext(ctx, bin, "cli", "index_repository",
 			fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
+		cmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
 
 		ds.codebaseProgress.mu.Lock()
 		ds.codebaseProgress.progress = "indexing"
@@ -683,8 +684,10 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 
 			// Trigger index after install
 			setStatus("index", "installing")
-			err := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
-				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath)).Run()
+			indexCmd := exec.Command(ds.DwytBin+"/codebase-memory-mcp", "cli", "index_repository",
+				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath))
+			indexCmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
+			err := indexCmd.Run()
 			if err != nil {
 				setStatus("index", "error: "+err.Error())
 			} else {
@@ -1101,6 +1104,13 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
+
+	// If Obsidian app is not installed, return not_installed
+	if !brain.ObsidianInstalled() {
+		d.UptimeSecs = -1
+		return d
+	}
+
 	if ds.ProjectObsidian == nil {
 		d.UptimeSecs = -1
 		return d

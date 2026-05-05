@@ -96,18 +96,18 @@ dwyt .
 
 ```bash
 # Salvar no brain
-curl -X POST http://127.0.0.1:2737/api/brain/save \
+curl -X POST http://127.0.0.1:2737/api/obsidian/save \
   -H "Content-Type: application/json" \
   -d '{"type":"decision","content":"Test decision"}'
 
 # Buscar no brain
-curl "http://127.0.0.1:2737/api/brain/search?q=decision" | jq
+curl "http://127.0.0.1:2737/api/obsidian/search?q=decision" | jq
 
 # Status do brain
-curl http://127.0.0.1:2737/api/brain/status | jq
+curl http://127.0.0.1:2737/api/obsidian/status | jq
 
 # Summarize
-curl -X POST http://127.0.0.1:2737/api/brain/summarize | jq
+curl -X POST http://127.0.0.1:2737/api/obsidian/summarize | jq
 ```
 
 **Validar:**
@@ -134,7 +134,7 @@ curl -X POST http://127.0.0.1:2737/api/project/switch \
 curl http://127.0.0.1:2737/api/projects/current | jq
 
 # Verificar brain isolado
-curl "http://127.0.0.1:2737/api/brain/search?q=decision" | jq
+curl "http://127.0.0.1:2737/api/obsidian/search?q=decision" | jq
 ```
 
 **Validar:**
@@ -321,7 +321,7 @@ hey -n 1000 -c 10 http://127.0.0.1:2737/api/health
 hey -n 500 -c 5 http://127.0.0.1:2737/api/status
 
 # Test brain search
-hey -n 100 -c 2 "http://127.0.0.1:2737/api/brain/search?q=test"
+hey -n 100 -c 2 "http://127.0.0.1:2737/api/obsidian/search?q=test"
 ```
 
 **Esperado:**
@@ -379,7 +379,7 @@ curl http://127.0.0.1:2737/api/projects | jq
 curl http://127.0.0.1:2737/api/projects/current | jq
 
 # Brain status
-curl http://127.0.0.1:2737/api/brain/status | jq
+curl http://127.0.0.1:2737/api/obsidian/status | jq
 
 # Tool details
 curl http://127.0.0.1:2737/api/tool-details | jq

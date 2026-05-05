@@ -21,17 +21,25 @@ func CBMCP(dwytBin string) error {
 		return nil
 	}
 	os.MkdirAll(dwytBin, 0755)
+
+	// Install the --ui variant so the graph visualization works at localhost:9749
+	// The standard binary is stdio-only and has no HTTP server.
 	script := fetch("https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh")
 	if script == "" {
 		return fmt.Errorf("cbmcp: falha ao baixar script de instalação")
 	}
-	cmd := exec.Command("bash", "-s", "--", "--dir="+dwytBin, "--skip-config")
+	// --ui installs the UI variant; --skip-config skips agent config (DWYT manages that)
+	cmd := exec.Command("bash", "-s", "--", "--ui", "--dir="+dwytBin, "--skip-config")
 	stdin, _ := cmd.StdinPipe()
 	go func() { io.WriteString(stdin, script); stdin.Close() }()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cbmcp: %w\n%s", err, string(out))
 	}
+
+	// Enable UI mode persistently so it always starts the HTTP server
+	exec.Command(binPath, "--ui=true", "--port=9749").Run()
+
 	return nil
 }
 

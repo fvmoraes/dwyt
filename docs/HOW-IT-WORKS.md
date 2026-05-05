@@ -7,7 +7,7 @@ DWYT (Don't Waste Your Tokens) is a self-contained, single-binary orchestrator t
 ```
 User runs: dwyt .
   → Detects project directory
-  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>/brain/)
+  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>/obsidian/)
   → Starts Headroom proxy in background (port 8787)
   → Codebase sits idle (on-demand indexing)
   → RTK is active as CLI tool
@@ -119,7 +119,7 @@ dwyt daemon
   │   ├─ db.New()                 → open/create ~/.dwyt/dwyt.db (SQLite)
   │   ├─ brain.MigrateOldMemoryDirs()  → convert old memory.json → .md files
   │   ├─ state.Init()             → load/create ~/.dwyt/state.json
-  │   ├─ brain.NewObsidian()  → create/load Obsidian vault
+  │   ├─ brain.NewProjectObsidian()  → create/load Obsidian vault
   │   ├─ procman.New()            → create ProcessManager
   │   ├─ procman.Register("codebase", ...) → register Codebase service
   │   ├─ procman.Register("headroom", ...) → register Headroom service
@@ -141,7 +141,7 @@ dwyt daemon
 ### Structure
 
 ```
-~/.dwyt/projects/<sha256[:12]>/brain/
+~/.dwyt/projects/<sha256[:12]>/obsidian/
 ├── index.md              # project index with structure overview
 ├── context.md            # full summary (auto-rebuilt from all files)
 ├── decisions.md          # architecture decisions (append-only log)
@@ -168,12 +168,12 @@ SQLite provides embedded persistence without external dependencies...
 
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET | `/api/brain/status` | Stats (file count, types, last update) |
-| GET | `/api/brain/search?q=` | Full-text search across all .md files |
-| POST | `/api/brain/save` | Save entry `{"type":"decision","content":"..."}` |
-| POST | `/api/brain/summarize` | Rebuild context.md from all files |
-| POST | `/api/brain/forget` | Clear all brain files |
-| POST | `/api/brain/open` | Open vault in Obsidian (`obsidian://open?path=`) |
+| GET | `/api/obsidian/status` | Stats (file count, types, last update) |
+| GET | `/api/obsidian/search?q=` | Full-text search across all .md files |
+| POST | `/api/obsidian/save` | Save entry `{"type":"decision","content":"..."}` |
+| POST | `/api/obsidian/summarize` | Rebuild context.md from all files |
+| POST | `/api/obsidian/forget` | Clear all vault files |
+| POST | `/api/obsidian/open` | Open vault in Obsidian (`obsidian://open?path=`) |
 
 ### SaveEntry routing by type
 
@@ -339,7 +339,7 @@ Component mounts
   → GET /api/status        (tool health)
   → GET /api/tool-details  (per-tool metrics)
   → GET /api/logs          (service status)
-  → GET /api/brain/status  (brain stats)
+  → GET /api/obsidian/status  (obsidian stats)
   → SSE /api/events        (real-time project_switch, status updates)
   → setInterval(pollAll, reloadSecs * 1000) if auto-reload enabled
 ```
@@ -376,12 +376,12 @@ Component mounts
 
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET | `/api/brain/status` | Brain stats |
-| GET | `/api/brain/search?q=` | Search brain files |
-| POST | `/api/brain/save` | Save entry |
-| POST | `/api/brain/summarize` | Rebuild context.md |
-| POST | `/api/brain/forget` | Clear all entries |
-| POST | `/api/brain/open` | Open in Obsidian |
+| GET | `/api/obsidian/status` | Obsidian stats |
+| GET | `/api/obsidian/search?q=` | Search vault files |
+| POST | `/api/obsidian/save` | Save entry |
+| POST | `/api/obsidian/summarize` | Rebuild context.md |
+| POST | `/api/obsidian/forget` | Clear all entries |
+| POST | `/api/obsidian/open` | Open in Obsidian |
 
 ### ProcessManager
 
@@ -458,6 +458,7 @@ Component mounts
 │   ├── rtk
 │   ├── headroom
 │   └── Codebase
+├── codebase/                     # Codebase indexes (CBM_CACHE_DIR=~/.dwyt/codebase)
 ├── data/                         # (reserved)
 ├── headroom-venv/                # Python virtualenv
 ├── logs/                         # ProcessManager captured logs
@@ -467,7 +468,7 @@ Component mounts
 │   └── headroom-stderr.log
 ├── projects/                     # Per-project data
 │   └── <sha12>/                  # project ID = SHA256(path)[:12]
-│       ├── brain/                # Obsidian vault
+│       ├── obsidian/              # Obsidian vault
 │       │   ├── index.md
 │       │   ├── context.md
 │       │   ├── decisions.md
@@ -627,7 +628,7 @@ User runs: dwyt .
        │
        ├─ AI client reads AGENTS.md / CLAUDE.md
        │   → Instructed to query Obsidian vault FIRST
-       │   → GET /api/brain/search?q=<task description>
+       │   → GET /api/obsidian/search?q=<task description>
        │
        ├─ API calls pass through Headroom proxy
        │   → ~34% token compression
@@ -636,7 +637,7 @@ User runs: dwyt .
        │   → 60-98% output compression
        │
        └─ After important changes:
-           → POST /api/brain/save {"type":"decision","content":"..."}
+           → POST /api/obsidian/save {"type":"decision","content":"..."}
 ```
 
 ---
@@ -663,14 +664,18 @@ dwyt uninstall
 This command performs a **full cleanup** in order:
 
 1. **Stops all running processes** — daemon, Headroom, Codebase, RTK
-2. **Removes `~/.dwyt/`** — bins, SQLite database, `state.json`, Obsidian brain vaults, logs, `env.sh`
+2. **Removes `~/.dwyt/`** — bins, SQLite database, `state.json`, Obsidian vaults, logs, Headroom venv
 3. **Removes symlinks** from `~/.local/bin/` — `dwyt`, `rtk`, `headroom`, `codebase-memory-mcp`
-4. **Cleans shell RC files** — removes the `# dwyt:source` block from `.zshrc`, `.bashrc`, `.zprofile`, `.profile`
-5. **Scans project directories** — removes `.dwyt/` folders found up to 3 levels deep under `~`, `~/Documents`, `~/Projects`, `~/dev`, `~/code`, `~/workspace`, `~/src`
+4. **Removes RTK data** — `~/.rtk/`, `~/.config/rtk/`, `~/.local/share/rtk/`, RTK binaries outside `~/.dwyt`
+5. **Removes Headroom data** — `~/.headroom/`, `~/.config/headroom/`, pip uninstall `headroom-ai`
+6. **Removes Codebase data** — `~/.dwyt/codebase/` (indexes), `~/.cache/codebase-memory-mcp/` (fallback), runs `codebase-memory-mcp uninstall -y`
+7. **Cleans shell RC files** — removes the `# dwyt:source` block from `.zshrc`, `.bashrc`, `.zprofile`, `.profile`
 
-After uninstall, restart your terminal to apply shell changes.
+> **Note:** The Obsidian app itself is NOT removed — only the DWYT-managed vaults inside `~/.dwyt/projects/`.
 
 > **Windows:** also removes the `dwytBin` entry from `HKCU\Environment\PATH` and cleans the PowerShell profile.
+
+After uninstall, restart your terminal to apply shell changes.
 
 ---
 

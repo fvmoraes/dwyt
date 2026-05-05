@@ -105,7 +105,25 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	cmd := exec.Command(binPath, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.Stdin = nil
+	// Redirect stdin to /dev/null — critical for MCP servers (like codebase-memory-mcp)
+	// that read from stdin by default. Without this they block waiting for input
+	// and the HTTP UI never starts.
+	devNull, err := os.Open(os.DevNull)
+	if err == nil {
+		cmd.Stdin = devNull
+		defer devNull.Close()
+	} else {
+		cmd.Stdin = nil
+	}
+	// Create a new process group/session so the child is not affected by
+	// terminal job control (SIGTTOU/SIGTTIN) — prevents state T (stopped).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	// Inherit environment and add CBM_CACHE_DIR so codebase stores data in ~/.dwyt/codebase
+	cmd.Env = os.Environ()
+	cbmCacheDir := filepath.Join(pm.logDir, "..", "codebase") // logDir is ~/.dwyt/logs
+	cbmCacheDir = filepath.Clean(cbmCacheDir)
+	cmd.Env = append(cmd.Env, "CBM_CACHE_DIR="+cbmCacheDir)
 
 	stdoutPath := filepath.Join(pm.logDir, name+"-stdout.log")
 	stderrPath := filepath.Join(pm.logDir, name+"-stderr.log")
@@ -126,7 +144,14 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 
 	if mp.HealthURL != "" {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", mp.Port, mp.HealthURL)
-		if err := waitForHealth(healthURL, 5, 10*time.Second); err != nil {
+		// codebase-memory-mcp takes longer to start — use a longer timeout
+		timeout := 10 * time.Second
+		retries := 5
+		if strings.Contains(binPath, "codebase") {
+			timeout = 30 * time.Second
+			retries = 10
+		}
+		if err := waitForHealth(healthURL, retries, timeout); err != nil {
 			// Kill process that failed healthcheck
 			if proc, procErr := os.FindProcess(mp.PID); procErr == nil {
 				proc.Signal(syscall.SIGKILL)

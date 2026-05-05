@@ -35,8 +35,11 @@ func initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC string) {
 			"# Headroom proxy — automatic compression of AI API calls\n"+
 			"export HEADROOM_PORT=8787\n"+
 			"export OPENAI_BASE_URL=\"http://127.0.0.1:8787/v1\"\n"+
-			"export ANTHROPIC_BASE_URL=\"http://127.0.0.1:8787\"\n",
+			"export ANTHROPIC_BASE_URL=\"http://127.0.0.1:8787\"\n"+
+			"# Codebase — store indexes in ~/.dwyt/codebase\n"+
+			"export CBM_CACHE_DIR=%q\n",
 		dwytData, dwytHome, dwytBin,
+		filepath.Join(dwytHome, "codebase"),
 	)
 	os.WriteFile(envFile, []byte(content), 0644)
 

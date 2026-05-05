@@ -121,12 +121,53 @@ func pollHeadroom() ToolStatus {
 
 func pollBrain() ToolStatus {
 	ts := ToolStatus{Name: "obsidian"}
-	// Obsidian vault is always available if DWYT is running (filesystem-based)
+
+	// Check if Obsidian app is installed
+	if !obsidianAppInstalled() {
+		ts.State = StateNotInstalled
+		ts.Running = false
+		ts.Healthy = false
+		ts.Details = "Obsidian app not installed"
+		return ts
+	}
+
+	// Obsidian is installed — vault is always available (filesystem-based)
 	ts.Running = true
 	ts.Healthy = true
 	ts.State = StateRunning
 	ts.Details = "Obsidian vault active"
 	return ts
+}
+
+// obsidianAppInstalled checks if the Obsidian desktop app is installed.
+func obsidianAppInstalled() bool {
+	if _, err := exec.LookPath("obsidian"); err == nil {
+		return true
+	}
+	home, _ := os.UserHomeDir()
+	locations := []string{
+		filepath.Join(home, ".local", "bin", "obsidian"),
+		filepath.Join(home, ".local", "share", "applications", "obsidian.desktop"),
+		"/usr/bin/obsidian",
+		"/usr/local/bin/obsidian",
+		"/opt/obsidian/obsidian",
+		"/opt/Obsidian/obsidian",
+		filepath.Join(home, "AppData", "Local", "obsidian", "obsidian.exe"),
+		"/Applications/Obsidian.app/Contents/MacOS/Obsidian",
+	}
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			return true
+		}
+	}
+	// Also check for AppImage in common locations
+	entries, _ := os.ReadDir(filepath.Join(home, ".local", "bin"))
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.Name()), "obsidian") {
+			return true
+		}
+	}
+	return false
 }
 
 func GetRTKMetrics(dwytBin string) *RTKMetrics {
@@ -283,8 +324,12 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 		states["rtk"] = StateRunning
 	}
 
-	// brain (always running — filesystem-based)
-	states["obsidian"] = StateRunning
+	// obsidian — only active if app is installed
+	if obsidianAppInstalled() {
+		states["obsidian"] = StateRunning
+	} else {
+		states["obsidian"] = StateNotInstalled
+	}
 
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states

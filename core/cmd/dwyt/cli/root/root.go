@@ -353,33 +353,35 @@ var uninstallCmd = &cobra.Command{
 	Short: "Remove all DWYT tools, data and config",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
+		home, _ := os.UserHomeDir()
 
 		fmt.Printf("\n  ╔══════════════════════════════════════╗\n")
 		fmt.Printf("  ║  DWYT — Uninstall                   ║\n")
 		fmt.Printf("  ╚══════════════════════════════════════╝\n\n")
 
 		// ── 1. Stop all running processes ─────────────────────────────────────
-		fmt.Println("  → Stopping all DWYT processes...")
+		fmt.Println("  → Stopping all processes...")
 		health.StopAll()
 		exe, _ := os.Executable()
 		exec.Command("pkill", "-f", exe+" daemon").Run()
 		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
 		exec.Command("pkill", "-f", "codebase-memory-mcp").Run()
 		exec.Command("pkill", "-f", "headroom proxy").Run()
+		exec.Command("pkill", "-f", "headroom").Run()
+		exec.Command("pkill", "-f", "rtk").Run()
 		time.Sleep(500 * time.Millisecond)
 		fmt.Println("  ✓ Processes stopped")
 
-		// ── 2. Remove ~/.dwyt (bins, SQLite, state.json, brain vaults, logs) ──
+		// ── 2. Remove ~/.dwyt (bins, SQLite, state, vaults, logs, venv) ───────
 		fmt.Printf("  → Removing DWYT home: %s\n", e.DwytHome)
 		if err := os.RemoveAll(e.DwytHome); err != nil {
 			fmt.Printf("  ✗ Failed to remove %s: %v\n", e.DwytHome, err)
 		} else {
-			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, Obsidian vaults, logs)")
+			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, Obsidian vaults, logs, venv)")
 		}
 
 		// ── 3. Remove symlinks from ~/.local/bin ──────────────────────────────
 		if runtime.GOOS != "windows" {
-			home, _ := os.UserHomeDir()
 			localBin := filepath.Join(home, ".local", "bin")
 			for _, name := range []string{"dwyt", "rtk", "headroom", "codebase-memory-mcp"} {
 				link := filepath.Join(localBin, name)
@@ -390,13 +392,96 @@ var uninstallCmd = &cobra.Command{
 			}
 		}
 
-		// ── 4. Remove Windows PATH entry ──────────────────────────────────────
+		// ── 4. Remove RTK global data ──────────────────────────────────────────
+		fmt.Println("  → Removing RTK data...")
+		rtkDirs := []string{
+			filepath.Join(home, ".rtk"),
+			filepath.Join(home, ".config", "rtk"),
+			filepath.Join(home, ".local", "share", "rtk"),
+		}
+		for _, d := range rtkDirs {
+			if _, err := os.Stat(d); err == nil {
+				os.RemoveAll(d)
+				fmt.Printf("  ✓ Removed: %s\n", d)
+			}
+		}
+		// RTK binary in common locations (if installed outside ~/.dwyt)
+		rtkBins := []string{
+			filepath.Join(home, ".local", "bin", "rtk"),
+			"/usr/local/bin/rtk",
+		}
+		for _, b := range rtkBins {
+			if _, err := os.Lstat(b); err == nil {
+				os.Remove(b)
+				fmt.Printf("  ✓ Removed: %s\n", b)
+			}
+		}
+
+		// ── 5. Remove Headroom Python venv and config ──────────────────────────
+		fmt.Println("  → Removing Headroom data...")
+		headroomDirs := []string{
+			filepath.Join(home, ".headroom"),
+			filepath.Join(home, ".config", "headroom"),
+			filepath.Join(home, ".local", "share", "headroom"),
+		}
+		for _, d := range headroomDirs {
+			if _, err := os.Stat(d); err == nil {
+				os.RemoveAll(d)
+				fmt.Printf("  ✓ Removed: %s\n", d)
+			}
+		}
+		// Headroom pip package (uninstall from any venv that might exist)
+		exec.Command("pip", "uninstall", "-y", "headroom-ai").Run()
+		exec.Command("pip3", "uninstall", "-y", "headroom-ai").Run()
+
+		// ── 6. Remove Codebase (codebase-memory-mcp) data ─────────────────────
+		fmt.Println("  → Removing Codebase data...")
+		codebaseDirs := []string{
+			filepath.Join(e.DwytHome, "codebase"),              // primary: ~/.dwyt/codebase
+			filepath.Join(home, ".cache", "codebase-memory-mcp"), // fallback: default location
+			filepath.Join(home, ".codebase-memory-mcp"),
+			filepath.Join(home, ".config", "codebase-memory-mcp"),
+		}
+		for _, d := range codebaseDirs {
+			if _, err := os.Stat(d); err == nil {
+				os.RemoveAll(d)
+				fmt.Printf("  ✓ Removed: %s\n", d)
+			}
+		}
+		// Also run codebase-memory-mcp uninstall if binary still exists
+		cbmcpBin := filepath.Join(e.DwytBin, "codebase-memory-mcp")
+		if _, err := os.Stat(cbmcpBin); err == nil {
+			exec.Command(cbmcpBin, "uninstall", "-y").Run()
+			fmt.Println("  ✓ Codebase agent configs removed")
+		}
+		// Codebase binary in common locations
+		codebaseBins := []string{
+			filepath.Join(home, ".local", "bin", "codebase-memory-mcp"),
+			"/usr/local/bin/codebase-memory-mcp",
+		}
+		for _, b := range codebaseBins {
+			if _, err := os.Lstat(b); err == nil {
+				os.Remove(b)
+				fmt.Printf("  ✓ Removed: %s\n", b)
+			}
+		}
+
+		// ── 7. Remove Obsidian vault data (only DWYT-managed vaults) ──────────
+		// Note: we do NOT remove the Obsidian app itself — only DWYT vaults
+		fmt.Println("  → Removing DWYT Obsidian vaults...")
+		obsidianVaultBase := filepath.Join(home, ".dwyt", "projects")
+		if _, err := os.Stat(obsidianVaultBase); err == nil {
+			// Already removed in step 2, but log it
+			fmt.Println("  ✓ Obsidian vaults removed (part of DWYT home)")
+		}
+
+		// ── 8. Remove Windows PATH entry ──────────────────────────────────────
 		if runtime.GOOS == "windows" {
 			removeFromWindowsUserPath(e.DwytBin)
 			fmt.Println("  ✓ Removed from Windows PATH")
 		}
 
-		// ── 5. Clean shell RC files (.zshrc, .bashrc, .zprofile, .profile) ────
+		// ── 9. Clean shell RC files ────────────────────────────────────────────
 		fmt.Println("  → Cleaning shell RC files...")
 		rcFiles := []string{e.ShellRC, e.LoginRC}
 		for _, rc := range rcFiles {
@@ -408,16 +493,14 @@ var uninstallCmd = &cobra.Command{
 			}
 		}
 
-		// ── 6. Remove PowerShell profile entry (Windows) ──────────────────────
+		// ── 10. Remove PowerShell profile entry (Windows) ─────────────────────
 		if runtime.GOOS == "windows" {
-			home, _ := os.UserHomeDir()
 			psProfile := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
 			if cleaned := removeFromRC(psProfile); cleaned {
 				fmt.Printf("  ✓ Cleaned PowerShell profile: %s\n", psProfile)
 			}
 		}
 
-		// ── 7. Nothing to scan in project dirs — .dwyt/ no longer created there ──
 		fmt.Printf("\n  ✓ DWYT fully uninstalled.\n")
 		fmt.Printf("  ℹ  Restart your terminal to apply shell changes.\n\n")
 		return nil

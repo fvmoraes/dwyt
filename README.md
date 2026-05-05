@@ -47,7 +47,7 @@ O DWYT é um binário único (~37MB) que carrega a UI React embutida. Tudo funci
 ```
 dwyt .
   ├── Detecta o projeto
-  ├── Carrega o vault Obsidian (~/.dwyt/projects/<id>/brain/)
+  ├── Carrega o vault Obsidian (~/.dwyt/projects/<id>/obsidian/)
   ├── ProcessManager sobe Codebase + Headroom em background
   ├── RTK ativo como CLI tool
   └── UI abre em http://localhost:2737
@@ -59,7 +59,7 @@ dwyt .
 
 ### Obsidian (Project Brain) — **obrigatório**
 
-O cérebro do DWYT. Cada projeto ganha um **vault Obsidian** em `~/.dwyt/projects/<id>/brain/` com markdowns estruturados:
+O cérebro do DWYT. Cada projeto ganha um **vault Obsidian** em `~/.dwyt/projects/<id>/obsidian/` com markdowns estruturados:
 
 ```
 brain/
@@ -215,7 +215,7 @@ Ao clicar em **Instalar →**, o DWYT baixa e configura Codebase, Headroom e RTK
 │   └── headroom-stderr.log
 ├── projects/                    # per-project Obsidian vaults
 │   └── <sha12>/
-│       ├── brain/               # vault Obsidian (markdowns)
+│       ├── obsidian/              # vault Obsidian (markdowns)
 │       └── project.json         # metadata do projeto
 ├── env.sh                       # variáveis de ambiente (OPENAI_BASE_URL, etc.)
 ├── dwyt.db                      # SQLite (projetos, config)

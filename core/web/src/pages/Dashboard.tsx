@@ -157,6 +157,8 @@ export default function Dashboard() {
   // Format uptime from detail — only show min/sec
   function fmtUptimeFromDet(det: ToolDetail | undefined): string {
     if (!det || det.uptime_secs < 0) return '—'
+    if (det.uptime_secs === 0 && det.uptime_label) return det.uptime_label
+    if (det.uptime_secs === 0) return '—'
     return fmtUptime(det.uptime_secs) || '—'
   }
 
@@ -298,7 +300,6 @@ export default function Dashboard() {
   const rtkSaved     = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
   const obsidianCount      = obsidianStats?.total_files || 0
-  const obsidianEstimate   = obsidianCount > 0 ? obsidianCount * 5000 : 0
 
   function calcWithout() {
     let w = 0
@@ -445,7 +446,7 @@ export default function Dashboard() {
               {[
                 { label: t.terminalOptimized, saved: rtkSaved, color: '#2f9e44' },
                 { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
-                { label: t.obsidianActive, saved: obsidianEstimate, color: '#f08d49' },
+                { label: t.obsidianActive, saved: 0, color: '#f08d49' },
                 { label: t.codeMap, saved: 0, color: '#339af0' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -597,7 +598,6 @@ export default function Dashboard() {
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <CardHeader label={t.obsidianActive} color="#f08d49" state={state} description={t.obsidianDesc} />
               <Hr />
-              <Row label={t.tokensSavedLabel} value={obsidianEstimate > 0 ? fmtN(obsidianEstimate) + ' est.' : '—'} />
               <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <RepoRow />

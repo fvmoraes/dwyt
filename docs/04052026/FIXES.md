@@ -366,7 +366,7 @@ tail -f ~/.dwyt/logs/codebase-stdout.log
 curl http://127.0.0.1:2737/api/state | jq
 
 # Ver brain status
-curl http://127.0.0.1:2737/api/brain/status | jq
+curl http://127.0.0.1:2737/api/obsidian/status | jq
 ```
 
 ---
