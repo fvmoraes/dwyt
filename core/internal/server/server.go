@@ -1244,8 +1244,8 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 // apiCodebaseOpenUI ensures the codebase-memory-mcp UI is running on port 9749,
 // starting it if needed, then returns the URL so the frontend can open it.
 func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
-	const uiPort = "9749"
-	const uiURL  = "http://localhost:" + uiPort
+	const uiPort = 9749
+	uiURL := fmt.Sprintf("http://localhost:%d", uiPort)
 
 	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
@@ -1253,18 +1253,25 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
-	// Check if already running
+	// Already running — just return the URL
 	if health.ProbeURL(uiURL + "/health") {
 		c.JSON(200, gin.H{"url": uiURL, "started": false})
 		return
 	}
 
-	// Not running — start it
-	check, err := health.StartService("codebase-ui", bin, uiURL+"/health", "--ui=true", "--port="+uiPort)
-	if err != nil || !check.Healthy {
-		log.Error("failed to start codebase UI", log.Fields{"error": check.Error})
-		c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "may still be starting"})
+	// Start via ProcessManager (handles port, healthcheck, logs)
+	st, err := ds.ProcMan.Start("codebase")
+	if err != nil {
+		log.Error("failed to start codebase UI", log.Fields{"error": err.Error()})
+		// Return URL anyway — it may still be starting
+		c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "starting, please wait a moment"})
 		return
+	}
+
+	port := uiPort
+	if st != nil && st.Port > 0 {
+		port = st.Port
+		uiURL = fmt.Sprintf("http://localhost:%d", port)
 	}
 
 	c.JSON(200, gin.H{"url": uiURL, "started": true})

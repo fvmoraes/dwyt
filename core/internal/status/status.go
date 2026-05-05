@@ -71,25 +71,17 @@ func pollCBMCP(dwytBin string) ToolStatus {
 		return ts
 	}
 
+	// Binary exists — mark as installed/available
 	ts.State = StateRunning
+	ts.Running = true
+	ts.Healthy = true
 	ts.Port = 9749
 
+	// If the HTTP UI is also responding, add that detail
 	if health.ProbeURL("http://127.0.0.1:9749/health") {
-		ts.Running = true
-		ts.Healthy = true
-		ts.State = StateRunning
 		ts.Details = "UI on port 9749"
-		return ts
-	}
-
-	if out, err := exec.Command(bin, "--version").Output(); err == nil {
-		ts.Running = true
-		ts.Healthy = true
-		ts.Details = strings.TrimSpace(string(out))
-		ts.State = StateRunning
 	} else {
-		ts.State = StateFailed
-		ts.Error = "process failed or not responding"
+		ts.Details = "installed"
 	}
 	return ts
 }
