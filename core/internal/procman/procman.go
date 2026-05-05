@@ -117,7 +117,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	}
 	// Create a new process group/session so the child is not affected by
 	// terminal job control (SIGTTOU/SIGTTIN) — prevents state T (stopped).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(cmd)
 
 	// Inherit environment and add CBM_CACHE_DIR so codebase stores data in ~/.dwyt/codebase
 	cmd.Env = os.Environ()
