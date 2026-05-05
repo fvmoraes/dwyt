@@ -696,6 +696,17 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 			go func() {
 				install.ObsidianMCP(ds.DwytBin)
 			}()
+			// Install Obsidian desktop app if not already present
+			go func() {
+				if !brain.ObsidianInstalled() {
+					setStatus("obsidian-app", "installing")
+					if _, obsErr := install.InstallObsidianApp(); obsErr != nil {
+						setStatus("obsidian-app", "error: "+obsErr.Error())
+					} else {
+						setStatus("obsidian-app", "ok")
+					}
+				}
+			}()
 		case "obsidian-mcp":
 			err = install.ObsidianMCP(ds.DwytBin)
 			}

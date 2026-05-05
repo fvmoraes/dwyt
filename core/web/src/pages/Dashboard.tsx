@@ -115,7 +115,6 @@ export default function Dashboard() {
   const [savingBrain,  setSavingBrain]  = useState(false)
   const [openingBrain, setOpeningBrain] = useState(false)
   const [openingDir,   setOpeningDir]   = useState(false)
-  const [installingObsidian, setInstallingObsidian] = useState(false)
   const [saveType,     setSaveType]     = useState('note')
   const [saveContent,  setSaveContent]  = useState('')
   const [mcpRegistry,  setMCPRegistry]  = useState<Record<string, { status: string; port: number; installed: boolean; enabled: boolean }>>({})
@@ -645,25 +644,6 @@ export default function Dashboard() {
                   setOpeningDir(false)
                 }} />
               </div>
-              {state !== 'active' && (
-                <Button variant="success" size="xs" label={installingObsidian ? '...' : (t.installObsidian || 'Install Obsidian')} onClick={async () => {
-                  setInstallingObsidian(true)
-                  try { await api.installObsidian() } catch { /* ignore */ }
-                  let attempts = 0
-                  const checker = setInterval(async () => {
-                    attempts++
-                    try {
-                      const s = await api.getObsidianInstallStatus()
-                      if (s.status !== 'installing') {
-                        clearInterval(checker)
-                        setInstallingObsidian(false)
-                        pollAll()
-                      }
-                    } catch { /* ignore */ }
-                    if (attempts > 120) { clearInterval(checker); setInstallingObsidian(false) }
-                  }, 2000)
-                }} />
-              )}
             </div>
           )
         })()}
