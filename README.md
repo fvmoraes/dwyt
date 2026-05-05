@@ -1,90 +1,90 @@
 # DWYT — Don't Waste Your Tokens
 
-> O orquestrador invisível que reduz o consumo de tokens dos seus clientes de IA.
+> The invisible orchestrator that reduces token consumption across your AI clients.
 
-DWYT orquestra quatro ferramentas que reduzem drasticamente o consumo de tokens em clientes como Claude Code, Codex, Copilot, Kiro, Cursor e OpenCode — tudo controlado por uma UI web, sem comandos externos.
+DWYT orchestrates four tools that drastically reduce token usage in clients like Claude Code, Codex, Copilot, Kiro, Cursor, and OpenCode — all managed through a single web UI, with no CLI configuration needed.
 
 ---
 
-## Instalação em um comando
+## One-command install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 ```
 
-O script detecta sua plataforma, baixa o binário da release, configura o PATH e orienta os próximos passos.
+The script detects your platform, downloads the binary from GitHub Releases, configures PATH, and guides you through the next steps.
 
 ---
 
-## Como usar
+## Usage
 
 ```bash
-cd ~/meu-projeto
+cd ~/my-project
 dwyt .
 ```
 
-A UI abre em `http://localhost:2737` com o projeto pré-carregado. **Nenhuma configuração por CLI — tudo é feito pela interface.**
+The UI opens at `http://localhost:2737` with your project pre-loaded. **Everything is configured through the UI — no CLI commands needed.**
 
-### Comandos disponíveis
+### Commands
 
-| Comando | O que faz |
-|---------|-----------|
-| `dwyt .` | Abre no diretório atual |
-| `dwyt /path` | Abre em um diretório específico |
-| `dwyt` | Abre no CWD |
-| `dwyt stop` | Para todos os serviços |
-| `dwyt status` | Status rápido no terminal |
-| `dwyt version` | Versão atual |
-| `dwyt reinstall` | Apaga `~/.dwyt` e reinstala |
-| `dwyt uninstall` | Remove todas as ferramentas |
+| Command | Description |
+|---------|-------------|
+| `dwyt .` | Open in current directory |
+| `dwyt /path` | Open in a specific directory |
+| `dwyt` | Open in CWD |
+| `dwyt stop` | Stop all services |
+| `dwyt status` | Quick terminal status |
+| `dwyt version` | Current version |
+| `dwyt reinstall` | Wipe `~/.dwyt` and reinstall |
+| `dwyt uninstall` | Remove all tools |
 
 ---
 
-## Arquitetura
+## Architecture
 
-O DWYT é um binário único (~37MB) que carrega a UI React embutida. Tudo funciona sem dependências externas — a UI, API e serviços são servidos pelo mesmo processo.
+DWYT is a single self-contained binary (~37MB) with the React UI embedded inside. No runtime dependencies — the UI, API, and services all run from one process.
 
 ```
 dwyt .
-  ├── Detecta o projeto
-  ├── Carrega o vault Obsidian (~/.dwyt/projects/<id>/obsidian/)
-  ├── ProcessManager sobe Codebase + Headroom em background
-  ├── RTK ativo como CLI tool
-  └── UI abre em http://localhost:2737
+  ├── Detects project directory
+  ├── Loads Obsidian vault (~/.dwyt/projects/<id>/obsidian/)
+  ├── ProcessManager starts Codebase + Headroom in background
+  ├── RTK active as CLI tool
+  └── UI opens at http://localhost:2737
 ```
 
 ---
 
-## As ferramentas
+## The Tools
 
-### Obsidian (Project Brain) — **obrigatório**
+### Obsidian — mandatory
 
-O cérebro do DWYT. Cada projeto ganha um **vault Obsidian** em `~/.dwyt/projects/<id>/obsidian/` com markdowns estruturados:
+The brain of DWYT. Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>/obsidian/` with structured markdown files:
 
 ```
-brain/
-├── index.md         # índice do projeto
-├── context.md       # resumo completo (rebuild automático)
-├── decisions.md     # log de decisões de arquitetura
-├── tasks.md         # tarefas ativas
-├── knowledge/       # artigos de conhecimento
-└── logs/            # sessões, erros, comandos executados
+obsidian/
+├── index.md         # project index
+├── context.md       # auto-rebuilt summary
+├── decisions.md     # architecture decisions log
+├── tasks.md         # active tasks
+├── knowledge/       # knowledge base articles
+└── logs/            # sessions, errors, commands
 ```
 
-**Formato**: frontmatter YAML (`tags`, `date`, `type`) em cada arquivo. Compatível com busca nativa do Obsidian e plugins como Dataview.
+**Format**: frontmatter YAML (`tags`, `date`, `type`) in every file. Compatible with Obsidian's native search and Dataview plugin.
 
-**Botão "Open in Obsidian"** no card da UI abre o vault diretamente no app.
+**"Open in Obsidian"** button on the card opens the vault directory directly.
 
-**IAs são instruídas** a consultar o vault antes de qualquer operação — eliminando reconstrução de contexto.
+**IAs are instructed** to query the vault before any operation — eliminating context rebuilds.
 
-| API | Uso |
-|-----|-----|
-| `GET /api/brain/search?q=` | Buscar contexto antes de começar tarefa |
-| `POST /api/brain/save` | Salvar decisão, erro, tarefa ou nota |
+| API | Purpose |
+|-----|---------|
+| `GET /api/obsidian/search?q=` | Search vault before starting a task |
+| `POST /api/obsidian/save` | Save a decision, error, task, or note |
 
-### Headroom — compressão de API automática
+### Headroom — automatic API compression
 
-Proxy que comprime chamadas às APIs de IA em trânsito (~34% de redução). Usa o comando nativo do Headroom para configurar cada cliente de IA automaticamente:
+A proxy that compresses AI API calls in transit (~34% reduction). Uses Headroom's native commands to configure each AI client automatically:
 
 ```bash
 # DWYT runs these automatically when Headroom starts:
@@ -94,23 +94,24 @@ headroom wrap cursor      # Cursor
 headroom wrap copilot     # GitHub Copilot CLI
 ```
 
-Ao iniciar o Headroom (pelo botão Start ou automaticamente com `dwyt .`), o DWYT executa `headroom wrap` para cada cliente de IA habilitado no Setup. Ao parar, executa `headroom unwrap` para remover a configuração.
+When Headroom starts (via the Start button or automatically with `dwyt .`), DWYT runs `headroom wrap` for every enabled AI client. When stopped, `headroom unwrap` cleans up.
 
-As variáveis de ambiente também são exportadas automaticamente pelo `env.sh`:
+Environment variables are also auto-exported by `env.sh`:
 
 ```bash
+export HEADROOM_PORT=8787
 export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
-| Botão | Ação |
-|-------|------|
-| **Open Stats** | Abre estatísticas de compressão em tempo real |
-| **Start/Stop** | Inicia/para o proxy + wrap/unwrap automático dos clientes |
+| Button | Action |
+|--------|--------|
+| **Open Stats** | Real-time compression statistics |
+| **Start/Stop** | Start/stop proxy + auto wrap/unwrap clients |
 
-### RTK — compressão de terminal
+### RTK — terminal compression
 
-CLI tool que comprime output de comandos shell em 60–98%. Basta prefixar comandos com `rtk`:
+CLI tool that compresses shell command output by 60–98%. Just prefix commands with `rtk`:
 
 ```bash
 rtk git status
@@ -118,17 +119,17 @@ rtk git log --oneline
 rtk cargo test
 ```
 
-Métricas filtradas por projeto — o card mostra comandos executados e tokens economizados no diretório atual.
+Metrics are filtered per project — the card shows commands executed and tokens saved in the current directory.
 
-### Codebase — mapa estrutural do código (opcional)
+### Codebase — structural code map (optional)
 
-Grafo de código que permite navegação estrutural sem grep arquivo por arquivo. **Indexação sob demanda** — o usuário clica "Index" quando quiser.
+A code graph that enables structural navigation without file-by-file grep. **On-demand indexing** — click "Index" when you want to analyze the codebase.
 
-Gerenciado pelo **ProcessManager** interno com:
-- Start/Stop com healthcheck (5 tentativas, backoff exponencial)
-- Logs stdout/stderr capturados (`~/.dwyt/logs/codebase-*.log`)
-- Porta dinâmica (se 9749 ocupada, tenta alternativas)
-- Botão **View Logs** para diagnóstico real em caso de erro
+Managed by the internal **ProcessManager**:
+- Start/Stop with healthcheck (5 retries, exponential backoff)
+- Stdout/stderr captured to `~/.dwyt/logs/codebase-*.log`
+- Dynamic port (9749, falls back to alternatives if occupied)
+- **View Logs** button for real diagnostics on failure
 
 ---
 
@@ -138,32 +139,32 @@ Gerenciado pelo **ProcessManager** interno com:
 ┌───────────────────────────────────────────────────────────────────┐
 │  🤓 DWYT          [Auto Off 5s 10s] [↺ Refresh] [Logs] [← Setup] │
 ├───────────────────────────────────────────────────────────────────┤
-│  🛡️ meu-projeto  DWYT is protecting this project  🧠 12 obsidian files │
+│  🛡️ my-project  DWYT is protecting this project  🧠 12 obsidian files │
 │                                                                   │
 │  ┌───────────────────────────────────────────────────────────┐    │
-│  │  Sem DWYT        │  Com DWYT        │  Economia total     │    │
-│  │  2.4M tokens     │  480K tokens     │  1.9M  ↓ 80%       │    │
-│  │  seriam gastos   │  gastos          │                     │    │
-│  │                  │                  │  Obsidian | RTK     │    │
-│  │                  │                  │  Headroom | Codebase│    │
+│  │  Without DWYT     │  With DWYT        │  Total Savings    │    │
+│  │  2.4M tokens      │  480K tokens      │  1.9M  ↓ 80%     │    │
+│  │  would be spent   │  spent            │                   │    │
+│  │                   │                   │  Obsidian | RTK   │    │
+│  │                   │                   │  Headroom|Codebase│    │
 │  └───────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌────────────────────────┐  ┌────────────────────────┐          │
 │  │  CODEBASE         🟢   │  │  RTK               🟢 │          │
 │  │  Code graph — …        │  │  Terminal output —  … │          │
 │  │  ─────────────────────  │  │  ─────────────────────  │          │
-│  │  UPTIME       2m 3s    │  │  COMANDOS          847 │          │
+│  │  UPTIME       2m 3s    │  │  COMMANDS         847 │          │
 │  │  STATUS     Indexed    │  │  TOKENS SAVED     31M │          │
 │  │  ▶ Start  ■ Stop       │  │  % SAVED          61% │          │
-│  │  [/path] [Index]       │  │  ─────────────────────  │          │
-│  │  Open Graph →          │  │  ████████████░░░░░░░░░  │          │
-│  └────────────────────────┘  └────────────────────────┘          │
+│  │  [/path] [Index]       │  │  ████████████░░░░░░░░░  │          │
+│  │  Open Graph →          │  └────────────────────────┘          │
+│  └────────────────────────┘                                       │
 │  ┌────────────────────────┐  ┌────────────────────────┐          │
 │  │  HEADROOM         🟢   │  │  OBSIDIAN          🟢 │          │
 │  │  API call compression  │  │  Obsidian vault — …   │          │
 │  │  ─────────────────────  │  │  ─────────────────────  │          │
 │  │  REQUESTS         234  │  │  FILES             12 │          │
-│  │  TOKENS SAVED     8M  │  │  UPTIME         1h 2m │          │
+│  │  TOKENS SAVED     8M  │  │  ACTIVE         1h 2m │          │
 │  │  COMPRESSION      34%  │  │  ▶ Save  [Search...]  │          │
 │  │  PORT             8787  │  │  Rebuild | Forget     │          │
 │  │  ▶ Start  ■ Stop       │  │  🧠 Open in Obsidian  │          │
@@ -172,19 +173,19 @@ Gerenciado pelo **ProcessManager** interno com:
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Cada card** mostra nome da ferramenta, descrição do que faz e status real (🟢 online / 🟡 parado / 🔴 não instalado).
+**Each card** shows the tool name, a one-line description, and real status (🟢 online / 🟡 stopped / 🔴 not installed).
 
 ---
 
 ## Setup
 
-Na primeira execução, a UI abre no Setup. **Obsidian é obrigatório** e já vem pré-selecionado. As demais ferramentas são opcionais.
+On first run, the UI opens the Setup Wizard. **Obsidian is mandatory** and pre-selected. Other tools are optional.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  🤓 DWYT                    [Instalar →] [Dashboard →]  │
+│  🤓 DWYT                    [Install →] [Dashboard →]   │
 ├─────────────────────────────────────────────────────────┤
-│  ▾ Ferramentas              4 de 4 selecionadas         │
+│  ▾ Tools                     4 of 4 selected            │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │ ● Obsidian (ON)  Obsidian vault — project       │    │
 │  │ ● Codebase       Code graph — structural        │    │
@@ -192,55 +193,55 @@ Na primeira execução, a UI abre no Setup. **Obsidian é obrigatório** e já v
 │  │ ● RTK            Terminal output compression    │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
-│  ▾ IAs / Clientes           6 de 6 selecionados         │
+│  ▾ AI Clients                6 of 6 selected            │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │ ● Claude Code   ● Codex   ● GitHub Copilot      │    │
 │  │ ● Kiro          ● Cursor  ● OpenCode            │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
-│  ▾ Projeto                  /home/user/meu-projeto      │
+│  ▾ Project                   /home/user/my-project      │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │ /home/user/meu-projeto          [Selecionar]    │    │
+│  │ /home/user/my-project           [Select]        │    │
 │  └─────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-Ao clicar em **Instalar →**, o DWYT baixa e configura Codebase, Headroom e RTK. Gera os arquivos de instrução para cada cliente de IA. Sobe os serviços. Abre o Dashboard.
+Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK. Generates instruction files for each AI client. Runs `headroom wrap` for supported clients. Starts services. Opens the Dashboard.
 
 ---
 
-## Onde os dados ficam
+## Where data lives
 
 ### Linux / macOS
 
 ```
 ~/.dwyt/
-├── bin/                         # binários das ferramentas
-├── data/                        # banco SQLite
-├── headroom-venv/               # Python virtualenv do Headroom
-├── logs/                        # stdout/stderr dos serviços
+├── bin/                         # tool binaries
+├── codebase/                    # code graph data (CBM_CACHE_DIR)
+├── headroom-venv/               # Python virtualenv
+├── logs/                        # service stdout/stderr
 │   ├── codebase-stdout.log
 │   ├── codebase-stderr.log
 │   ├── headroom-stdout.log
 │   └── headroom-stderr.log
-├── projects/                    # per-project Obsidian vaults
+├── projects/                    # per-project vaults
 │   └── <sha12>/
-│       ├── obsidian/              # vault Obsidian (markdowns)
-│       └── project.json         # metadata do projeto
-├── env.sh                       # variáveis de ambiente (OPENAI_BASE_URL, etc.)
-├── dwyt.db                      # SQLite (projetos, config)
-└── state.json                   # estado runtime (PIDs, portas, erros)
+│       ├── obsidian/            # Obsidian vault (markdowns)
+│       └── project.json         # project metadata
+├── env.sh                       # environment variables
+├── dwyt.db                      # SQLite (projects + config)
+└── state.json                   # runtime state (PIDs, ports, errors)
 ```
 
 ### Windows
 
 ```
-%APPDATA%\dwyt\                  # C:\Users\<user>\AppData\Roaming\dwyt\
+%APPDATA%\dwyt\
 ├── bin\
-├── data\
+├── codebase\
 ├── headroom-venv\
 ├── logs\
-├── projects\                    # per-project Obsidian vaults
+├── projects\
 ├── env.ps1
 ├── dwyt.db
 └── state.json
@@ -248,16 +249,16 @@ Ao clicar em **Instalar →**, o DWYT baixa e configura Codebase, Headroom e RTK
 
 ---
 
-## Arquivos gerados por projeto
+## Generated project files
 
-O Setup cria estes arquivos no diretório do projeto (todos adicionados ao `.gitignore`):
+Setup creates these files in the project directory (all added to `.gitignore`):
 
 ```
-<projeto>/
-├── .mcp.json                      # config do codebase-memory-mcp
-├── AGENTS.md                      # instruções para Codex, Kiro, Cursor, OpenCode
-├── CLAUDE.md                      # instruções para Claude Code
-├── opencode.json                  # config do OpenCode
+<project>/
+├── .mcp.json                      # codebase-memory-mcp MCP config
+├── AGENTS.md                      # instructions for Codex, Kiro, Cursor, OpenCode
+├── CLAUDE.md                      # instructions for Claude Code
+├── opencode.json                  # OpenCode config
 ├── .github/
 │   └── copilot-instructions.md
 ├── .cursor/
@@ -266,17 +267,17 @@ O Setup cria estes arquivos no diretório do projeto (todos adicionados ao `.git
     └── steering/dwyt.md
 ```
 
-**Todos instruem as IAs** nesta ordem de prioridade:
-1. **Obsidian FIRST** — consulte o vault antes de qualquer operação
-2. **Headroom** — compressão automática via env vars
-3. **RTK** — prefixe comandos shell com `rtk`
-4. **Codebase MCP** — apenas para exploração estrutural
+**All instruct IAs** in this priority order:
+1. **Obsidian FIRST** — query the vault before any operation
+2. **Headroom** — automatic compression via `headroom wrap`
+3. **RTK** — prefix shell commands with `rtk`
+4. **Codebase MCP** — structural exploration only when needed
 
 ---
 
-## Clientes suportados
+## Supported clients
 
-| Cliente | Arquivos gerados |
+| Client | Generated files |
 |---|---|
 | **Claude Code** | `CLAUDE.md`, `.claude/` |
 | **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` |
@@ -287,21 +288,21 @@ O Setup cria estes arquivos no diretório do projeto (todos adicionados ao `.git
 
 ---
 
-## URLs da UI
+## UI URLs
 
-| URL | Descrição |
+| URL | Description |
 |---|---|
-| `/#/` | Setup |
-| `/#/dashboard` | Dashboard (todos os repositórios) |
-| `/#/dashboard?project=/path/repo` | Dashboard com projeto específico |
-| `/#/dashboard?reload=5` | Auto-reload de 5s |
-| `/#/dashboard?logs=1` | Painel de logs aberto |
+| `/#/` | Setup Wizard |
+| `/#/dashboard` | Dashboard (all repositories) |
+| `/#/dashboard?project=/path` | Dashboard with specific project |
+| `/#/dashboard?reload=5` | Auto-reload every 5s |
+| `/#/dashboard?logs=1` | Logs panel open |
 
 ---
 
-## Headroom — detalhes técnicos
+## Headroom — technical details
 
-O Headroom sobe automaticamente com `dwyt .` em background na porta 8787. O `env.sh` injetado no shell RC exporta:
+Headroom starts automatically in background on port 8787 with `dwyt .`. The `env.sh` injected into your shell RC exports:
 
 ```bash
 export HEADROOM_PORT=8787
@@ -309,38 +310,47 @@ export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
-Ao iniciar, injeta blocos `<!-- dwyt:headroom-proxy -->` nos arquivos de config dos clientes. Ao parar (pelo botão Stop na UI), remove esses blocos. **Fallback automático**: se o Headroom cair, os clientes voltam a usar os endpoints padrão das APIs.
+On start, DWYT runs `headroom wrap` for each enabled AI client, configuring their proxy settings natively. On stop, `headroom unwrap` cleans up. **Automatic fallback**: if Headroom goes down, clients fall back to direct API endpoints.
+
+### Headroom wrap mapping
+
+| DWYT client | Headroom command |
+|-------------|-----------------|
+| Claude Code | `headroom wrap claude` |
+| Codex | `headroom wrap codex` |
+| Cursor | `headroom wrap cursor` |
+| GitHub Copilot | `headroom wrap copilot` |
+| Kiro / OpenCode | env vars only (no native wrap) |
 
 ---
 
-## Codebase — detalhes técnicos
+## Codebase — technical details
 
-Gerenciado pelo **ProcessManager** interno:
-- **Start**: healthcheck HTTP com retry (5 tentativas, backoff exponencial, timeout 10s)
-- **Stop**: `SIGTERM` → espera 5s → `SIGKILL`
+Managed by the internal **ProcessManager**:
+- **Start**: healthcheck with retry (5 attempts, exponential backoff, 30s timeout for Codebase)
+- **Stop**: `SIGTERM` → wait 5s → `SIGKILL`
 - **Logs**: `~/.dwyt/logs/codebase-stdout.log` + `codebase-stderr.log`
-- **Porta dinâmica**: se 9749 ocupada, tenta 9750, 9751, 9752
-- **Botão "View Logs"** na UI mostra os logs reais para diagnóstico
+- **Dynamic port**: if 9749 is occupied, tries 9750, 9751, 9752
+- **stdin**: kept open via pipe (Codebase is an MCP server, exits on EOF)
 
-**Indexação**: sob demanda, não automática. O usuário clica "Index" na UI. Progresso visível com polling.
-
----
-
-## Requisitos
-
-| Ferramenta | Necessário para |
-|---|---|
-| Obsidian | **Obrigatório** — engine principal de conhecimento |
-| Python 3 | Instalação do Headroom |
-| Node.js | Instalação do Codebase |
-| curl ou wget | Download do instalador |
-| Git | Instalação de dependências |
-
-O binário `dwyt` em si não tem dependências — é um executável Go estático com a UI React embutida.
+**Indexing**: on-demand only. Click "Index" in the UI. Progress is polled every 2 seconds.
 
 ---
 
-## Repositórios
+## Requirements
+
+| Tool | Required for |
+|------|-------------|
+| Obsidian | **Mandatory** — primary knowledge engine (app optional, vault always works) |
+| Python 3 | Headroom installation |
+| curl or wget | Installer download |
+| Git | Dependency installation |
+
+The `dwyt` binary itself has no dependencies — it's a static Go executable with the React UI embedded.
+
+---
+
+## Repositories
 
 - [DWYT](https://github.com/fvmoraes/dwyt)
 - [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
