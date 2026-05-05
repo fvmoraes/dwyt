@@ -269,29 +269,30 @@ export default function Dashboard() {
     )
   }
 
-  function StartStop({ onStart, onStop }: { onStart?: () => void; onStop?: () => void }) {
+  function Btn({ label, onClick, variant }: { label: string; onClick: () => void; variant?: 'blue' | 'green' | 'red' }) {
+    const v = variant || 'blue'
+    const bg = v === 'green' ? 'linear-gradient(135deg, #1a3a1a 0%, #2f9e44 100%)' 
+             : v === 'red'   ? 'linear-gradient(135deg, #3a1a1a 0%, #e03131 100%)'
+             : 'linear-gradient(135deg, #1a2a3a 0%, #339af0 100%)'
+    const border = v === 'green' ? '#2f9e44' : v === 'red' ? '#e03131' : '#339af0'
+    const color  = v === 'green' ? '#51cf66' : v === 'red' ? '#ff6b6b' : '#74c0fc'
     return (
-      <div style={{ display: 'flex', gap: 4 }}>
-        <button className="subtle-start"
-          onClick={() => { (onStart ?? (() => api.startAll()))(); setTimeout(pollAll, 2000) }}>
-          {t.start}
-        </button>
-        <button className="subtle-stop"
-          onClick={() => { (onStop ?? (() => api.stopAll()))(); setTimeout(pollAll, 2000) }}>
-          {t.stop}
-        </button>
-      </div>
+      <button onClick={onClick} style={{
+        background: bg, border: `1px solid ${border}`, borderRadius: 4,
+        fontSize: 9, padding: '3px 8px', color, fontWeight: 600,
+        cursor: 'pointer', transition: 'all 0.15s',
+      }}>{label}</button>
     )
   }
 
-  function LinkBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  function StartStop({ onStart, onStop }: { onStart?: () => void; onStop?: () => void }) {
     return (
-      <button onClick={onClick} style={{
-        background: 'transparent', border: 'none', padding: '1px 0',
-        fontSize: 10, color: 'var(--muted)', textAlign: 'left', cursor: 'pointer',
-      }}>
-        {label}
-      </button>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <Btn label={t.start} variant="green"
+          onClick={() => { (onStart ?? (() => api.startAll()))(); setTimeout(pollAll, 2000) }} />
+        <Btn label={t.stop} variant="red"
+          onClick={() => { (onStop ?? (() => api.stopAll()))(); setTimeout(pollAll, 2000) }} />
+      </div>
     )
   }
 
@@ -449,7 +450,7 @@ export default function Dashboard() {
             {/* Per-tool breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '4px 10px', background: '#1a1b1f', gap: 8 }}>
               {[
-                { label: t.terminalOptimized, saved: rtkSaved, color: '#2f9e44' },
+                { label: t.terminalOptimized, saved: rtkSaved, color: '#845ef7' },
                 { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
                 { label: t.obsidianActive, saved: 0, color: '#f08d49' },
                 { label: t.codeMap, saved: 0, color: '#339af0' },
@@ -534,7 +535,7 @@ export default function Dashboard() {
                     </div>
                   )}
                   {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
-                  <LinkBtn label={isIndexed ? t.openGraph : t.openGraphUnavailable} onClick={async () => {
+                  <Btn variant="blue" label={isIndexed ? t.openGraph : t.openGraphUnavailable} onClick={async () => {
                     const btn = document.activeElement as HTMLButtonElement
                     if (btn) { btn.textContent = '...'; btn.disabled = true }
                     try {
@@ -565,7 +566,7 @@ export default function Dashboard() {
                     } catch (_) { pollAll() }
                     if (btn) { btn.textContent = isIndexed ? t.openGraph : t.openGraphUnavailable; btn.disabled = false }
                   }} />
-                  <LinkBtn label={configuringMCP === 'codebase' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
+                  <Btn variant="blue" label={configuringMCP === 'codebase' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
                     setConfiguringMCP('codebase')
                     try { await api.configureMCP(indexPath); pollAll() } catch (_) {}
                     setConfiguringMCP('')
@@ -582,7 +583,7 @@ export default function Dashboard() {
           const state = toolState(rtkTool, det)
           return (
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <CardHeader label={t.terminalOptimized} color="#2f9e44" state={state} description={t.rtkDesc} />
+              <CardHeader label={t.terminalOptimized} color="#845ef7" state={state} description={t.rtkDesc} />
               <Hr />
               <Row label={t.commands}       value={det?.total_commands ? String(det.total_commands) : '—'} />
               <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -593,7 +594,7 @@ export default function Dashboard() {
               <StartStop />
               {det?.pct_saved ? (
                 <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%` }} />
+                  <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%`, background: '#845ef7' }} />
                 </div>
               ) : null}
             </div>
@@ -618,7 +619,7 @@ export default function Dashboard() {
                 onStart={async () => { await api.headroomStart(); setTimeout(pollAll, 2000) }}
                 onStop={async () => { await api.headroomStop(); setTimeout(pollAll, 1000) }}
               />
-              <LinkBtn label={t.openStats} onClick={async () => {
+              <Btn variant="blue" label={t.openStats} onClick={async () => {
                 const r = await api.getHeadroomStatsURL()
                 if (r.url) window.open(r.url)
                 if (r.started) setTimeout(pollAll, 2000)
@@ -667,7 +668,7 @@ export default function Dashboard() {
                 <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
               </div>
               {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
-              <LinkBtn label={configuringMCP === 'obsidian' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
+              <Btn variant="blue" label={configuringMCP === 'obsidian' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
                 setConfiguringMCP('obsidian')
                 try { await api.configureMCP(indexPath); pollAll() } catch (_) {}
                 setConfiguringMCP('')

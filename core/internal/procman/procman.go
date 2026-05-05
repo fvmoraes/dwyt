@@ -103,10 +103,15 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	}
 
 	cmd := exec.Command(binPath, args...)
-	// Keep stdin open with a pipe — MCP servers (codebase) need stdin alive
-	// to stay running. If stdin is /dev/null they read EOF and exit.
-	stdinPipe, _ := cmd.StdinPipe()
-	defer stdinPipe.Close()
+	// MCP servers that use stdio need stdin to stay alive.
+	// For services with a healthURL (HTTP-based like codebase UI), we can close stdin.
+	// For stdio-based services, we keep stdin open indefinitely.
+	if mp.HealthURL != "" {
+		stdinPipe, _ := cmd.StdinPipe()
+		defer stdinPipe.Close()
+	} else {
+		cmd.Stdin = os.Stdin
+	}
 
 	stdoutPath := filepath.Join(pm.logDir, name+"-stdout.log")
 	stderrPath := filepath.Join(pm.logDir, name+"-stderr.log")

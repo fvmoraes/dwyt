@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -432,6 +433,20 @@ func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {
+	// Try Obsidian URI scheme first: obsidian://open?path=<vault>
+	vaultURI := "obsidian://open?path=" + url.PathEscape(pb.brainDir)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		cmd = exec.Command("open", vaultURI)
+	} else if runtime.GOOS == "windows" {
+		cmd = exec.Command("start", vaultURI)
+	} else {
+		cmd = exec.Command("xdg-open", vaultURI)
+	}
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+	// Fallback: open the brain directory in file manager
 	return pb.OpenBrainDir()
 }
 

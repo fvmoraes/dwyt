@@ -1300,12 +1300,14 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
-	// Start in background, respond immediately
+	// Force stop any stale process, then start fresh
+	ds.ProcMan.Stop("codebase")
+	time.Sleep(300 * time.Millisecond)
+
 	go func() {
 		ds.ProcMan.Start("codebase")
 	}()
-
-	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "note": "starting in background"})
+	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "starting": true})
 }
 
 // apiHeadroomStatsURL checks if headroom proxy is running and returns the stats URL.
@@ -1606,29 +1608,20 @@ func (ds *DashboardServer) headroomWrapClients() []string {
 
 // ── MCP Management ─────────────────────────────────────────────────────────
 
-// startMCPsIfNeeded starts both MCP services in background if binaries are installed.
+// startMCPsIfNeeded starts the Codebase MCP service in background if installed.
+// Note: dwyt-obsidian is a stdio MCP server — AI agents launch it on demand.
 func (ds *DashboardServer) startMCPsIfNeeded() {
 	go func() {
 		// Small delay to let daemon fully start
 		time.Sleep(2 * time.Second)
 
-		// Start codebase MCP (already managed by ProcMan)
+		// Start codebase MCP (HTTP-based, managed by ProcMan)
 		if _, err := os.Stat(filepath.Join(ds.DwytBin, "codebase-memory-mcp")); err == nil {
 			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
 				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
 				ds.RuntimeState.RegisterProcess("mcp-codebase", st.PID, st.Port)
 			} else {
 				log.Warn("mcp codebase start failed", log.Fields{"error": err})
-			}
-		}
-
-		// Start obsidian MCP (stdio-based, no port)
-		if _, err := os.Stat(filepath.Join(ds.DwytBin, "dwyt-obsidian-mcp")); err == nil {
-			if st, err := ds.ProcMan.Start("obsidian-mcp"); err == nil && st.Running {
-				log.Info("mcp obsidian auto-started", log.Fields{"pid": st.PID})
-				ds.RuntimeState.RegisterProcess("mcp-obsidian", st.PID, 0)
-			} else {
-				log.Warn("mcp obsidian start failed", log.Fields{"error": err})
 			}
 		}
 	}()
