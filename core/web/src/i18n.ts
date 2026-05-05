@@ -32,6 +32,7 @@ export const T = {
     status: 'Status',
     allRepos: 'All repositories', selectProject: 'Select a project', repoCount: 'repositories',
     openDashboard: 'Open dashboard', openBrain: 'Open Vault', viewLogs: 'View Logs',
+    openVaultDir: 'Open Dir', installObsidian: 'Install Obsidian',
     // User-friendly tool names
     obsidianActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',
@@ -92,6 +93,7 @@ export const T = {
     status: 'Status',
     allRepos: 'Todos os repositórios', selectProject: 'Selecionar projeto', repoCount: 'repositórios',
     openDashboard: 'Abrir dashboard', openBrain: 'Abrir Vault', viewLogs: 'Ver Logs',
+    openVaultDir: 'Abrir Dir', installObsidian: 'Instalar Obsidian',
     // User-friendly tool names
     obsidianActive: 'Obsidian', compressionActive: 'Headroom',
     terminalOptimized: 'RTK', codeMap: 'Codebase',

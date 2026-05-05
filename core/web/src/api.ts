@@ -139,6 +139,18 @@ export async function openBrain(): Promise<{ status: string; error?: string }> {
   const r = await fetch(`${API}/obsidian/open`, { method: 'POST' })
   return r.json()
 }
+export async function openBrainDir(): Promise<{ status: string; dir?: string; error?: string }> {
+  const r = await fetch(`${API}/obsidian/open-dir`, { method: 'POST' })
+  return r.json()
+}
+export async function installObsidian(): Promise<{ status: string; message: string }> {
+  const r = await fetch(`${API}/obsidian/install`, { method: 'POST' })
+  return r.json()
+}
+export async function getObsidianInstallStatus(): Promise<{ status: string; path?: string; error?: string }> {
+  const r = await fetch(`${API}/obsidian/install-status`)
+  return r.json()
+}
 
 // ── MCP endpoints ────────────────────────────────────────────────────────
 export async function getMCPRegistry(): Promise<{ mcpServers: Record<string, { command: string; port: number; healthURL: string; enabled: boolean; installed: boolean; status: string; pid: number }> }> {

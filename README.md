@@ -155,9 +155,10 @@ Managed by the internal **ProcessManager**:
 │  │  ─────────────────────  │  │  ─────────────────────  │          │
 │  │  UPTIME       2m 3s    │  │  COMMANDS         847 │          │
 │  │  STATUS     Indexed    │  │  TOKENS SAVED     31M │          │
-│  │  ▶ Start  ■ Stop       │  │  % SAVED          61% │          │
-│  │  [/path] [Index]       │  │  ████████████░░░░░░░░░  │          │
-│  │  Open Graph →          │  └────────────────────────┘          │
+│  │  MCP            🟢 Online│  │  % SAVED          61% │          │
+│  │  [/path] [Index]       │  │  🏷 CLI: prefix with rtk │          │
+│  │  Open Graph →          │  │  ████████████░░░░░░░░░  │          │
+│  │  Configure MCP         │  └────────────────────────┘          │
 │  └────────────────────────┘                                       │
 │  ┌────────────────────────┐  ┌────────────────────────┐          │
 │  │  HEADROOM         🟢   │  │  OBSIDIAN          🟢 │          │
@@ -165,11 +166,12 @@ Managed by the internal **ProcessManager**:
 │  │  ─────────────────────  │  │  ─────────────────────  │          │
 │  │  REQUESTS         234  │  │  FILES             12 │          │
 │  │  TOKENS SAVED     8M  │  │  ACTIVE         1h 2m │          │
-│  │  COMPRESSION      34%  │  │  ▶ Save  [Search...]  │          │
-│  │  PORT             8787  │  │  Rebuild | Forget     │          │
-│  │  ▶ Start  ■ Stop       │  │  🧠 Open in Obsidian  │          │
-│  │  Open Stats →          │  └────────────────────────┘          │
-│  └────────────────────────┘                                       │
+│  │  COMPRESSION      34%  │  │  MCP            🟢 Online│          │
+│  │  ▶ Start  ■ Stop       │  │  [type ▼] [note...] [Save]│          │
+│  │  Open Stats →          │  │  [Search obsidian...] 🔍 │          │
+│  └────────────────────────┘  │  Configure MCP          │          │
+│                               │  Rebuild | Open Vault  │          │
+│                               └────────────────────────┘          │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -255,7 +257,7 @@ Setup creates these files in the project directory (all added to `.gitignore`):
 
 ```
 <project>/
-├── .mcp.json                      # codebase-memory-mcp MCP config
+├── .mcp.json                      # MCP config (codebase + obsidian servers)
 ├── AGENTS.md                      # instructions for Codex, Kiro, Cursor, OpenCode
 ├── CLAUDE.md                      # instructions for Claude Code
 ├── opencode.json                  # OpenCode config
@@ -263,7 +265,12 @@ Setup creates these files in the project directory (all added to `.gitignore`):
 │   └── copilot-instructions.md
 ├── .cursor/
 │   └── rules/dwyt.mdc
+├── .claude/
+│   └── mcp.json                   # Claude MCP config
+├── .vscode/
+│   └── mcp.json                   # VSCode MCP config
 └── .kiro/
+    ├── mcp.json                   # Kiro MCP config
     └── steering/dwyt.md
 ```
 

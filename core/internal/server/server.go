@@ -252,6 +252,9 @@ func (ds *DashboardServer) Start() error {
 		api.POST("/obsidian/save", ds.apiObsidianSave)
 		api.POST("/obsidian/summarize", ds.apiObsidianSummarize)
 		api.POST("/obsidian/open", ds.apiObsidianOpen)
+		api.POST("/obsidian/open-dir", ds.apiObsidianOpenDir)
+		api.POST("/obsidian/install", ds.apiObsidianInstall)
+		api.GET("/obsidian/install-status", ds.apiObsidianInstallStatus)
 		// ProcessManager routes
 		api.POST("/services/codebase/start", ds.apiCodebaseStart)
 		api.POST("/services/codebase/stop", ds.apiCodebaseStop)
@@ -1426,6 +1429,51 @@ func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "opened"})
 }
 
+func (ds *DashboardServer) apiObsidianOpenDir(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
+		return
+	}
+	if err := ds.ProjectObsidian.OpenBrainDir(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "opened", "dir": ds.ProjectObsidian.GetBrainDir()})
+}
+
+func (ds *DashboardServer) apiObsidianInstall(c *gin.Context) {
+	go func() {
+		ds.installMu.Lock()
+		ds.installStatus["obsidian-app"] = "installing"
+		ds.installMu.Unlock()
+
+		path, err := install.InstallObsidianApp()
+		ds.installMu.Lock()
+		if err != nil {
+			ds.installStatus["obsidian-app"] = "error: " + err.Error()
+		} else {
+			ds.installStatus["obsidian-app"] = "ok: " + path
+		}
+		ds.installMu.Unlock()
+	}()
+	c.JSON(200, gin.H{"status": "installing", "message": "Obsidian installation started in background"})
+}
+
+func (ds *DashboardServer) apiObsidianInstallStatus(c *gin.Context) {
+	ds.installMu.Lock()
+	s := ds.installStatus["obsidian-app"]
+	ds.installMu.Unlock()
+	if s == "" {
+		c.JSON(200, gin.H{"status": "not_started"})
+	} else if s == "installing" {
+		c.JSON(200, gin.H{"status": "installing"})
+	} else if strings.HasPrefix(s, "ok") {
+		c.JSON(200, gin.H{"status": "installed", "path": strings.TrimPrefix(s, "ok: ")})
+	} else {
+		c.JSON(200, gin.H{"status": "error", "error": s})
+	}
+}
+
 // ── ProcessManager handlers ───────────────────────────────────────────────
 
 func (ds *DashboardServer) apiCodebaseStart(c *gin.Context) {
@@ -1688,6 +1736,15 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 		status := "offline"
 		if st != nil && st.Running && st.Healthy {
 			status = "online"
+		} else if installed && entry.Port > 0 && isPortOpen(entry.Port) {
+			// ProcMan doesn't know about it (started externally or before ProcMan tracked it),
+			// but the port is open — probe the health URL directly.
+			healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", entry.Port, entry.HealthURL)
+			if health.ProbeURL(healthURL) {
+				status = "online"
+			} else {
+				status = "port_open_no_health"
+			}
 		}
 		result[name] = map[string]interface{}{
 			"command":   entry.Command,

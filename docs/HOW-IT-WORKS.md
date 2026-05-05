@@ -86,6 +86,7 @@ Vite outputs to `core/internal/server/dashboard/dist/`. At build time, GoRelease
 | `internal/install` | `install.go` | Tool installers: Codebase, RTK, Headroom |
 | `internal/env` | `env.go` | Shell RC injection, env.sh, PATH symlinks |
 | `internal/db` | `db.go` | SQLite store: projects table, config key-value |
+| `internal/mcpregistry` | `registry.go` | MCP server registry, Claude/VSCode/Kiro config sync |
 | `internal/detect` | `detect.go` | OS/Shell/Home detection |
 | `internal/workspace` | `workspace.go` | Per-project `.dwyt/` state |
 | `internal/log` | `log.go` | File-based logger (DEBUG/INFO/WARN/ERROR) |
@@ -172,8 +173,10 @@ SQLite provides embedded persistence without external dependencies...
 | GET | `/api/obsidian/search?q=` | Full-text search across all .md files |
 | POST | `/api/obsidian/save` | Save entry `{"type":"decision","content":"..."}` |
 | POST | `/api/obsidian/summarize` | Rebuild context.md from all files |
-| POST | `/api/obsidian/forget` | Clear all vault files |
 | POST | `/api/obsidian/open` | Open vault in Obsidian (`obsidian://open?path=`) |
+| POST | `/api/obsidian/open-dir` | Open vault directory in file manager |
+| POST | `/api/obsidian/install` | Download and install Obsidian app (Linux: AppImage) |
+| GET | `/api/obsidian/install-status` | Obsidian installation progress |
 
 ### SaveEntry routing by type
 
@@ -232,6 +235,53 @@ Stdout and stderr are captured to:
 ```
 
 Available via `GET /api/services/<service>/logs?tail=50`.
+---
+
+## MCP Registry
+
+The MCP registry manages MCP server configurations for AI clients (Claude Desktop, VSCode, Kiro). It is saved to `~/.dwyt/config/mcp-registry.json`.
+
+### Default Servers
+
+| Server | Binary | Endpoint |
+|--------|--------|----------|
+| `codebase` | `codebase-memory-mcp` | HTTP on port 9749 |
+| `obsidian` | `dwyt-obsidian-mcp` | stdio (launched by AI agents) |
+
+### Registry Operations
+
+- **Load** — reads `mcp-registry.json` from `~/.dwyt/config/`, ensures default entries exist
+- **Save** — persists changes to disk
+- **ConfigureMCP** — writes MCP configs for all enabled servers to Claude Desktop (`claude_desktop_config.json`), VSCode (`.vscode/mcp.json`), and Kiro (`.kiro/mcp.json`)
+- **ConfigureMCPByName(name)** — targets a single MCP server for configuration
+- **Toggle(name, enabled)** — enables/disables a server without removing it
+
+### Status Detection
+
+The `/api/mcp/registry` endpoint uses two-tier detection:
+1. **ProcMan status** — checks if ProcessManager has the service registered as running+healthy
+2. **Direct probe fallback** — if ProcMan is unaware (e.g., service started externally), probes the health-URL port directly. Status "online" when health-check passes, "port_open_no_health" when port is occupied but health fails (shown as 🟡 in UI)
+
+### Config Sync
+
+When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards):
+1. Saves the registry to disk
+2. Creates backup of current entries
+3. Writes Claude Desktop config → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/claude-desktop/` (Linux)
+4. Writes per-project `.vscode/mcp.json` and `.kiro/mcp.json`
+5. Rolls back on failure
+
+### API Endpoints
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/mcp/registry` | List all servers with status |
+| POST | `/api/mcp/configure` | Write MCP configs (optional `name` for single server) |
+| POST | `/api/mcp/services/start` | Start a server by name |
+| POST | `/api/mcp/services/stop` | Stop a server by name |
+| POST | `/api/mcp/services/restart` | Restart a server by name |
+| GET | `/api/mcp/services/status?name=` | Get server process status |
+| GET | `/api/mcp/services/logs?name=` | Get server logs |
 
 ---
 
@@ -286,9 +336,10 @@ Indexing is **on-demand only**. No automatic indexing on startup or project swit
 ### Indexing flow
 
 1. User clicks "Index" → `POST /api/codebase/index {"path":"..."}`
-2. Backend spawns `Codebase cli index_repository` in goroutine
+2. Backend spawns `codebase-memory-mcp cli index_repository` in goroutine
 3. Frontend polls `GET /api/codebase/index/status` every 2s
-4. On completion: marks project as indexed in SQLite
+4. On completion: `countCodebaseGraph()` walks the cache directory counting nodes/edges from stored JSON files, then marks project as indexed in SQLite with real metrics
+5. Indexing has a 10-minute timeout and can be cancelled when switching projects
 
 ---
 
@@ -352,6 +403,7 @@ Component mounts
 | SetupWizard | `SetupWizard.tsx` | Tool/IA client selection + install progress |
 | Sidebar | `Sidebar.tsx` | Project list with switching |
 | FileBrowser | `FileBrowser.tsx` | Directory browser for project path selection |
+| Button | `Button.tsx` | Unified button with variants (primary, secondary, success, danger, ghost, icon), sizes, loading/disabled states |
 | Toggle | `Toggle.tsx` | Generic toggle switch with disabled state |
 | Logo | `Logo.tsx` | SVG mascot (nerd character) |
 | LangToggle | `LangToggle.tsx` | EN/PT language switcher |
@@ -380,8 +432,19 @@ Component mounts
 | GET | `/api/obsidian/search?q=` | Search vault files |
 | POST | `/api/obsidian/save` | Save entry |
 | POST | `/api/obsidian/summarize` | Rebuild context.md |
-| POST | `/api/obsidian/forget` | Clear all entries |
 | POST | `/api/obsidian/open` | Open in Obsidian |
+
+### MCP Registry
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/mcp/registry` | List all MCP servers with status |
+| POST | `/api/mcp/configure` | Write MCP configs (optional `name` for single server) |
+| POST | `/api/mcp/services/start` | Start a server by name |
+| POST | `/api/mcp/services/stop` | Stop a server by name |
+| POST | `/api/mcp/services/restart` | Restart a server by name |
+| GET | `/api/mcp/services/status?name=` | Get server process status |
+| GET | `/api/mcp/services/logs?name=` | Get server logs |
 
 ### ProcessManager
 
@@ -496,13 +559,17 @@ The Setup creates these files in the user's project directory:
 
 ```
 <project>/
-├── .mcp.json                     # Codebase MCP config
+├── .mcp.json                     # MCP config (codebase + obsidian servers)
 ├── AGENTS.md                     # instructions for Codex, Kiro, Cursor, OpenCode
 ├── CLAUDE.md                     # instructions for Claude Code
 ├── opencode.json                 # OpenCode config
 ├── .github/copilot-instructions.md
 ├── .cursor/rules/dwyt.mdc
-├── .kiro/steering/dwyt.md
+├── .claude/mcp.json              # Claude Desktop MCP config
+├── .vscode/mcp.json              # VSCode MCP config
+├── .kiro/
+│   ├── mcp.json                  # Kiro MCP config
+│   └── steering/dwyt.md
 └── .gitignore                    # updated with dwyt entries
 ```
 

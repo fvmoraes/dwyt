@@ -114,6 +114,8 @@ export default function Dashboard() {
   const [summarizing,  setSummarizing]  = useState(false)
   const [savingBrain,  setSavingBrain]  = useState(false)
   const [openingBrain, setOpeningBrain] = useState(false)
+  const [openingDir,   setOpeningDir]   = useState(false)
+  const [installingObsidian, setInstallingObsidian] = useState(false)
   const [saveType,     setSaveType]     = useState('note')
   const [saveContent,  setSaveContent]  = useState('')
   const [mcpRegistry,  setMCPRegistry]  = useState<Record<string, { status: string; port: number; installed: boolean; enabled: boolean }>>({})
@@ -460,7 +462,7 @@ export default function Dashboard() {
               <Row label={t.tokensSavedLabel} value={'—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <Row label={t.status}          value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
-              <Row label={'MCP'}              value={mcpRegistry['codebase']?.status === 'online' ? `🟢 ${t.mcpOnline}` : `🔴 ${t.mcpOffline}`} />
+              <Row label={'MCP'}              value={mcpRegistry['codebase']?.status === 'online' ? `🟢 ${t.mcpOnline}` : mcpRegistry['codebase']?.status === 'port_open_no_health' ? `🟡 Starting...` : `🔴 ${t.mcpOffline}`} />
               <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
               <Hr />
               {state === 'not_installed' ? (
@@ -592,7 +594,7 @@ export default function Dashboard() {
               <Hr />
               <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
-              <Row label={'MCP'}              value={mcpRegistry['obsidian']?.status === 'online' ? `🟢 ${t.mcpOnline}` : `🔴 ${t.mcpOffline}`} />
+              <Row label={'MCP'}              value={mcpRegistry['obsidian']?.status === 'online' ? `🟢 ${t.mcpOnline}` : mcpRegistry['obsidian']?.status === 'port_open_no_health' ? `🟡 Starting...` : `🔴 ${t.mcpOffline}`} />
               <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
               <Hr />
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -637,7 +639,31 @@ export default function Dashboard() {
                   try { await api.openBrain() } catch { /* ignore */ }
                   setOpeningBrain(false)
                 }} />
+                <Button variant="primary" size="xs" label={openingDir ? '...' : (t.openVaultDir || 'Open Dir')} onClick={async () => {
+                  setOpeningDir(true)
+                  try { await api.openBrainDir() } catch { /* ignore */ }
+                  setOpeningDir(false)
+                }} />
               </div>
+              {state !== 'active' && (
+                <Button variant="success" size="xs" label={installingObsidian ? '...' : (t.installObsidian || 'Install Obsidian')} onClick={async () => {
+                  setInstallingObsidian(true)
+                  try { await api.installObsidian() } catch { /* ignore */ }
+                  let attempts = 0
+                  const checker = setInterval(async () => {
+                    attempts++
+                    try {
+                      const s = await api.getObsidianInstallStatus()
+                      if (s.status !== 'installing') {
+                        clearInterval(checker)
+                        setInstallingObsidian(false)
+                        pollAll()
+                      }
+                    } catch { /* ignore */ }
+                    if (attempts > 120) { clearInterval(checker); setInstallingObsidian(false) }
+                  }, 2000)
+                }} />
+              )}
             </div>
           )
         })()}

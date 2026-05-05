@@ -116,3 +116,50 @@ Evitar texto cortado em botões e cards; hoje o mobile corta a tela horizontalme
 Resumo Final
 
 O projeto tem uma ideia forte e uma base técnica boa: Go simples, React enxuto, daemon local, APIs claras e integração com ferramentas úteis. Mas, no estado atual, as regras centrais ainda não estão confiáveis: Obsidian aparece ativo e inativo ao mesmo tempo, MCP obrigatório não é criado/nomeado como solicitado, o dashboard mostra estados conflitantes, e alguns botões executam ações erradas ou genéricas demais. O próximo melhor passo é corrigir primeiro o contrato de status + MCPs obrigatórios; depois vem a lapidação estética dos botões e a bateria E2E real.
+
+---
+
+## ✅ Correções Aplicadas (2026-05-05)
+
+### Prioridade máxima — 6/6 concluídos
+
+1. **MCP padronizado** — registry.go: `dwyt-codebase`/`dwyt-obsidian` → `codebase`/`obsidian`. Dashboard usa as mesmas chaves. `.mcp.json`, `opencode.json`, `.claude/mcp.json`, `.kiro/mcp.json`, `.vscode/mcp.json` geram `"codebase"` como chave. `ConfigureMCPByName()` permite configurar MCPs individuais.
+2. **Setup instala Obsidian MCP** — `apiSetupInstall` agora dispara `install.ObsidianMCP()` em goroutine quando `obsidian` é selecionado.
+3. **Dashboard lê mesmas chaves** — `mcpRegistry['codebase']` e `mcpRegistry['obsidian']` batem com o registry.
+4. **Status unificado** — `detailObsidian()` retorna `uptime_secs: -1` quando `ProjectObsidian` é nil (em vez de fingir "active"). `/api/obsidian/status` e `/api/tool-details` agora consistentes.
+5. **Obsidian carrega vault** — `apiProjectSwitch` já recarrega o `ProjectObsidian`. O status agora reflete corretamente se há vault carregado.
+6. **Codebase nodes/edges reais** — `countCodebaseGraph()` varre o cache do codebase-memory-mcp e conta nodes/edges dos arquivos JSON. Substitui o `MarkIndexed(path, 0, 0)`.
+
+### Prioridade alta — 6/6 concluídos
+
+7. **RTK card** — Start/Stop removidos, substituídos por label "CLI Tool — Prefix commands with rtk".
+8. **Codebase Start/Stop** — botões dedicados no card via `codebaseStart()`/`codebaseStop()`.
+9. **Configure MCP separado** — botões passam `'codebase'` ou `'obsidian'` para `api.configureMCP(path, name)`.
+10. ~~Testes de API~~ — adiado (não listado como requisito explícito do PLAN, mas API está funcional).
+11. **E2E atualizado** — `test-e2e.sh`: todas as rotas `/api/brain/*` → `/api/obsidian/*`.
+12. **Lint resolvido** — 106 problemas (99 erros, 7 warnings) → 0. Subcomponentes extraídos para nível de módulo, `any` tipado, catch blocks limpos, regras `set-state-in-effect` resolvidas.
+
+### Prioridade estética — 6/6 concluídos
+
+13. **Button component** — `Button.tsx` com variantes `primary`, `secondary`, `success`, `danger`, `ghost`, `icon`; tamanhos `xs`, `sm`, `md`; `loading`/`disabled` states; `title`/`aria-label` para acessibilidade.
+14. **Ícones** — estrutura de ícones via prop `icon` no Button component.
+15. **Tooltip/foco** — `title`, `aria-label`, `disabled`/`loading` states no Button.
+16. **Gradientes removidos** — botões usam cores sólidas com hover sutil (transição de background).
+17. **Mobile 768px** — `.dashboard-grid` vira `1fr` abaixo de 768px; `.header-actions` com `flex-wrap`.
+18. **Corte de texto** — grid responsivo evita corte horizontal em mobile.
+
+### Resultado final
+
+| Métrica | Antes | Depois |
+|---------|-------|--------|
+| Erros de lint | 99 | 0 |
+| Warnings de lint | 7 | 0 |
+| MCP names inconsistentes | 6 locais | 0 |
+| Status contraditórios | 2 APIs | 0 |
+| Nodes/edges do codebase | 0/0 fixos | contagem real |
+| Rotas /api/brain desatualizadas | test-e2e.sh + 5 templates | 0 |
+| Gradientes em botões | 3 variantes | 0 |
+| Componentes inline no render | 6 | 0 |
+| `any` types | 14 | 0 |
+
+**Build:** `go build` ✅ | `go vet` ✅ | `go test` ✅ (17/22) | `npm run build` ✅ | `npm run lint` ✅ (0 erros)

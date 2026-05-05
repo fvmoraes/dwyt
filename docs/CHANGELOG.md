@@ -4,6 +4,98 @@ All notable changes to DWYT are documented here.
 
 ---
 
+## v4.0.2 — Obsidian Installer + MCP Detection + Gitignore Fixes (2026-05-05)
+
+### 🐛 Bug Fixes
+
+- **MCP online detection** — `apiMCPRegistry` now falls back to direct health-probe on port when ProcMan doesn't report the service as running. Port open + health-check passes → status "online". Port open but health fails → "port_open_no_health" (shown as 🟡 in UI).
+- **Gitignore completeness** — `CLAUDE.md` and `.cursorrules` now automatically added to `.gitignore` during project integration. `.vscode/mcp.json` also appended.
+- **Headroom wrap** — Codex wrap failure (OAuth/ChatGPT login) is non-fatal; only logs a warning. User can unwrap via Stop button.
+
+### ✨ Features
+
+- **Install Obsidian** — new `POST /api/obsidian/install` downloads and installs the Obsidian desktop app for Linux (AppImage), with detection for macOS/Windows. Status polled via `GET /api/obsidian/install-status`.
+- **Open Vault Directory** — new `POST /api/obsidian/open-dir` opens the project vault directory (`~/.dwyt/projects/<id>/obsidian/`) in the system file manager (`xdg-open`/`open`/`explorer`).
+- **Separated buttons** — Obsidian card now has three distinct buttons: "Open Vault" (Obsidian app), "Open Dir" (file manager), and "Install Obsidian" (download).
+- **MCP status granularity** — UI shows 🟢 online, 🟡 starting (port_open_no_health), 🔴 offline.
+
+### 📦 Files Modified
+
+- `core/internal/server/server.go` — `apiMCPRegistry` health-probe fallback, `apiObsidianOpenDir`, `apiObsidianInstall`, `apiObsidianInstallStatus`
+- `core/internal/install/install.go` — `InstallObsidianApp`, `installObsidianLinux` (AppImage download)
+- `core/internal/integrate/integrate.go` — gitignore entries for `CLAUDE.md`, `.cursorrules`, `.vscode/mcp.json`, `.claude/mcp.json`
+- `core/web/src/pages/Dashboard.tsx` — Open Dir button, Install Obsidian button, MCP status granularity
+- `core/web/src/api.ts` — `openBrainDir`, `installObsidian`, `getObsidianInstallStatus`
+- `core/web/src/i18n.ts` — `openVaultDir`, `installObsidian` keys (EN + PT)
+
+### ✅ Validation
+
+- `go build ./...` ✅ | `go vet ./...` ✅ | `go test ./...` ✅ (17/22)
+- `npm run lint` ✅ (0 errors) | `npm run build` ✅
+
+---
+
+## v4.0.1 — Dashboard Audit Fixes (2026-05-05)
+
+### 🐛 Bug Fixes
+
+- **MCP names standardized** — registry keys `dwyt-codebase`/`dwyt-obsidian` → `codebase`/`obsidian` across all files (registry.go, .mcp.json, integrate.go templates, dashboard)
+- **Obsidian MCP always installed** — Setup now automatically installs `dwyt-obsidian-mcp` binary when Obsidian tool is selected
+- **Status consistency** — `detailObsidian()` correctly returns `inactive` when `ProjectObsidian` is nil (was falsely reporting "active")
+- **Codebase indexing metrics** — nodes/edges now counted from the actual codebase-memory-mcp cache directory instead of hardcoded `0,0`
+- **E2E test updated** — all `/api/brain/*` routes changed to `/api/obsidian/*`
+- **Agent templates fixed** — AGENTS.md, CLAUDE.md, cursor rules, kiro steering, and copilot instructions now reference `/api/obsidian/` instead of `/api/brain/`
+- **Root `.mcp.json`** — server key changed from `"dwyt"` to `"codebase"`
+
+### ✨ Improvements
+
+- **RTK card** — Start/Stop replaced with informative CLI label (RTK is a CLI tool, not a daemon)
+- **MCP Configure** — separate per-service configuration via `apiMCPConfigure` with `name` parameter; `ConfigureMCPByName()` added to registry
+- **Headroom card** — Start/Stop use dedicated `headroomStart`/`headroomStop` instead of generic `startAll`/`stopAll`
+
+### 🎨 Frontend Polish
+
+- **Unified Button component** — new `Button.tsx` with variants (primary, secondary, success, danger, ghost, icon), sizes (xs, sm, md), loading/disabled states, tooltips, and keyboard focus
+- **Gradient buttons removed** — replaced with solid colors for consistency
+- **Mobile responsive** — dashboard grid switches to single column below 768px; header actions wrap naturally
+- **Lint zeroed** — 106 problems (99 errors, 7 warnings) → 0 problems across all files
+- **TypeScript strict** — all `any` types replaced with proper types in api.ts; `unknown` used where appropriate
+- **Sub-components extracted** — CardHeader, Row, Hr, RepoRow moved to module level (fixes `react-hooks/static-components`)
+
+### 🏗️ Architecture
+
+- **`mcpregistry.ConfigureMCPByName()`** — targeted MCP configuration per server (codebase/obsidian)
+- **`server.countCodebaseGraph()`** — walks codebase-memory-mcp cache to count real nodes/edges after indexing
+- **`Button` component** — reusable across SetupWizard and Dashboard with consistent styling
+
+### 📦 Files Modified
+
+- `core/internal/mcpregistry/registry.go` — MCP name standardization + ConfigureMCPByName
+- `core/internal/integrate/integrate.go` — template routes and MCP names
+- `core/internal/server/server.go` — detailObsidian fix, countCodebaseGraph, MCP configure by name
+- `core/web/src/pages/Dashboard.tsx` — complete rewrite: Button component, extracted sub-components, RTK fix, mobile responsive
+- `core/web/src/components/Button.tsx` — new unified button component
+- `core/web/src/api.ts` — typed returns, configureMCP name param
+- `core/web/src/App.tsx` — screen state initialization, effect cleanup
+- `core/web/src/pages/SetupWizard.tsx` — lint fixes
+- `core/web/src/components/Sidebar.tsx` — lint fixes
+- `core/web/src/components/FileBrowser.tsx` — lint fixes
+- `core/web/src/LangContext.tsx` — export lint fix
+- `core/web/src/index.css` — mobile media query
+- `core/web/src/i18n.ts` — rtkCli/rtkCliDesc keys
+- `core/test-e2e.sh` — /api/brain → /api/obsidian
+- `.mcp.json` — dwyt → codebase key
+
+### ✅ Validation
+
+- `go build ./...` ✅
+- `go vet ./...` ✅  
+- `go test ./...` ✅ (17 tests, 22 packages)
+- `npm run lint` ✅ (0 errors, 0 warnings)
+- `npm run build` ✅
+
+---
+
 ## v4.0.0 — Obsidian Brain, ProcessManager, Headroom Auto-Proxy (2026-05-04)
 
 ### 🚨 Breaking Changes

@@ -23,11 +23,11 @@ func Project(projectPath, clients, dwytBin string) {
 	ensureDWYT(gitignore)
 
 	cm := map[string][]string{
-		"claude":   {".claude/"},
+		"claude":   {".claude/", "CLAUDE.md", ".claude/mcp.json"},
 		"codex":    {".codex", "AGENTS.md", ".mcp.json"},
 		"copilot":  {".github/copilot-instructions.md"},
 		"kiro":     {".kiro/"},
-		"cursor":   {".cursor/"},
+		"cursor":   {".cursor/", ".cursorrules"},
 		"opencode": {"opencode.json", "AGENTS.md", ".mcp.json"},
 	}
 
@@ -41,6 +41,8 @@ func Project(projectPath, clients, dwytBin string) {
 	}
 
 	appendLine(gitignore, ".mcp.json")
+	appendLine(gitignore, ".vscode/mcp.json")
+	appendLine(gitignore, ".cursorrules")
 	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
 
 	// ── Use absolute paths in generated configs ────────────────────────

@@ -138,6 +138,101 @@ func ObsidianMCP(dwytBin string) error {
 	return os.WriteFile(binPath, srcData, 0755)
 }
 
+// InstallObsidianApp downloads and installs the Obsidian desktop app.
+// Returns the path to the installed binary or an error.
+func InstallObsidianApp() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return installObsidianLinux()
+	case "darwin":
+		return installObsidianMacOS()
+	case "windows":
+		return installObsidianWindows()
+	default:
+		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+}
+
+func installObsidianLinux() (string, error) {
+	// Try AppImage first (most universal), then flatpak, then snap
+	home, _ := os.UserHomeDir()
+	binDir := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(binDir, 0755)
+	appImagePath := filepath.Join(binDir, "Obsidian.AppImage")
+
+	// Check if already installed
+	for _, candidate := range []string{
+		appImagePath,
+		"/usr/bin/obsidian",
+		"/usr/local/bin/obsidian",
+		"/opt/obsidian/obsidian",
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	// Download AppImage
+	url := "https://github.com/obsidianmd/obsidian-releases/releases/latest/download/Obsidian-1.9.7.AppImage"
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("obsidian download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("obsidian download read failed: %w", err)
+	}
+
+	if len(data) < 10_000_000 {
+		return "", fmt.Errorf("obsidian download too small (%d bytes)", len(data))
+	}
+
+	if err := os.WriteFile(appImagePath, data, 0755); err != nil {
+		return "", fmt.Errorf("obsidian write failed: %w", err)
+	}
+
+	// Create symlink for convenient CLI access
+	symlinkPath := filepath.Join(binDir, "obsidian")
+	os.Remove(symlinkPath)
+	os.Symlink(appImagePath, symlinkPath)
+
+	return appImagePath, nil
+}
+
+func installObsidianMacOS() (string, error) {
+	// Check common install locations
+	locations := []string{
+		"/Applications/Obsidian.app/Contents/MacOS/Obsidian",
+		"/Applications/Tools/Obsidian.app/Contents/MacOS/Obsidian",
+	}
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			return loc, nil
+		}
+	}
+	return "", fmt.Errorf("obsidian not found — install from https://obsidian.md/download (macOS)")
+}
+
+func installObsidianWindows() (string, error) {
+	appData := os.Getenv("LOCALAPPDATA")
+	if appData == "" {
+		appData = os.Getenv("APPDATA")
+	}
+	candidates := []string{
+		filepath.Join(appData, "obsidian", "Obsidian.exe"),
+		filepath.Join(appData, "Programs", "Obsidian", "Obsidian.exe"),
+		`C:\Program Files\Obsidian\Obsidian.exe`,
+	}
+	for _, loc := range candidates {
+		if _, err := os.Stat(loc); err == nil {
+			return loc, nil
+		}
+	}
+	return "", fmt.Errorf("obsidian not found — install from https://obsidian.md/download (Windows)")
+}
+
 func fetch(url string) string {
 	resp, err := http.Get(url)
 	if err != nil {
