@@ -51,13 +51,13 @@ func Load() (*Registry, error) {
 	// Ensure default entries
 	binDir := filepath.Join(dwytHome(), "bin")
 	defaults := map[string]MCPServerEntry{
-		"dwyt-codebase": {
+		"codebase": {
 			Command:   filepath.Join(binDir, "codebase-memory-mcp"),
 			Port:      9749,
 			HealthURL: "/health",
 			Enabled:   true,
 		},
-		"dwyt-obsidian": {
+		"obsidian": {
 			Command:   filepath.Join(binDir, "dwyt-obsidian-mcp"),
 			Enabled:   true,
 		},
@@ -187,6 +187,31 @@ func (r *Registry) SyncVSCode(projectPath string) error {
 
 	data, _ := json.MarshalIndent(config, "", "  ")
 	return os.WriteFile(mcpPath, data, 0644)
+}
+
+// ConfigureMCPByName writes MCP configuration for a specific MCP server only.
+func (r *Registry) ConfigureMCPByName(projectPath, name string) error {
+	if _, ok := r.MCPServers[name]; !ok {
+		return fmt.Errorf("mcp server %s not found in registry", name)
+	}
+	if err := r.Save(); err != nil {
+		return fmt.Errorf("mcp registry save failed: %w", err)
+	}
+
+	errors := []string{}
+	if err := r.SyncClaudeDesktop(); err != nil {
+		errors = append(errors, "claude: "+err.Error())
+	}
+	if projectPath != "" {
+		if err := r.SyncVSCode(projectPath); err != nil {
+			errors = append(errors, "vscode: "+err.Error())
+		}
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("sync errors: %v", errors)
+	}
+	log.Info("mcp configs synced for server", log.Fields{"project": projectPath, "server": name})
+	return nil
 }
 
 // ConfigureMCP writes MCP configurations to all supported agents.

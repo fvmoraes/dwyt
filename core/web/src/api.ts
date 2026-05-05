@@ -115,11 +115,11 @@ export async function getIndexStatus(): Promise<{ indexing: boolean; progress: s
 }
 
 // ── Brain endpoints ────────────────────────────────────────────────────────
-export async function getBrainStatus(): Promise<{ active: boolean; stats?: any; error?: string }> {
+export async function getBrainStatus(): Promise<{ active: boolean; stats?: Record<string, unknown>; error?: string }> {
   const r = await fetch(`${API}/obsidian/status`)
   return r.json()
 }
-export async function searchBrain(query: string): Promise<{ results: any[]; count: number }> {
+export async function searchBrain(query: string): Promise<{ results: Array<Record<string, unknown>>; count: number }> {
   const params = new URLSearchParams({ q: query })
   const r = await fetch(`${API}/obsidian/search?${params.toString()}`)
   return r.json()
@@ -145,35 +145,35 @@ export async function getMCPRegistry(): Promise<{ mcpServers: Record<string, { c
   const r = await fetch(`${API}/mcp/registry`)
   return r.json()
 }
-export async function configureMCP(projectPath?: string): Promise<{ status: string; note: string }> {
+export async function configureMCP(projectPath?: string, name?: string): Promise<{ status: string; note: string }> {
   const r = await fetch(`${API}/mcp/configure`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_path: projectPath || '' }),
+    body: JSON.stringify({ project_path: projectPath || '', name: name || '' }),
   })
   return r.json()
 }
-export async function mcpStart(name: string): Promise<any> {
+export async function mcpStart(name: string): Promise<unknown> {
   const r = await fetch(`${API}/mcp/services/start`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   })
   return r.json()
 }
-export async function mcpStop(name: string): Promise<any> {
+export async function mcpStop(name: string): Promise<unknown> {
   const r = await fetch(`${API}/mcp/services/stop`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   })
   return r.json()
 }
-export async function mcpRestart(name: string): Promise<any> {
+export async function mcpRestart(name: string): Promise<unknown> {
   const r = await fetch(`${API}/mcp/services/restart`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   })
   return r.json()
 }
-export async function mcpStatus(name?: string): Promise<any> {
+export async function mcpStatus(name?: string): Promise<unknown> {
   const url = name ? `${API}/mcp/services/status?name=${name}` : `${API}/mcp/services/status`
   const r = await fetch(url)
   return r.json()
@@ -184,35 +184,35 @@ export async function mcpLogs(name: string, tail?: number): Promise<string> {
 }
 
 // ── ProcessManager endpoints ───────────────────────────────────────────────
-export async function codebaseStart(): Promise<any> {
+export async function codebaseStart(): Promise<unknown> {
   const r = await fetch(`${API}/services/codebase/start`, { method: 'POST' })
   return r.json()
 }
-export async function codebaseStop(): Promise<any> {
+export async function codebaseStop(): Promise<unknown> {
   const r = await fetch(`${API}/services/codebase/stop`, { method: 'POST' })
   return r.json()
 }
-export async function codebaseStatus(): Promise<any> {
+export async function codebaseStatus(): Promise<unknown> {
   const r = await fetch(`${API}/services/codebase/status`)
   return r.json()
 }
-export async function codebaseLogs(tail?: number): Promise<any> {
+export async function codebaseLogs(tail?: number): Promise<string> {
   const r = await fetch(`${API}/services/codebase/logs?tail=${tail || 50}`)
   return r.text()
 }
-export async function headroomStart(): Promise<any> {
+export async function headroomStart(): Promise<unknown> {
   const r = await fetch(`${API}/services/headroom/start`, { method: 'POST' })
   return r.json()
 }
-export async function headroomStop(): Promise<any> {
+export async function headroomStop(): Promise<unknown> {
   const r = await fetch(`${API}/services/headroom/stop`, { method: 'POST' })
   return r.json()
 }
-export async function headroomStatus(): Promise<any> {
+export async function headroomStatus(): Promise<unknown> {
   const r = await fetch(`${API}/services/headroom/status`)
   return r.json()
 }
-export async function headroomLogs(tail?: number): Promise<any> {
+export async function headroomLogs(tail?: number): Promise<string> {
   const r = await fetch(`${API}/services/headroom/logs?tail=${tail || 50}`)
   return r.text()
 }

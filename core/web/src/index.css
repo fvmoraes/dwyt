@@ -133,3 +133,9 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
 .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; }
 .tag.ok   { background: rgba(47,158,68,0.15);  color: var(--green); }
 .tag.warn { background: rgba(240,62,62,0.15);  color: var(--red); }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .dashboard-grid { grid-template-columns: 1fr !important; }
+  .header-actions { flex-wrap: wrap; gap: 3px; }
+}

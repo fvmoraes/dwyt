@@ -15,7 +15,7 @@ export default function FileBrowser({ onSelect, selected, initialPath }: Props) 
   const [currentPath, setCurrentPath] = useState('')
   const [loading,     setLoading]     = useState(false)
 
-  useEffect(() => { loadDir(initialPath && initialPath.startsWith('/') ? initialPath : '') }, [])
+  useEffect(() => { loadDir(initialPath && initialPath.startsWith('/') ? initialPath : '') }, [initialPath])
 
   async function loadDir(path: string) {
     setLoading(true)
@@ -27,9 +27,9 @@ export default function FileBrowser({ onSelect, selected, initialPath }: Props) 
     setLoading(false)
   }
 
-  function navigateTo(path: string) { loadDir(path); onSelect(path) }
+  function navigateTo(path: string) { loadDir(path); void onSelect(path) }
   function goUp() { navigateTo(currentPath.split('/').slice(0, -1).join('/') || '/') }
-  function handleClick(e: FsEntry) { e.is_dir ? navigateTo(e.path) : onSelect(currentPath) }
+  function handleClick(e: FsEntry) { if (e.is_dir) { navigateTo(e.path) } else { onSelect(currentPath) } }
 
   const crumbs = currentPath.split('/').filter(Boolean)
 

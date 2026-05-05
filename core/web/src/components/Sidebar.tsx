@@ -29,7 +29,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
     try {
       const data = await api.getProjects()
       onProjectsLoaded(data.projects || [])
-    } catch (_) {}
+    } catch { /* ignore */ }
   }, [onProjectsLoaded])
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
         await loadProjects()
         navigate('/dashboard?project=' + encodeURIComponent(path))
       }
-    } catch (_) {}
+    } catch { /* ignore */ }
     setSwitching(null)
   }
 

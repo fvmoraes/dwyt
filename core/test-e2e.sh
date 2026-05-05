@@ -72,25 +72,25 @@ info "Checking tool status..."
 STATUS=$(curl -s http://127.0.0.1:2737/api/status)
 echo "$STATUS" | grep -q '"tools"' || error "Status endpoint failed"
 
-# 9. Test brain API
-info "Testing brain API..."
-curl -X POST http://127.0.0.1:2737/api/brain/save \
+# 9. Test obsidian API
+info "Testing obsidian API..."
+curl -X POST http://127.0.0.1:2737/api/obsidian/save \
   -H "Content-Type: application/json" \
-  -d '{"type":"decision","content":"Test decision from E2E"}' || error "Brain save failed"
+  -d '{"type":"decision","content":"Test decision from E2E"}' || error "Obsidian save failed"
 
 sleep 1
 
-SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/brain/search?q=decision")
-echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Brain search failed"
+SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/obsidian/search?q=decision")
+echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Obsidian search failed"
 
-# 10. Test brain summarize
-info "Testing brain summarize..."
-curl -X POST http://127.0.0.1:2737/api/brain/summarize || error "Brain summarize failed"
+# 10. Test obsidian summarize
+info "Testing obsidian summarize..."
+curl -X POST http://127.0.0.1:2737/api/obsidian/summarize || error "Obsidian summarize failed"
 
-# 11. Get brain status
-info "Getting brain status..."
-BRAIN_STATUS=$(curl -s http://127.0.0.1:2737/api/brain/status)
-echo "$BRAIN_STATUS" | grep -q '"active":true' || error "Brain not active"
+# 11. Get obsidian status
+info "Getting obsidian status..."
+OBSIDIAN_STATUS=$(curl -s http://127.0.0.1:2737/api/obsidian/status)
+echo "$OBSIDIAN_STATUS" | grep -q '"active":true' || error "Obsidian not active"
 
 # 12. Test project switch
 info "Testing project switch..."
@@ -108,10 +108,10 @@ sleep 2
 CURRENT=$(curl -s http://127.0.0.1:2737/api/projects/current)
 echo "$CURRENT" | grep -q "test-project-2" || error "Project not switched"
 
-# 13. Verify brain is isolated per project
-info "Verifying brain isolation..."
-SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/brain/search?q=decision")
-echo "$SEARCH_RESULT" | grep -q '"count":0' || error "Brain not isolated between projects"
+# 13. Verify obsidian is isolated per project
+info "Verifying obsidian isolation..."
+SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/obsidian/search?q=decision")
+echo "$SEARCH_RESULT" | grep -q '"count":0' || error "Obsidian not isolated between projects"
 
 # 14. Switch back to project 1
 info "Switching back to project 1..."
@@ -121,8 +121,8 @@ curl -X POST http://127.0.0.1:2737/api/project/switch \
 
 sleep 2
 
-SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/brain/search?q=decision")
-echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Brain data lost after switch"
+SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/obsidian/search?q=decision")
+echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Obsidian data lost after switch"
 
 # 15. Test state persistence
 info "Testing state persistence..."
@@ -150,10 +150,10 @@ curl -f http://127.0.0.1:2737/api/health || error "Daemon not responding after r
 CURRENT=$(curl -s http://127.0.0.1:2737/api/projects/current)
 echo "$CURRENT" | grep -q "test-project-1" || error "Project not restored"
 
-# 19. Verify brain was preserved
-info "Verifying brain persistence..."
-SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/brain/search?q=decision")
-echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Brain data not persisted"
+# 19. Verify obsidian was preserved
+info "Verifying obsidian persistence..."
+SEARCH_RESULT=$(curl -s "http://127.0.0.1:2737/api/obsidian/search?q=decision")
+echo "$SEARCH_RESULT" | grep -q '"count":1' || error "Obsidian data not persisted"
 
 # 20. Test metrics endpoints
 info "Testing metrics endpoints..."
@@ -176,9 +176,9 @@ echo -e "${GREEN}✓ All tests passed successfully!${NC}"
 echo ""
 echo "Test coverage:"
 echo "  ✓ Daemon startup and health"
-echo "  ✓ Brain save, search, and summarize"
+echo "  ✓ Obsidian save, search, and summarize"
 echo "  ✓ Project switching"
-echo "  ✓ Brain isolation between projects"
+echo "  ✓ Obsidian isolation between projects"
 echo "  ✓ State persistence across restarts"
 echo "  ✓ API endpoints"
 echo ""

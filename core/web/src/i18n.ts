@@ -64,6 +64,8 @@ export const T = {
     kiroDesc: '.kiro/steering/dwyt.md',
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
+    // RTK CLI info
+    rtkCli: 'CLI Tool', rtkCliDesc: 'Prefix commands with rtk',
     variable: 'variable',
   },
   pt: {
@@ -120,6 +122,7 @@ export const T = {
     kiroDesc: '.kiro/steering/dwyt.md',
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
+    rtkCli: 'Ferramenta CLI', rtkCliDesc: 'Prefixe comandos com rtk',
     variable: 'variável',
   },
 } as const

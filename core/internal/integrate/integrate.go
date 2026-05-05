@@ -128,13 +128,13 @@ func writeIfMissing(path, content string) {
 func mcpJSONTemplate(projectName, cbmcpBin string) string {
 	return fmt.Sprintf(`{
   "mcpServers": {
-    %q: {
+    "codebase": {
       "type": "stdio",
       "command": %q
     }
   }
 }
-`, projectName, cbmcpBin)
+`, cbmcpBin)
 }
 
 func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
@@ -142,7 +142,7 @@ func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["AGENTS.md"],
   "mcp": {
-    %q: {
+    "codebase": {
       "type": "local",
       "command": [%q]
     }
@@ -154,7 +154,7 @@ func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
     "skill": "allow"
   }
 }
-`, projectName, cbmcpBin)
+`, cbmcpBin)
 }
 
 func agentsMDTemplate(rtkBin string) string {
@@ -165,8 +165,8 @@ func agentsMDTemplate(rtkBin string) string {
 		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
 		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
 		"The project vault is an Obsidian vault with markdown files.\n" +
-		"Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>\n" +
-		"Save: POST http://127.0.0.1:2737/api/brain/save\n\n" +
+		"Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>\n" +
+		"Save: POST http://127.0.0.1:2737/api/obsidian/save\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
@@ -185,8 +185,8 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 
 ## Priority order (follow strictly):
 1. **Obsidian FIRST** — before any file read or context rebuild:
-   - Search: GET http://127.0.0.1:2737/api/brain/search?q=your+query
-   - Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
+   - Search: GET http://127.0.0.1:2737/api/obsidian/search?q=your+query
+   - Save: POST http://127.0.0.1:2737/api/obsidian/save {"type":"decision","content":"..."}
    - Types: command, decision, action, error, note
    - Never mix vaults between projects — isolation is automatic.
 
@@ -206,8 +206,8 @@ alwaysApply: true
 
 ## DWYT Priority Order:
 1. **Obsidian FIRST**: consult project vault before any file operation.
-   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/brain/save
+   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/obsidian/save
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
@@ -218,8 +218,8 @@ const kiroSteering = `# DWYT Steering
 
 ## Priority:
 1. **Obsidian FIRST**: check project vault before reading files.
-   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/brain/save {"type":"decision","content":"..."}
+   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/obsidian/save {"type":"decision","content":"..."}
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
 4. **Codebase MCP**: structural exploration only — use after Obsidian
@@ -231,8 +231,8 @@ const copilotMD = `# DWYT — GitHub Copilot
 
 ## Priority:
 1. **Obsidian FIRST**: check project vault before heavy file reads.
-   Search: GET http://127.0.0.1:2737/api/brain/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/brain/save
+   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
+   Save: POST http://127.0.0.1:2737/api/obsidian/save
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed

@@ -431,7 +431,8 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 			log.Info("codebase index completed", log.Fields{"path": body.Path})
 
 			if ds.Store != nil {
-				ds.Store.MarkIndexed(body.Path, 0, 0)
+				nodes, edges := countCodebaseGraph(ds.DwytHome, body.Path)
+				ds.Store.MarkIndexed(body.Path, nodes, edges)
 			}
 		}
 		ds.broadcastSSE("index_update", ds.codebaseProgress.progress)
@@ -688,6 +689,10 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 				err = install.Headroom(ds.DwytBin, ds.DwytHome)
 		case "obsidian":
 			err = nil // brain is built-in, no external install needed
+			// Also install the Obsidian MCP binary for MCP clients
+			go func() {
+				install.ObsidianMCP(ds.DwytBin)
+			}()
 		case "obsidian-mcp":
 			err = install.ObsidianMCP(ds.DwytBin)
 			}
@@ -1142,8 +1147,8 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
 
 	if ds.ProjectObsidian == nil {
-		d.UptimeSecs = 0
-		d.UptimeLabel = "active"
+		d.UptimeSecs = -1
+		d.UptimeLabel = ""
 		return d
 	}
 
@@ -1606,6 +1611,49 @@ func (ds *DashboardServer) headroomWrapClients() []string {
 
 // ── MCP Management ─────────────────────────────────────────────────────────
 
+// countCodebaseGraph walks the codebase-memory-mcp cache for a project
+// and counts nodes and edges from the stored graph data.
+func countCodebaseGraph(dwytHome, projectPath string) (nodes, edges int) {
+	hash := db.HashPath(projectPath)
+	cacheDir := filepath.Join(dwytHome, "codebase", hash)
+	if _, err := os.Stat(cacheDir); err != nil {
+		return 0, 0
+	}
+
+	// Walk all .json files in the cache and count entities
+	filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".json") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		// Count graph nodes/edges from known codebase-memory-mcp formats
+		var doc map[string]interface{}
+		if json.Unmarshal(data, &doc) == nil {
+			if n, ok := doc["nodes"]; ok {
+				switch v := n.(type) {
+				case float64:
+					nodes += int(v)
+				case []interface{}:
+					nodes += len(v)
+				}
+			}
+			if e, ok := doc["edges"]; ok {
+				switch v := e.(type) {
+				case float64:
+					edges += int(v)
+				case []interface{}:
+					edges += len(v)
+				}
+			}
+		}
+		return nil
+	})
+	return nodes, edges
+}
+
 // startMCPsIfNeeded starts the Codebase MCP service in background if installed.
 // Note: dwyt-obsidian is a stdio MCP server — AI agents launch it on demand.
 func (ds *DashboardServer) startMCPsIfNeeded() {
@@ -1657,6 +1705,7 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 	var body struct {
 		ProjectPath string `json:"project_path"`
+		Name        string `json:"name"`
 	}
 	c.BindJSON(&body)
 	if body.ProjectPath == "" {
@@ -1668,9 +1717,16 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	if err := reg.ConfigureMCP(body.ProjectPath); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+	if body.Name != "" {
+		if err := reg.ConfigureMCPByName(body.ProjectPath, body.Name); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		if err := reg.ConfigureMCP(body.ProjectPath); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	c.JSON(200, gin.H{"status": "configured", "note": "MCP configs written for Claude Desktop and VSCode"})
 }

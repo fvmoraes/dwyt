@@ -49,7 +49,7 @@ export default function SetupWizard() {
       setProjectPath(urlProject || config?.project_path || cwdData?.cwd || '')
       setReady(true)
     })
-  }, [])
+  }, [searchParams])
 
   useEffect(() => {
     if (!installing) return
@@ -58,10 +58,10 @@ export default function SetupWizard() {
         const data = await api.getInstallStatus()
         setInstallProgress(data.tools || {})
         if (!data.installing) { setInstalling(false); navigate('/dashboard') }
-      } catch (_) {}
+      } catch { /* ignore */ }
     }, 1500)
     return () => clearInterval(timer)
-  }, [installing])
+  }, [installing, navigate])
 
   function toggleSection(idx: number) {
     setExpanded(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])
@@ -77,7 +77,7 @@ export default function SetupWizard() {
       await api.saveSetup({ tools, ias, providers: [], project_path: projectPath })
       await api.installSetup({ tools, ias, providers: [], project_path: projectPath })
       setInstalling(true)
-    } catch (_) { navigate('/dashboard') }
+    } catch { navigate('/dashboard') }
     finally { setSaving(false) }
   }
 
