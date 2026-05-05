@@ -51,15 +51,17 @@ func Project(projectPath, clients, dwytBin string) {
 		rtkBin += ".exe"
 	}
 
-	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSONTemplate(cbmcpBin))
-	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSONTemplate(cbmcpBin, rtkBin))
+	projectName := filepath.Base(projectPath)
+
+	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
+	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSONTemplate(projectName, cbmcpBin, rtkBin))
 
 	if strings.Contains(clients, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 		// Claude also reads .claude/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(cbmcpBin))
+		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
 	}
 
 	if strings.Contains(clients, "cursor") {
@@ -73,7 +75,7 @@ func Project(projectPath, clients, dwytBin string) {
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, kiroSteering)
 		// Kiro also reads .kiro/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(cbmcpBin))
+		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
 	}
 
 	if strings.Contains(clients, "copilot") {
@@ -123,24 +125,24 @@ func writeIfMissing(path, content string) {
 
 // ── Templates with absolute binary paths ──────────────────────────────────────
 
-func mcpJSONTemplate(cbmcpBin string) string {
+func mcpJSONTemplate(projectName, cbmcpBin string) string {
 	return fmt.Sprintf(`{
   "mcpServers": {
-    "dwyt": {
+    %q: {
       "type": "stdio",
       "command": %q
     }
   }
 }
-`, cbmcpBin)
+`, projectName, cbmcpBin)
 }
 
-func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
+func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
 	return fmt.Sprintf(`{
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["AGENTS.md"],
   "mcp": {
-    "dwyt": {
+    %q: {
       "type": "local",
       "command": [%q]
     }
@@ -152,7 +154,7 @@ func opencodeJSONTemplate(cbmcpBin, rtkBin string) string {
     "skill": "allow"
   }
 }
-`, cbmcpBin)
+`, projectName, cbmcpBin)
 }
 
 func agentsMDTemplate(rtkBin string) string {

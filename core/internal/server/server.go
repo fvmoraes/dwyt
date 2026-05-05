@@ -944,6 +944,16 @@ func uptimeFromPID(pattern string) (int64, string) {
 	return processUptimeSecs, fmtUptime(processUptimeSecs)
 }
 
+func isPortOpen(port int) bool {
+	client := &http.Client{Timeout: 1 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
+}
+
 func fmtUptime(secs int64) string {
 	if secs < 0 {
 		return ""
@@ -1266,17 +1276,16 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
-	// Already running — just return the URL
-	if health.ProbeURL(uiURL + "/health") {
+	// Check if anything is already listening on the UI port
+	if isPortOpen(uiPort) {
 		c.JSON(200, gin.H{"url": uiURL, "started": false})
 		return
 	}
 
-	// Start via ProcessManager (handles port, healthcheck, logs)
+	// Start via ProcessManager
 	st, err := ds.ProcMan.Start("codebase")
 	if err != nil {
 		log.Error("failed to start codebase UI", log.Fields{"error": err.Error()})
-		// Return URL anyway — it may still be starting
 		c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "starting, please wait a moment"})
 		return
 	}
@@ -1286,7 +1295,6 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		port = st.Port
 		uiURL = fmt.Sprintf("http://localhost:%d", port)
 	}
-
 	c.JSON(200, gin.H{"url": uiURL, "started": true})
 }
 
