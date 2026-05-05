@@ -1461,17 +1461,13 @@ func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
 
 	ds.RuntimeState.RegisterProcess("headroom", status.PID, status.Port)
 
-	if err := integrate.WriteHeadroomProxyConfig(ds.DefaultProject, status.Port, ds.clientsString()); err != nil {
-		log.Warn("failed to write headroom proxy config", log.Fields{"error": err.Error()})
-	}
+	ds.runHeadroomWrap(ds.DefaultProject)
 
 	c.JSON(200, gin.H{"status": "started", "port": status.Port})
 }
 
 func (ds *DashboardServer) apiHeadroomStopPM(c *gin.Context) {
-	if err := integrate.RemoveHeadroomProxyConfig(ds.DefaultProject, ds.clientsString()); err != nil {
-		log.Warn("failed to remove headroom proxy config", log.Fields{"error": err.Error()})
-	}
+	ds.runHeadroomUnwrap(ds.DefaultProject)
 
 	ds.ProcMan.Stop("headroom")
 	ds.RuntimeState.RemoveProcess("headroom")
@@ -1522,10 +1518,7 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 		log.Info("headroom spawned by daemon", log.Fields{"pid": status.PID, "port": status.Port})
 
 		if status.Healthy {
-			// Write proxy config to client files for auto-detection
-			if err := integrate.WriteHeadroomProxyConfig(ds.DefaultProject, ds.HeadroomPort, ds.clientsString()); err != nil {
-				log.Warn("failed to write headroom proxy config on auto-start", log.Fields{"error": err.Error()})
-			}
+			ds.runHeadroomWrap(ds.DefaultProject)
 		} else {
 			log.Warn("headroom started but not healthy", log.Fields{"port": ds.HeadroomPort})
 		}
@@ -1550,6 +1543,62 @@ func (ds *DashboardServer) clientsString() string {
 		clients = strings.Join(cfg.Clients, ",")
 	}
 	return clients
+}
+
+var headroomWrapMap = map[string]string{
+	"claude":  "claude",
+	"codex":   "codex",
+	"cursor":  "cursor",
+	"copilot": "copilot",
+}
+
+func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
+	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	if _, err := os.Stat(headroomBin); err != nil {
+		return
+	}
+	clients := ds.clientsString()
+	for _, c := range strings.Split(clients, ",") {
+		c = strings.TrimSpace(c)
+		if hrName, ok := headroomWrapMap[c]; ok {
+			cmd := exec.Command(headroomBin, "wrap", hrName)
+			cmd.Dir = projectPath
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Warn("headroom wrap failed", log.Fields{"client": c, "error": err.Error(), "output": string(out)})
+			} else {
+				log.Info("headroom wrap", log.Fields{"client": c})
+			}
+		}
+	}
+}
+
+func (ds *DashboardServer) runHeadroomUnwrap(projectPath string) {
+	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	if _, err := os.Stat(headroomBin); err != nil {
+		return
+	}
+	clients := ds.clientsString()
+	for _, c := range strings.Split(clients, ",") {
+		c = strings.TrimSpace(c)
+		if _, ok := headroomWrapMap[c]; ok {
+			cmd := exec.Command(headroomBin, "unwrap", c)
+			cmd.Dir = projectPath
+			cmd.Run() // unwrap may not exist for all tools — best effort
+			log.Info("headroom unwrap", log.Fields{"client": c})
+		}
+	}
+}
+
+func (ds *DashboardServer) headroomWrapClients() []string {
+	clients := strings.Split(ds.clientsString(), ",")
+	var result []string
+	for _, c := range clients {
+		c = strings.TrimSpace(c)
+		if _, ok := headroomWrapMap[c]; ok {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 // broadcastSSE pushes an event to all connected SSE clients.

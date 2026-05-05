@@ -84,19 +84,29 @@ brain/
 
 ### Headroom — compressão de API automática
 
-Proxy que comprime chamadas às APIs de IA em trânsito (~34% de redução). **Sem configuração manual** — o `env.sh` exporta automaticamente:
+Proxy que comprime chamadas às APIs de IA em trânsito (~34% de redução). Usa o comando nativo do Headroom para configurar cada cliente de IA automaticamente:
+
+```bash
+# DWYT runs these automatically when Headroom starts:
+headroom wrap claude      # Claude Code
+headroom wrap codex       # Codex
+headroom wrap cursor      # Cursor
+headroom wrap copilot     # GitHub Copilot CLI
+```
+
+Ao iniciar o Headroom (pelo botão Start ou automaticamente com `dwyt .`), o DWYT executa `headroom wrap` para cada cliente de IA habilitado no Setup. Ao parar, executa `headroom unwrap` para remover a configuração.
+
+As variáveis de ambiente também são exportadas automaticamente pelo `env.sh`:
 
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
-Ao iniciar, injeta config de proxy nos arquivos dos clientes (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules/dwyt.mdc`, etc.). Ao parar, remove.
-
 | Botão | Ação |
 |-------|------|
 | **Open Stats** | Abre estatísticas de compressão em tempo real |
-| **Start/Stop** | Inicia/para o proxy com injeção/remoção automática de config |
+| **Start/Stop** | Inicia/para o proxy + wrap/unwrap automático dos clientes |
 
 ### RTK — compressão de terminal
 
