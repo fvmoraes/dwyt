@@ -16,10 +16,6 @@ func CBMCP(dwytBin string) error {
 		binName += ".exe"
 	}
 	binPath := filepath.Join(dwytBin, binName)
-	if _, err := os.Stat(binPath); err == nil {
-		fmt.Println("  ✓ codebase-memory-mcp já instalado")
-		return nil
-	}
 	os.MkdirAll(dwytBin, 0755)
 
 	// Install the --ui variant so the graph visualization works at localhost:9749
@@ -49,11 +45,6 @@ func RTK(dwytBin string) error {
 		binName += ".exe"
 	}
 	binPath := filepath.Join(dwytBin, binName)
-	if _, err := os.Stat(binPath); err == nil {
-		fmt.Println("  ✓ RTK já instalado")
-		exec.Command(binPath, "init", "-g", "--yes").Run()
-		return nil
-	}
 	os.MkdirAll(dwytBin, 0755)
 
 	script := fetch("https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh")
@@ -93,10 +84,6 @@ func Headroom(dwytBin, dwytHome string) error {
 		wrapperName = "headroom.bat"
 	}
 	wrapperPath := filepath.Join(dwytBin, wrapperName)
-	if _, err := os.Stat(wrapperPath); err == nil {
-		fmt.Println("  ✓ Headroom já instalado")
-		return nil
-	}
 
 	venvDir := filepath.Join(dwytHome, "headroom-venv")
 	os.MkdirAll(dwytHome, 0755)
@@ -133,6 +120,16 @@ func Headroom(dwytBin, dwytHome string) error {
 	return nil
 }
 
+
+func ObsidianMCP(dwytBin string) error {
+	binPath := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
+	if _, err := os.Stat(binPath); err == nil {
+		return nil
+	}
+	// The binary is part of the DWYT release bundle.
+	// If it's not found, it will be auto-installed on next DWYT update.
+	return fmt.Errorf("dwyt-obsidian-mcp not installed (run DWYT update or contact support)")
+}
 
 func fetch(url string) string {
 	resp, err := http.Get(url)

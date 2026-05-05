@@ -43,7 +43,27 @@ type BrainManager struct {
 	Current *ProjectObsidian
 }
 
+// safePath ensures the resolved path stays within dwytHome boundary.
+// Returns error if path escapes the allowed scope.
+func safePath(dwytHome, target string) error {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("obsidian: unsafe path resolution: %w", err)
+	}
+	dwytAbs, err := filepath.Abs(dwytHome)
+	if err != nil {
+		return fmt.Errorf("obsidian: unsafe home resolution: %w", err)
+	}
+	if !strings.HasPrefix(abs+string(os.PathSeparator), dwytAbs+string(os.PathSeparator)) && abs != dwytAbs {
+		return fmt.Errorf("obsidian: path escapes dwyt home boundary: %s", abs)
+	}
+	return nil
+}
+
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
+	if err := safePath(dwytHome, projectPath); err != nil && projectPath != "" {
+		return nil, err
+	}
 	id := hashPath(projectPath)
 	baseDir := filepath.Join(dwytHome, "projects", id)
 
@@ -409,22 +429,6 @@ func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
 	defer pb.mu.Unlock()
 	pb.AIEnabled = aiEnabled
 	pb.ToolsEnabled = toolsEnabled
-}
-
-func (pb *ProjectObsidian) Forget() error {
-	pb.mu.Lock()
-	defer pb.mu.Unlock()
-
-	entries, _ := os.ReadDir(pb.brainDir)
-	for _, e := range entries {
-		os.RemoveAll(filepath.Join(pb.brainDir, e.Name()))
-	}
-	os.MkdirAll(filepath.Join(pb.brainDir, "knowledge"), 0755)
-	os.MkdirAll(filepath.Join(pb.brainDir, "logs"), 0755)
-	ensureSeedFiles(pb.brainDir)
-	pb.Summary = ""
-	pb.UpdatedAt = time.Now()
-	return nil
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {

@@ -91,7 +91,7 @@ export async function getContext() {
 }
 
 // Start codebase UI if needed and return its URL
-export async function openCodebaseUI(): Promise<{ url: string; started: boolean; error?: string }> {
+export async function openCodebaseUI(): Promise<{ url: string; started: boolean; ready?: boolean; error?: string; note?: string }> {
   const r = await fetch(`${API}/codebase/open-ui`, { method: 'POST' })
   return r.json()
 }
@@ -135,13 +135,52 @@ export async function summarizeBrain(): Promise<{ status: string; summary: strin
   const r = await fetch(`${API}/obsidian/summarize`, { method: 'POST' })
   return r.json()
 }
-export async function forgetBrain(): Promise<{ status: string }> {
-  const r = await fetch(`${API}/obsidian/forget`, { method: 'POST' })
-  return r.json()
-}
 export async function openBrain(): Promise<{ status: string; error?: string }> {
   const r = await fetch(`${API}/obsidian/open`, { method: 'POST' })
   return r.json()
+}
+
+// ── MCP endpoints ────────────────────────────────────────────────────────
+export async function getMCPRegistry(): Promise<{ mcpServers: Record<string, { command: string; port: number; healthURL: string; enabled: boolean; installed: boolean; status: string; pid: number }> }> {
+  const r = await fetch(`${API}/mcp/registry`)
+  return r.json()
+}
+export async function configureMCP(projectPath?: string): Promise<{ status: string; note: string }> {
+  const r = await fetch(`${API}/mcp/configure`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_path: projectPath || '' }),
+  })
+  return r.json()
+}
+export async function mcpStart(name: string): Promise<any> {
+  const r = await fetch(`${API}/mcp/services/start`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return r.json()
+}
+export async function mcpStop(name: string): Promise<any> {
+  const r = await fetch(`${API}/mcp/services/stop`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return r.json()
+}
+export async function mcpRestart(name: string): Promise<any> {
+  const r = await fetch(`${API}/mcp/services/restart`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  return r.json()
+}
+export async function mcpStatus(name?: string): Promise<any> {
+  const url = name ? `${API}/mcp/services/status?name=${name}` : `${API}/mcp/services/status`
+  const r = await fetch(url)
+  return r.json()
+}
+export async function mcpLogs(name: string, tail?: number): Promise<string> {
+  const r = await fetch(`${API}/mcp/services/logs?name=${name}&tail=${tail || 50}`)
+  return r.text()
 }
 
 // ── ProcessManager endpoints ───────────────────────────────────────────────

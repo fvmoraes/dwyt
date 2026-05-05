@@ -20,7 +20,9 @@ import (
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/fvmoraes/dwyt/internal/procman"
+	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/fvmoraes/dwyt/internal/workspace"
@@ -128,8 +130,17 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
+	// Register Obsidian MCP (stdio-based, no port — runs as child process)
+	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
+	procmanInstance.Register("obsidian-mcp", obsidianMCPBin, "", 0)
+
 	// Route Codebase data to DWYT home instead of ~/.cache
 	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
+
+	// Initialize security protection system
+	security.Load(dwytHome)
+	// Initialize Obsidian API config
+	security.InitObsidianConfig(dwytHome)
 
 	// Read headroom port from env
 	headroomPort := 8787
@@ -240,7 +251,6 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/obsidian/search", ds.apiObsidianSearch)
 		api.POST("/obsidian/save", ds.apiObsidianSave)
 		api.POST("/obsidian/summarize", ds.apiObsidianSummarize)
-		api.POST("/obsidian/forget", ds.apiObsidianForget)
 		api.POST("/obsidian/open", ds.apiObsidianOpen)
 		// ProcessManager routes
 		api.POST("/services/codebase/start", ds.apiCodebaseStart)
@@ -253,6 +263,14 @@ func (ds *DashboardServer) Start() error {
 		api.GET("/services/headroom/logs", ds.apiHeadroomLogsPM)
 		// Runtime state endpoint
 		api.GET("/state", ds.apiState)
+		// MCP registry endpoints
+		api.GET("/mcp/registry", ds.apiMCPRegistry)
+		api.POST("/mcp/configure", ds.apiMCPConfigure)
+		api.POST("/mcp/services/start", ds.apiMCPStart)
+		api.POST("/mcp/services/stop", ds.apiMCPStop)
+		api.POST("/mcp/services/restart", ds.apiMCPRestart)
+		api.GET("/mcp/services/status", ds.apiMCPStatus)
+		api.GET("/mcp/services/logs", ds.apiMCPLogs)
 	}
 
 	go ds.broadcastLoop()
@@ -265,6 +283,9 @@ func (ds *DashboardServer) Start() error {
 
 	// Start headroom in background if installed and not already running
 	ds.startHeadroomIfNeeded()
+
+	// Start MCP services in background
+	ds.startMCPsIfNeeded()
 
 	return r.Run(addr)
 }
@@ -667,6 +688,8 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 				err = install.Headroom(ds.DwytBin, ds.DwytHome)
 		case "obsidian":
 			err = nil // brain is built-in, no external install needed
+		case "obsidian-mcp":
+			err = install.ObsidianMCP(ds.DwytBin)
 			}
 			if err != nil {
 				setStatus(t, "error: "+err.Error())
@@ -1271,26 +1294,18 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
-	// Check if anything is already listening on the UI port
+	// Check if already running — respond immediately
 	if isPortOpen(uiPort) {
-		c.JSON(200, gin.H{"url": uiURL, "started": false})
+		c.JSON(200, gin.H{"url": uiURL, "started": false, "ready": true})
 		return
 	}
 
-	// Start via ProcessManager
-	st, err := ds.ProcMan.Start("codebase")
-	if err != nil {
-		log.Error("failed to start codebase UI", log.Fields{"error": err.Error()})
-		c.JSON(200, gin.H{"url": uiURL, "started": true, "note": "starting, please wait a moment"})
-		return
-	}
+	// Start in background, respond immediately
+	go func() {
+		ds.ProcMan.Start("codebase")
+	}()
 
-	port := uiPort
-	if st != nil && st.Port > 0 {
-		port = st.Port
-		uiURL = fmt.Sprintf("http://localhost:%d", port)
-	}
-	c.JSON(200, gin.H{"url": uiURL, "started": true})
+	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "note": "starting in background"})
 }
 
 // apiHeadroomStatsURL checks if headroom proxy is running and returns the stats URL.
@@ -1390,18 +1405,6 @@ func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
 	}
 	summary := ds.ProjectObsidian.RebuildSummary()
 	c.JSON(200, gin.H{"status": "summarized", "summary": summary})
-}
-
-func (ds *DashboardServer) apiObsidianForget(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
-		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
-		return
-	}
-	if err := ds.ProjectObsidian.Forget(); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"status": "forgotten"})
 }
 
 func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
@@ -1599,6 +1602,155 @@ func (ds *DashboardServer) headroomWrapClients() []string {
 		}
 	}
 	return result
+}
+
+// ── MCP Management ─────────────────────────────────────────────────────────
+
+// startMCPsIfNeeded starts both MCP services in background if binaries are installed.
+func (ds *DashboardServer) startMCPsIfNeeded() {
+	go func() {
+		// Small delay to let daemon fully start
+		time.Sleep(2 * time.Second)
+
+		// Start codebase MCP (already managed by ProcMan)
+		if _, err := os.Stat(filepath.Join(ds.DwytBin, "codebase-memory-mcp")); err == nil {
+			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
+				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
+				ds.RuntimeState.RegisterProcess("mcp-codebase", st.PID, st.Port)
+			} else {
+				log.Warn("mcp codebase start failed", log.Fields{"error": err})
+			}
+		}
+
+		// Start obsidian MCP (stdio-based, no port)
+		if _, err := os.Stat(filepath.Join(ds.DwytBin, "dwyt-obsidian-mcp")); err == nil {
+			if st, err := ds.ProcMan.Start("obsidian-mcp"); err == nil && st.Running {
+				log.Info("mcp obsidian auto-started", log.Fields{"pid": st.PID})
+				ds.RuntimeState.RegisterProcess("mcp-obsidian", st.PID, 0)
+			} else {
+				log.Warn("mcp obsidian start failed", log.Fields{"error": err})
+			}
+		}
+	}()
+}
+
+// ── MCP API handlers ────────────────────────────────────────────────────────
+
+func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
+	reg, err := mcpregistry.Load()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	result := make(map[string]interface{})
+	for name, entry := range reg.MCPServers {
+		st := ds.ProcMan.Status(name)
+		installed := reg.IsBinaryInstalled(name)
+		status := "offline"
+		if st != nil && st.Running && st.Healthy {
+			status = "online"
+		}
+		result[name] = map[string]interface{}{
+			"command":   entry.Command,
+			"port":      entry.Port,
+			"healthURL": entry.HealthURL,
+			"enabled":   entry.Enabled,
+			"installed": installed,
+			"status":    status,
+			"pid":       func() interface{} { if st != nil { return st.PID }; return 0 }(),
+		}
+	}
+	c.JSON(200, gin.H{"mcpServers": result})
+}
+
+func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
+	var body struct {
+		ProjectPath string `json:"project_path"`
+	}
+	c.BindJSON(&body)
+	if body.ProjectPath == "" {
+		body.ProjectPath = ds.DefaultProject
+	}
+
+	reg, err := mcpregistry.Load()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if err := reg.ConfigureMCP(body.ProjectPath); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "configured", "note": "MCP configs written for Claude Desktop and VSCode"})
+}
+
+func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
+	var body struct{ Name string `json:"name"` }
+	c.BindJSON(&body)
+	if body.Name == "" {
+		c.JSON(400, gin.H{"error": "name is required"})
+		return
+	}
+	st, err := ds.ProcMan.Start(body.Name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, st)
+}
+
+func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
+	var body struct{ Name string `json:"name"` }
+	c.BindJSON(&body)
+	if body.Name == "" {
+		c.JSON(400, gin.H{"error": "name is required"})
+		return
+	}
+	st, err := ds.ProcMan.Stop(body.Name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, st)
+}
+
+func (ds *DashboardServer) apiMCPRestart(c *gin.Context) {
+	var body struct{ Name string `json:"name"` }
+	c.BindJSON(&body)
+	if body.Name == "" {
+		c.JSON(400, gin.H{"error": "name is required"})
+		return
+	}
+	st, err := ds.ProcMan.Restart(body.Name)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, st)
+}
+
+func (ds *DashboardServer) apiMCPStatus(c *gin.Context) {
+	name := c.Query("name")
+	if name == "" {
+		all := ds.ProcMan.AllStatus()
+		c.JSON(200, all)
+		return
+	}
+	c.JSON(200, ds.ProcMan.Status(name))
+}
+
+func (ds *DashboardServer) apiMCPLogs(c *gin.Context) {
+	name := c.Query("name")
+	tail := 50
+	if t := c.Query("tail"); t != "" {
+		fmt.Sscanf(t, "%d", &tail)
+	}
+	if name == "" {
+		c.JSON(400, gin.H{"error": "name is required"})
+		return
+	}
+	logs := ds.ProcMan.Logs(name, tail)
+	c.Data(200, "text/plain; charset=utf-8", []byte(logs))
 }
 
 // broadcastSSE pushes an event to all connected SSE clients.

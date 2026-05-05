@@ -16,6 +16,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/fvmoraes/dwyt/internal/workspace"
@@ -73,6 +74,7 @@ func init() {
 	Cmd.AddCommand(reinstallCmd)
 	Cmd.AddCommand(uninstallCmd)
 	Cmd.AddCommand(daemonCmd)
+	Cmd.AddCommand(syncCmd)
 }
 
 func getHome() string {
@@ -335,13 +337,57 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var syncCmd = &cobra.Command{
+	Use:   "sync [what]",
+	Short: "Sync configurations to AI agents",
+	Long:  "Sync tool configurations. Use 'dwyt sync mcp' to configure MCP for Claude Desktop and VSCode.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		what := ""
+		if len(args) > 0 {
+			what = args[0]
+		}
+		switch what {
+		case "mcp":
+			return syncMCPAll()
+		case "":
+			// Sync everything by default
+			return syncMCPAll()
+		default:
+			return fmt.Errorf("unknown sync target: %s (use 'mcp')", what)
+		}
+	},
+}
+
+func syncMCPAll() error {
+	reg, err := mcpregistry.Load()
+	if err != nil {
+		return fmt.Errorf("mcp registry: %w", err)
+	}
+
+	cwd, _ := os.Getwd()
+	if err := reg.ConfigureMCP(cwd); err != nil {
+		return fmt.Errorf("mcp configure: %w", err)
+	}
+
+	fmt.Println("\n  ✓ MCP configs synced for Claude Desktop and VSCode")
+	fmt.Printf("  Registry: %s\n\n", filepath.Join(os.Getenv("HOME"), ".dwyt", "config", "mcp-registry.json"))
+	return nil
+}
+
 var reinstallCmd = &cobra.Command{
 	Use:   "reinstall",
 	Short: "Remove data dir and reinstall everything",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
+		// Safety: only remove if the path looks like a valid DWYT home
+		if !isValidDwytHome(e.DwytHome) {
+			return fmt.Errorf("unsafe DWYT home path: %s (refusing to operate)", e.DwytHome)
+		}
 		fmt.Printf("  Apagando %s...\n", e.DwytHome)
-		os.RemoveAll(e.DwytHome)
+		// Protect Obsidian vaults: remove everything except projects/
+		reinstallClean(e.DwytHome)
+		log.Info("reinstall: cleaned dwyt home (vaults preserved)", log.Fields{"path": e.DwytHome})
 		log.Info("reinstall: removed dwyt home", log.Fields{"path": e.DwytHome})
 		fmt.Printf("  ✓ Removido. Execute 'dwyt' para reinstalar via UI.\n")
 		return nil
@@ -372,12 +418,14 @@ var uninstallCmd = &cobra.Command{
 		time.Sleep(500 * time.Millisecond)
 		fmt.Println("  ✓ Processes stopped")
 
-		// ── 2. Remove ~/.dwyt (bins, SQLite, state, vaults, logs, venv) ───────
-		fmt.Printf("  → Removing DWYT home: %s\n", e.DwytHome)
-		if err := os.RemoveAll(e.DwytHome); err != nil {
-			fmt.Printf("  ✗ Failed to remove %s: %v\n", e.DwytHome, err)
+		// ── 2. Remove ~/.dwyt (bins, SQLite, state, logs, venv) ───────
+		// PROTECTION: projects/ (Obsidian vaults) are NEVER removed
+		fmt.Printf("  → Cleaning DWYT home: %s\n", e.DwytHome)
+		if !isValidDwytHome(e.DwytHome) {
+			fmt.Printf("  ✗ Unsafe DWYT home path: %s — refusing to clean\n", e.DwytHome)
 		} else {
-			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, Obsidian vaults, logs, venv)")
+			reinstallClean(e.DwytHome)
+			fmt.Println("  ✓ DWYT home cleaned (Obsidian vaults preserved)")
 		}
 
 		// ── 3. Remove symlinks from ~/.local/bin ──────────────────────────────
@@ -508,6 +556,52 @@ var uninstallCmd = &cobra.Command{
 }
 
 // removeFromRC removes the DWYT block (# dwyt:source + source line) from a shell RC file.
+// reinstallClean removes everything from DWYT home except protected paths (projects/).
+func reinstallClean(dwytHome string) {
+	entries, err := os.ReadDir(dwytHome)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Name() == "projects" {
+			continue // Skip — protected vault data
+		}
+		os.RemoveAll(filepath.Join(dwytHome, entry.Name()))
+	}
+}
+
+// isValidDwytHome checks that a path looks like a valid DWYT home directory
+// (contains .dwyt in its path and exists within user home or a valid DWYT_HOME override).
+func isValidDwytHome(path string) bool {
+	if path == "" || path == "/" {
+		return false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	// Must contain .dwyt as a path component
+	if !strings.Contains(abs, ".dwyt") {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		homeAbs, _ := filepath.Abs(home)
+		// DWYT home must be under user home OR be a DWYT_HOME override
+		if strings.HasPrefix(abs, homeAbs) {
+			return true
+		}
+	}
+	// Allow explicit DWYT_HOME override if set
+	if dwytHome := os.Getenv("DWYT_HOME"); dwytHome != "" {
+		absOverride, _ := filepath.Abs(dwytHome)
+		if abs == absOverride {
+			return true
+		}
+	}
+	return false
+}
+
 func removeFromRC(rcFile string) bool {
 	data, err := os.ReadFile(rcFile)
 	if err != nil {

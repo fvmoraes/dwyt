@@ -49,10 +49,11 @@ export default function Dashboard() {
   const [searchResult, setSearchResult] = useState('')
   const [obsidianStats, setObsidianStats]   = useState<any>(null)
   const [summarizing,  setSummarizing]  = useState(false)
-  const [forgetting,   setForgetting]   = useState(false)
   const [savingBrain,  setSavingBrain]  = useState(false)
   const [saveType,     setSaveType]     = useState('note')
   const [saveContent,  setSaveContent]  = useState('')
+  const [mcpRegistry,  setMCPRegistry]  = useState<Record<string, { status: string; port: number; installed: boolean; enabled: boolean }>>({})
+  const [configuringMCP, setConfiguringMCP] = useState('')
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -77,6 +78,10 @@ export default function Dashboard() {
     try {
       const ms = await api.getBrainStatus()
       if (ms.active && ms.stats) setObsidianStats(ms.stats)
+    } catch (_) {}
+    try {
+      const reg = await api.getMCPRegistry()
+      if (reg.mcpServers) setMCPRegistry(reg.mcpServers)
     } catch (_) {}
   }, [indexPath])
 
@@ -505,6 +510,7 @@ export default function Dashboard() {
               <Row label={t.tokensSavedLabel} value={'—'} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
               <Row label={t.status}          value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
+              <Row label={'MCP'}              value={mcpRegistry['codebase']?.status === 'online' ? `🟢 ${t.mcpOnline}` : `🔴 ${t.mcpOffline}`} />
               <RepoRow />
               <Hr />
               {state === 'not_installed' ? (
@@ -529,9 +535,40 @@ export default function Dashboard() {
                   )}
                   {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
                   <LinkBtn label={isIndexed ? t.openGraph : t.openGraphUnavailable} onClick={async () => {
-                    const r = await api.openCodebaseUI()
-                    if (r.url) window.open(r.url)
-                    if (r.started) setTimeout(pollAll, 2000)
+                    const btn = document.activeElement as HTMLButtonElement
+                    if (btn) { btn.textContent = '...'; btn.disabled = true }
+                    try {
+                      const r = await api.openCodebaseUI()
+                      if (r.url) {
+                        if (!r.ready && r.started) {
+                          // Wait and poll until ready, then open
+                          const waitStart = Date.now()
+                          const checkReady = setInterval(() => {
+                            fetch('http://127.0.0.1:9749/health')
+                              .then(res => {
+                                if (res.ok) {
+                                  clearInterval(checkReady)
+                                  window.open(r.url)
+                                  pollAll()
+                                }
+                              }).catch(() => {
+                                if (Date.now() - waitStart > 15000) {
+                                  clearInterval(checkReady)
+                                  pollAll()
+                                }
+                              })
+                          }, 500)
+                        } else {
+                          window.open(r.url)
+                        }
+                      }
+                    } catch (_) { pollAll() }
+                    if (btn) { btn.textContent = isIndexed ? t.openGraph : t.openGraphUnavailable; btn.disabled = false }
+                  }} />
+                  <LinkBtn label={configuringMCP === 'codebase' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
+                    setConfiguringMCP('codebase')
+                    try { await api.configureMCP(indexPath); pollAll() } catch (_) {}
+                    setConfiguringMCP('')
                   }} />
                 </>
               )}
@@ -600,6 +637,7 @@ export default function Dashboard() {
               <Hr />
               <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
               <Row label={t.uptime}         value={fmtUptimeFromDet(det)} />
+              <Row label={'MCP'}              value={mcpRegistry['obsidian-mcp']?.status === 'online' ? `🟢 ${t.mcpOnline}` : `🔴 ${t.mcpOffline}`} />
               <RepoRow />
               <Hr />
               {/* Quick save */}
@@ -629,6 +667,11 @@ export default function Dashboard() {
                 <button style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleSearch}>{t.search}</button>
               </div>
               {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
+              <LinkBtn label={configuringMCP === 'obsidian' ? t.mcpConfiguring : t.mcpConfigure} onClick={async () => {
+                setConfiguringMCP('obsidian')
+                try { await api.configureMCP(indexPath); pollAll() } catch (_) {}
+                setConfiguringMCP('')
+              }} />
               <div style={{ display: 'flex', gap: 4 }}>
                 <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
                   setSummarizing(true)
@@ -641,20 +684,11 @@ export default function Dashboard() {
                   {summarizing ? '...' : t.rebuildSummary}
                 </button>
                 <button style={{ fontSize: 9, flex: 1, padding: '3px 6px' }} onClick={async () => {
-                  if (!confirm(t.forgetMemoryConfirm || 'Forget all Obsidian data?')) return
-                  setForgetting(true)
-                  try { await api.forgetBrain(); setObsidianStats(null); pollAll() } catch (_) {}
-                  setForgetting(false)
-                }} disabled={forgetting}>
-                  {forgetting ? '...' : t.forgetMemory}
+                  try { await api.openBrain() } catch (_) {}
+                }}>
+                  🧠 {t.openBrain || 'Open Vault'}
                 </button>
               </div>
-              {/* Open in Obsidian */}
-              <button style={{ fontSize: 10, padding: '4px 8px', width: '100%' }} onClick={async () => {
-                try { await api.openBrain() } catch (_) {}
-              }}>
-                🧠 {t.openBrain || 'Open in Obsidian'}
-              </button>
             </div>
           )
         })()}
