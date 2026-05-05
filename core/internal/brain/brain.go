@@ -428,16 +428,6 @@ func (pb *ProjectObsidian) Forget() error {
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {
-	if ObsidianInstalled() {
-		vaultURL := fmt.Sprintf("obsidian://open?vault=%s", pb.ProjectName)
-		cmd := exec.Command("xdg-open", vaultURL)
-		if runtime.GOOS == "darwin" {
-			cmd = exec.Command("open", vaultURL)
-		} else if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/c", "start", vaultURL)
-		}
-		cmd.Start()
-	}
 	return pb.OpenBrainDir()
 }
 

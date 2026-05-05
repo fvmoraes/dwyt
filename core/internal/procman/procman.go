@@ -103,27 +103,10 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	}
 
 	cmd := exec.Command(binPath, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	// Redirect stdin to /dev/null — critical for MCP servers (like codebase-memory-mcp)
-	// that read from stdin by default. Without this they block waiting for input
-	// and the HTTP UI never starts.
-	devNull, err := os.Open(os.DevNull)
-	if err == nil {
-		cmd.Stdin = devNull
-		defer devNull.Close()
-	} else {
-		cmd.Stdin = nil
-	}
-	// Create a new process group/session so the child is not affected by
-	// terminal job control (SIGTTOU/SIGTTIN) — prevents state T (stopped).
-	setSysProcAttr(cmd)
-
-	// Inherit environment and add CBM_CACHE_DIR so codebase stores data in ~/.dwyt/codebase
-	cmd.Env = os.Environ()
-	cbmCacheDir := filepath.Join(pm.logDir, "..", "codebase") // logDir is ~/.dwyt/logs
-	cbmCacheDir = filepath.Clean(cbmCacheDir)
-	cmd.Env = append(cmd.Env, "CBM_CACHE_DIR="+cbmCacheDir)
+	// Keep stdin open with a pipe — MCP servers (codebase) need stdin alive
+	// to stay running. If stdin is /dev/null they read EOF and exit.
+	stdinPipe, _ := cmd.StdinPipe()
+	defer stdinPipe.Close()
 
 	stdoutPath := filepath.Join(pm.logDir, name+"-stdout.log")
 	stderrPath := filepath.Join(pm.logDir, name+"-stderr.log")
