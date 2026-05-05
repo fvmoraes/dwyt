@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -17,8 +19,29 @@ type ProjectState struct {
 	RTKSaved    int64     `json:"rtk_saved,omitempty"`
 }
 
+// dwytHome returns ~/.dwyt (or $DWYT_HOME if set).
+func dwytHome() string {
+	if h := os.Getenv("DWYT_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".dwyt")
+}
+
+// hashPath returns a 12-char hex ID for the given path — same algorithm as db.HashPath.
+func hashPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.Clean(abs)
+	h := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(h[:])[:12]
+}
+
+// ProjectDir returns ~/.dwyt/projects/<id> — never inside the project itself.
 func ProjectDir(repoPath string) string {
-	return filepath.Join(repoPath, ".dwyt")
+	return filepath.Join(dwytHome(), "projects", hashPath(repoPath))
 }
 
 func Read(repoPath string) (*ProjectState, error) {
@@ -43,7 +66,6 @@ func Save(ps *ProjectState) error {
 }
 
 func Touch(repoPath string) {
-	os.MkdirAll(ProjectDir(repoPath), 0755)
 	ps, _ := Read(repoPath)
 	ps.LastOpen = time.Now()
 	Save(ps)

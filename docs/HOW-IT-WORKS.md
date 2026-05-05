@@ -474,13 +474,18 @@ Component mounts
 │       │   ├── tasks.md
 │       │   ├── knowledge/
 │       │   └── logs/
-│       └── project.json          # project metadata
+│       ├── project.json          # project metadata + last_open
+│       └── headroom-proxy.json   # headroom proxy state (when active)
 ├── dwyt.db                       # SQLite (projects + config)
 ├── dwyt.log                      # DWYT log file
 ├── env.sh                        # Shell environment (sourced in .zshrc)
 ├── config.json                   # (legacy — now in SQLite)
 └── state.json                    # Runtime state (PIDs, ports, errors)
 ```
+
+> **Note:** DWYT never creates files inside your project directory except the AI client config files
+> (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) that you explicitly select during Setup.
+> All DWYT state lives exclusively in `~/.dwyt/`.
 
 ---
 

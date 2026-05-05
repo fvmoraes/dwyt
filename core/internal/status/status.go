@@ -129,7 +129,7 @@ func pollHeadroom() ToolStatus {
 
 func pollBrain() ToolStatus {
 	ts := ToolStatus{Name: "brain"}
-	// Brain is always available if DWYT is running (it's filesystem-based)
+	// Obsidian vault is always available if DWYT is running (filesystem-based)
 	ts.Running = true
 	ts.Healthy = true
 	ts.State = StateRunning

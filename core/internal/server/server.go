@@ -609,7 +609,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		}
 	}
 	if service == "" || service == "brain" {
-		logs["brain"] = "brain: active (Obsidian vault)"
+		logs["brain"] = "obsidian: active (Obsidian vault)"
 	}
 
 	c.JSON(200, gin.H{"logs": logs})

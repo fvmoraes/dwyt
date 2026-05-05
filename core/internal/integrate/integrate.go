@@ -41,7 +41,7 @@ func Project(projectPath, clients, dwytBin string) {
 	}
 
 	appendLine(gitignore, ".mcp.json")
-	appendLine(gitignore, ".dwyt/")
+	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
 
 	// ── Use absolute paths in generated configs ────────────────────────
 	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
@@ -176,7 +176,7 @@ func agentsMDTemplate(rtkBin string) string {
 		"- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m \"msg\"`\n\n" +
 		"### 4. Codebase — Mapa do Código (SOB DEMANDA)\n" +
 		"- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.\n" +
-		"- Prefira consultar o brain/contexto do projeto antes de indexar ou navegar no código.\n" +
+		"- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.\n" +
 		"- Use `search_graph`, `trace_call_path`, `get_code_snippet` ao invés de grep/glob.\n"
 }
 
@@ -243,7 +243,8 @@ var markerStart = "<!-- dwyt:headroom-proxy-start -->"
 var markerEnd = "<!-- dwyt:headroom-proxy-end -->"
 
 func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients string) error {
-	dwytDir := filepath.Join(projectPath, ".dwyt")
+	// Store proxy state in ~/.dwyt/projects/<id>/ — never inside the project
+	dwytDir := workspace.ProjectDir(projectPath)
 	os.MkdirAll(dwytDir, 0755)
 
 	proxyConfig := map[string]any{
@@ -294,7 +295,8 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 }
 
 func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
-	proxyFile := filepath.Join(projectPath, ".dwyt", "headroom-proxy.json")
+	// Proxy state lives in ~/.dwyt/projects/<id>/
+	proxyFile := filepath.Join(workspace.ProjectDir(projectPath), "headroom-proxy.json")
 	if data, err := os.ReadFile(proxyFile); err == nil {
 		var cfg map[string]any
 		if json.Unmarshal(data, &cfg) == nil {

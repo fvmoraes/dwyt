@@ -232,7 +232,7 @@ func startServicesAsync(dwytBin string) int {
 		fmt.Printf("  →  headroom                not installed (install via UI)\n")
 	}
 
-	fmt.Printf("  →  brain                   available (Obsidian)\n")
+	fmt.Printf("  →  obsidian                available (Obsidian vault)\n")
 
 	return headroomPort
 }
@@ -312,7 +312,7 @@ var statusCmd = &cobra.Command{
 		if pm, err := brain.NewProjectBrain(DwytHome, cwd); err == nil {
 			stats := pm.Stats()
 			if files, ok := stats["total_files"].(int); ok && files > 0 {
-				fmt.Printf("\n  🧠 Brain: %d files for %s\n", files, stats["project_name"])
+				fmt.Printf("\n  🧠 Obsidian: %d files for %s\n", files, stats["project_name"])
 				if summary, ok := stats["summary"].(string); ok && summary != "" {
 					if len(summary) > 120 {
 						summary = summary[:117] + "..."
@@ -374,7 +374,7 @@ var uninstallCmd = &cobra.Command{
 		if err := os.RemoveAll(e.DwytHome); err != nil {
 			fmt.Printf("  ✗ Failed to remove %s: %v\n", e.DwytHome, err)
 		} else {
-			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, brain vaults, logs)")
+			fmt.Println("  ✓ DWYT home removed (bins, SQLite, state, Obsidian vaults, logs)")
 		}
 
 		// ── 3. Remove symlinks from ~/.local/bin ──────────────────────────────
@@ -417,13 +417,7 @@ var uninstallCmd = &cobra.Command{
 			}
 		}
 
-		// ── 7. Remove .dwyt/ folders from all tracked projects ────────────────
-		fmt.Println("  → Scanning for project .dwyt/ folders...")
-		removed := removeProjectDwytFolders()
-		if removed > 0 {
-			fmt.Printf("  ✓ Removed .dwyt/ from %d project(s)\n", removed)
-		}
-
+		// ── 7. Nothing to scan in project dirs — .dwyt/ no longer created there ──
 		fmt.Printf("\n  ✓ DWYT fully uninstalled.\n")
 		fmt.Printf("  ℹ  Restart your terminal to apply shell changes.\n\n")
 		return nil
@@ -463,70 +457,6 @@ func removeFromRC(rcFile string) bool {
 	}
 	os.WriteFile(rcFile, []byte(result), 0644)
 	return true
-}
-
-// removeProjectDwytFolders walks common project locations and removes .dwyt/ subdirs.
-func removeProjectDwytFolders() int {
-	home, _ := os.UserHomeDir()
-	count := 0
-
-	// Scan home directory up to 3 levels deep for .dwyt/ folders
-	searchRoots := []string{
-		home,
-		filepath.Join(home, "Documents"),
-		filepath.Join(home, "Projects"),
-		filepath.Join(home, "dev"),
-		filepath.Join(home, "code"),
-		filepath.Join(home, "workspace"),
-		filepath.Join(home, "src"),
-	}
-
-	seen := map[string]bool{}
-	for _, root := range searchRoots {
-		if _, err := os.Stat(root); err != nil {
-			continue
-		}
-		walkDepth(root, 3, func(path string) {
-			if seen[path] {
-				return
-			}
-			seen[path] = true
-			if err := os.RemoveAll(path); err == nil {
-				count++
-				fmt.Printf("  ✓ Removed: %s\n", path)
-			}
-		})
-	}
-	return count
-}
-
-// walkDepth walks dir up to maxDepth levels looking for .dwyt/ subdirectories.
-func walkDepth(dir string, maxDepth int, fn func(string)) {
-	if maxDepth < 0 {
-		return
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		fullPath := filepath.Join(dir, entry.Name())
-		if entry.Name() == ".dwyt" {
-			fn(fullPath)
-			continue // don't recurse into .dwyt itself
-		}
-		// Skip hidden dirs and common non-project dirs
-		if strings.HasPrefix(entry.Name(), ".") ||
-			entry.Name() == "node_modules" ||
-			entry.Name() == "vendor" ||
-			entry.Name() == "__pycache__" {
-			continue
-		}
-		walkDepth(fullPath, maxDepth-1, fn)
-	}
 }
 
 // removeFromWindowsUserPath removes dwytBin from HKCU\Environment\PATH.
