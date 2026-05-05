@@ -59,7 +59,7 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	brainDir := newDir
 	os.MkdirAll(brainDir, 0755)
 
-	dirs := []string{"knowledge", "logs"}
+	dirs := []string{"knowledge", "logs", ".obsidian"}
 	for _, d := range dirs {
 		os.MkdirAll(filepath.Join(brainDir, d), 0755)
 	}
@@ -428,21 +428,17 @@ func (pb *ProjectObsidian) Forget() error {
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {
-	if !ObsidianInstalled() {
-		return fmt.Errorf("obsidian is not installed")
+	if ObsidianInstalled() {
+		vaultURL := fmt.Sprintf("obsidian://open?vault=%s", pb.ProjectName)
+		cmd := exec.Command("xdg-open", vaultURL)
+		if runtime.GOOS == "darwin" {
+			cmd = exec.Command("open", vaultURL)
+		} else if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/c", "start", vaultURL)
+		}
+		cmd.Start()
 	}
-	vaultPath := pb.brainDir
-	if runtime.GOOS == "windows" {
-		vaultPath = strings.ReplaceAll(vaultPath, "\\", "/")
-	}
-	vaultURL := fmt.Sprintf("obsidian://open?path=%s", vaultPath)
-	cmd := exec.Command("xdg-open", vaultURL)
-	if runtime.GOOS == "darwin" {
-		cmd = exec.Command("open", vaultURL)
-	} else if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", "start", vaultURL)
-	}
-	return cmd.Start()
+	return pb.OpenBrainDir()
 }
 
 func (pb *ProjectObsidian) OpenBrainDir() error {

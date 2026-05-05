@@ -1118,14 +1118,9 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
 
-	// If Obsidian app is not installed, return not_installed
-	if !brain.ObsidianInstalled() {
-		d.UptimeSecs = -1
-		return d
-	}
-
 	if ds.ProjectObsidian == nil {
-		d.UptimeSecs = -1
+		d.UptimeSecs = 0
+		d.UptimeLabel = "active"
 		return d
 	}
 
