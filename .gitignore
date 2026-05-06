@@ -4,7 +4,6 @@
 .dwyt/
 
 # dwyt
-CLAUDE.md
 .claude/
 .claude/mcp.json
 .mcp.json
@@ -14,7 +13,6 @@ opencode.json
 .kiro/settings/mcp.json
 .vscode/mcp.json
 .codex/
-AGENTS.md
 .cursor/mcp.json
 .cursor/rules/dwyt.mdc
 .github/copilot-instructions.md
