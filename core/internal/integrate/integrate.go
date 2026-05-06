@@ -21,14 +21,15 @@ func Project(projectPath, clients, dwytBin string) {
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
 	gitignore := filepath.Join(projectPath, ".gitignore")
 	ensureDWYT(gitignore)
+	removeDWYTLegacyIgnores(gitignore)
 
 	cm := map[string][]string{
-		"claude":   {".claude/", "CLAUDE.md", ".claude/mcp.json"},
-		"codex":    {".codex", "AGENTS.md", ".mcp.json"},
-		"copilot":  {".github/copilot-instructions.md"},
-		"kiro":     {".kiro/"},
-		"cursor":   {".cursor/", ".cursorrules"},
-		"opencode": {"opencode.json", "AGENTS.md", ".mcp.json"},
+		"claude":   {"CLAUDE.md", ".claude/mcp.json"},
+		"codex":    {".codex/", ".mcp.json"},
+		"copilot":  {},
+		"kiro":     {".kiro/mcp.json"},
+		"cursor":   {".cursorrules"},
+		"opencode": {"opencode.json", ".mcp.json"},
 	}
 
 	for _, c := range strings.Split(clients, ",") {
@@ -43,27 +44,31 @@ func Project(projectPath, clients, dwytBin string) {
 	appendLine(gitignore, ".mcp.json")
 	appendLine(gitignore, ".vscode/mcp.json")
 	appendLine(gitignore, ".cursorrules")
+	appendLine(gitignore, "CLAUDE.md")
+	appendLine(gitignore, ".claude/mcp.json")
+	appendLine(gitignore, ".kiro/mcp.json")
+	appendLine(gitignore, "opencode.json")
 	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
 
 	// ── Use absolute paths in generated configs ────────────────────────
-	cbmcpBin      := filepath.Join(dwytBin, "codebase-memory-mcp")
+	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
-	rtkBin         := filepath.Join(dwytBin, "rtk")
+	rtkBin := filepath.Join(dwytBin, "rtk")
 	if runtime.GOOS == "windows" {
 		cbmcpBin += ".exe"
 		obsidianMCPBin += ".exe"
 		rtkBin += ".exe"
 	}
 
-	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
-	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin))
+	writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin)
+	writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, rtkBin)
 
 	if strings.Contains(clients, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 		// Claude also reads .claude/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
 	if strings.Contains(clients, "cursor") {
@@ -77,7 +82,7 @@ func Project(projectPath, clients, dwytBin string) {
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, kiroSteering)
 		// Kiro also reads .kiro/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
 	if strings.Contains(clients, "copilot") {
@@ -117,12 +122,126 @@ func appendLine(path, line string) {
 	f.Write([]byte(line + "\n"))
 }
 
+func removeDWYTLegacyIgnores(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	remove := map[string]bool{
+		"AGENTS.md":                       true,
+		".cursor/":                        true,
+		".kiro/":                          true,
+		".github/copilot-instructions.md": true,
+		".cursor/rules/dwyt.mdc":          true,
+		".kiro/steering/dwyt.md":          true,
+	}
+	lines := strings.Split(string(data), "\n")
+	kept := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if remove[strings.TrimSpace(line)] {
+			changed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if changed {
+		os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0644)
+	}
+}
+
 func writeIfMissing(path, content string) {
 	if _, err := os.Stat(path); err == nil {
 		return
 	}
 	os.MkdirAll(filepath.Dir(path), 0755)
 	os.WriteFile(path, []byte(content), 0644)
+}
+
+func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
+	config := map[string]interface{}{}
+	if data, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(data, &config)
+	}
+	servers, _ := config["mcpServers"].(map[string]interface{})
+	if servers == nil {
+		servers = map[string]interface{}{}
+	}
+	removeLegacyMCPKeys(servers)
+	servers["codebase"] = map[string]interface{}{
+		"type":    "stdio",
+		"command": cbmcpBin,
+	}
+	servers["obsidian"] = map[string]interface{}{
+		"type":    "stdio",
+		"command": obsidianMCPBin,
+	}
+	config["mcpServers"] = servers
+	writeJSON(path, config)
+}
+
+func writeOrMergeOpenCodeJSON(path, cbmcpBin, obsidianMCPBin, _ string) {
+	config := map[string]interface{}{}
+	if data, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(data, &config)
+	}
+	if _, ok := config["$schema"]; !ok {
+		config["$schema"] = "https://opencode.ai/config.json"
+	}
+	config["instructions"] = ensureStringItem(config["instructions"], "AGENTS.md")
+
+	mcp, _ := config["mcp"].(map[string]interface{})
+	if mcp == nil {
+		mcp = map[string]interface{}{}
+	}
+	removeLegacyMCPKeys(mcp)
+	mcp["codebase"] = map[string]interface{}{
+		"type":    "local",
+		"command": []interface{}{cbmcpBin},
+	}
+	mcp["obsidian"] = map[string]interface{}{
+		"type":    "local",
+		"command": []interface{}{obsidianMCPBin},
+	}
+	config["mcp"] = mcp
+
+	permission, _ := config["permission"].(map[string]interface{})
+	if permission == nil {
+		permission = map[string]interface{}{}
+	}
+	for _, k := range []string{"bash", "edit", "webfetch", "skill"} {
+		if _, ok := permission[k]; !ok {
+			permission[k] = "allow"
+		}
+	}
+	config["permission"] = permission
+
+	writeJSON(path, config)
+}
+
+func removeLegacyMCPKeys(m map[string]interface{}) {
+	for _, key := range []string{"dwyt", "dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
+		delete(m, key)
+	}
+}
+
+func ensureStringItem(value interface{}, item string) []interface{} {
+	list := []interface{}{}
+	if existing, ok := value.([]interface{}); ok {
+		list = append(list, existing...)
+	}
+	for _, v := range list {
+		if s, ok := v.(string); ok && s == item {
+			return list
+		}
+	}
+	return append(list, item)
+}
+
+func writeJSON(path string, value interface{}) {
+	os.MkdirAll(filepath.Dir(path), 0755)
+	data, _ := json.MarshalIndent(value, "", "  ")
+	os.WriteFile(path, append(data, '\n'), 0644)
 }
 
 // ── Templates with absolute binary paths ──────────────────────────────────────
@@ -175,8 +294,8 @@ func agentsMDTemplate(rtkBin string) string {
 		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
 		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
 		"The project vault is an Obsidian vault with markdown files.\n" +
-		"Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>\n" +
-		"Save: POST http://127.0.0.1:2737/api/obsidian/save\n\n" +
+		"Search: GET http://localhost:2737/api/obsidian/search?q=<query>\n" +
+		"Save: POST http://localhost:2737/api/obsidian/save\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
@@ -195,8 +314,8 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 
 ## Priority order (follow strictly):
 1. **Obsidian FIRST** — before any file read or context rebuild:
-   - Search: GET http://127.0.0.1:2737/api/obsidian/search?q=your+query
-   - Save: POST http://127.0.0.1:2737/api/obsidian/save {"type":"decision","content":"..."}
+   - Search: GET http://localhost:2737/api/obsidian/search?q=your+query
+   - Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
    - Types: command, decision, action, error, note
    - Never mix vaults between projects — isolation is automatic.
 
@@ -216,8 +335,8 @@ alwaysApply: true
 
 ## DWYT Priority Order:
 1. **Obsidian FIRST**: consult project vault before any file operation.
-   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/obsidian/save
+   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+   Save: POST http://localhost:2737/api/obsidian/save
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
@@ -228,8 +347,8 @@ const kiroSteering = `# DWYT Steering
 
 ## Priority:
 1. **Obsidian FIRST**: check project vault before reading files.
-   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/obsidian/save {"type":"decision","content":"..."}
+   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+   Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
 4. **Codebase MCP**: structural exploration only — use after Obsidian
@@ -241,8 +360,8 @@ const copilotMD = `# DWYT — GitHub Copilot
 
 ## Priority:
 1. **Obsidian FIRST**: check project vault before heavy file reads.
-   Search: GET http://127.0.0.1:2737/api/obsidian/search?q=<query>
-   Save: POST http://127.0.0.1:2737/api/obsidian/save
+   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+   Save: POST http://localhost:2737/api/obsidian/save
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed

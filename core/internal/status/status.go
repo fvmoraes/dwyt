@@ -17,17 +17,26 @@ import (
 type ServiceState string
 
 const (
-	StateNotInstalled ServiceState = "not_installed"
-	StateStarting    ServiceState = "starting"
-	StateRunning     ServiceState = "running"
-	StateFailed       ServiceState = "failed"
+	StateNotInstalled     ServiceState = "not_installed"
+	StateStarting         ServiceState = "starting"
+	StateOnline           ServiceState = "online"
+	StateOffline          ServiceState = "offline"
+	StateInstalled        ServiceState = "installed"
+	StateInactive         ServiceState = "inactive"
+	StatePortOpenNoHealth ServiceState = "port_open_no_health"
+	StateError            ServiceState = "error"
+
+	// Legacy aliases kept for older callers that still compare against these names.
+	StateRunning ServiceState = StateOnline
+	StateFailed  ServiceState = StateError
 )
 
 type ToolStatus struct {
 	Name    string       `json:"name"`
 	Running bool         `json:"running"`
 	Healthy bool         `json:"healthy"`
-	State   ServiceState `json:"state"`
+	Status  ServiceState `json:"status"`
+	State   ServiceState `json:"state,omitempty"` // legacy mirror of Status
 	Port    int          `json:"port,omitempty"`
 	Details string       `json:"details,omitempty"`
 	Error   string       `json:"error,omitempty"`
@@ -59,7 +68,7 @@ func PollAll(dwytBin string, hasObsidianVault ...bool) *SystemStatus {
 	s := &SystemStatus{Timestamp: time.Now()}
 	s.Tools = append(s.Tools, pollCBMCP(dwytBin))
 	s.Tools = append(s.Tools, pollRTK(dwytBin))
-	s.Tools = append(s.Tools, pollHeadroom())
+	s.Tools = append(s.Tools, pollHeadroom(dwytBin))
 	vault := false
 	if len(hasObsidianVault) > 0 {
 		vault = hasObsidianVault[0]
@@ -69,7 +78,26 @@ func PollAll(dwytBin string, hasObsidianVault ...bool) *SystemStatus {
 }
 
 func pollCBMCP(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "codebase-memory-mcp", State: StateNotInstalled}
+	ts := ToolStatus{Name: "codebase-memory-mcp", Status: StateNotInstalled, State: StateNotInstalled}
+	if health.ProbeURL("http://127.0.0.1:9749/health") {
+		ts.Status = StateOnline
+		ts.State = StateOnline
+		ts.Running = true
+		ts.Healthy = true
+		ts.Port = 9749
+		ts.Details = "UI on port 9749"
+		return ts
+	}
+	if health.ProbePort(9749) {
+		ts.Status = StatePortOpenNoHealth
+		ts.State = StatePortOpenNoHealth
+		ts.Running = false
+		ts.Healthy = false
+		ts.Port = 9749
+		ts.Details = "port 9749 occupied but healthcheck failed"
+		return ts
+	}
+
 	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
@@ -77,78 +105,71 @@ func pollCBMCP(dwytBin string) ToolStatus {
 
 	// Binary exists — verify it's functional with --version
 	if _, err := exec.Command(bin, "--version").Output(); err != nil {
-		ts.State = StateFailed
+		ts.Status = StateError
+		ts.State = StateError
 		ts.Error = "binary is present but not responding"
 		return ts
 	}
 
-	// Check if the HTTP UI is actually running on expected port
-	if health.ProbeURL("http://127.0.0.1:9749/health") {
-		ts.State = StateRunning
-		ts.Running = true
-		ts.Healthy = true
-		ts.Port = 9749
-		ts.Details = "UI on port 9749"
-	} else {
-		if health.ProbePort(9749) {
-			// Port is occupied by something else — service may be misconfigured
-			ts.State = StateRunning
-			ts.Running = false
-			ts.Healthy = false
-			ts.Port = 9749
-			ts.Details = "port 9749 occupied but healthcheck failed"
-		} else {
-			// Binary works, server not running — installed but not active
-			ts.State = StateRunning
-			ts.Running = true
-			ts.Healthy = true
-			ts.Port = 9749
-			ts.Details = "installed (launch on demand)"
-		}
-	}
+	ts.Status = StateOffline
+	ts.State = StateOffline
+	ts.Running = false
+	ts.Healthy = false
+	ts.Port = 9749
+	ts.Details = "installed (launch on demand)"
 	return ts
 }
 
 func pollRTK(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "rtk", State: StateNotInstalled}
+	ts := ToolStatus{Name: "rtk", Status: StateNotInstalled, State: StateNotInstalled}
 	bin := filepath.Join(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
 	}
 
-	ts.State = StateRunning
+	ts.Status = StateInstalled
+	ts.State = StateInstalled
 	if out, err := exec.Command(bin, "--version").Output(); err == nil {
 		ts.Running = true
 		ts.Healthy = true
 		ts.Details = strings.TrimSpace(string(out))
 	} else {
-		ts.State = StateFailed
+		ts.Status = StateError
+		ts.State = StateError
 		ts.Error = "binary is present but not responding"
 	}
 	return ts
 }
 
-func pollHeadroom() ToolStatus {
-	ts := ToolStatus{Name: "headroom", Port: headroomDefaultPort}
+func pollHeadroom(dwytBin string) ToolStatus {
+	ts := ToolStatus{Name: "headroom", Port: headroomDefaultPort, Status: StateNotInstalled, State: StateNotInstalled}
 	url := fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)
 	if health.ProbeURL(url) {
 		ts.Running = true
 		ts.Healthy = true
-		ts.State = StateRunning
+		ts.Status = StateOnline
+		ts.State = StateOnline
 		ts.Details = fmt.Sprintf("proxy on port %d", headroomDefaultPort)
 	} else {
-		ts.State = StateNotInstalled
+		bin := filepath.Join(dwytBin, "headroom")
+		if _, err := os.Stat(bin); err != nil {
+			return ts
+		}
+		ts.Status = StateOffline
+		ts.State = StateOffline
+		ts.Details = "installed (start on demand)"
 	}
 	return ts
 }
 
 func pollBrain(hasVault bool) ToolStatus {
-	ts := ToolStatus{Name: "obsidian"}
+	ts := ToolStatus{Name: "obsidian", Status: StateInactive, State: StateInactive}
 
 	// The vault (ProjectObsidian) is the primary indicator of obsidian state.
 	// Desktop app installation is secondary — used only for "Open Vault" action.
 	if !hasVault {
-		ts.State = StateNotInstalled
+		ts.Status = StateInactive
+		ts.State = StateInactive
 		ts.Running = false
 		ts.Healthy = false
 		ts.Details = "no vault loaded"
@@ -158,14 +179,16 @@ func pollBrain(hasVault bool) ToolStatus {
 	if !obsidianAppInstalled() {
 		ts.Running = true
 		ts.Healthy = true
-		ts.State = StateRunning
+		ts.Status = StateOnline
+		ts.State = StateOnline
 		ts.Details = "vault loaded (Obsidian app not installed)"
 		return ts
 	}
 
 	ts.Running = true
 	ts.Healthy = true
-	ts.State = StateRunning
+	ts.Status = StateOnline
+	ts.State = StateOnline
 	ts.Details = "Obsidian vault active"
 	return ts
 }
@@ -291,12 +314,12 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
-	
+
 	// Check if RTK is initialized in this project
 	if _, err := os.Stat(filepath.Join(projectPath, ".rtk")); err != nil {
 		return nil // RTK not initialized in this project
 	}
-	
+
 	cmd := exec.Command(bin, "gain", "--project")
 	cmd.Dir = projectPath
 	out, err := cmd.Output()
@@ -332,24 +355,24 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 
 	// codebase: MCP server launched on-demand by clients, not a persistent service
 	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
-	if _, err := os.Stat(bin); err != nil {
+	if health.ProbeURL("http://127.0.0.1:9749/health") {
+		states["codebase-memory-mcp"] = StateOnline
+	} else if _, err := os.Stat(bin); err != nil {
 		states["codebase-memory-mcp"] = StateNotInstalled
 	} else if _, err := exec.Command(bin, "--version").Output(); err == nil {
-		// Binary is functional. Check if HTTP UI is actually serving.
-		if health.ProbeURL("http://127.0.0.1:9749/health") {
-			states["codebase-memory-mcp"] = StateRunning
-		} else {
-			states["codebase-memory-mcp"] = StateNotInstalled // installed but not running
-		}
+		states["codebase-memory-mcp"] = StateOffline
 	} else {
-		states["codebase-memory-mcp"] = StateFailed
+		states["codebase-memory-mcp"] = StateError
 	}
 
 	// headroom
+	bin = filepath.Join(dwytBin, "headroom")
 	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)) {
-		states["headroom"] = StateRunning
-	} else {
+		states["headroom"] = StateOnline
+	} else if _, err := os.Stat(bin); err != nil {
 		states["headroom"] = StateNotInstalled
+	} else {
+		states["headroom"] = StateOffline
 	}
 
 	// rtk
@@ -357,15 +380,12 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	if _, err := os.Stat(bin); err != nil {
 		states["rtk"] = StateNotInstalled
 	} else {
-		states["rtk"] = StateRunning
+		states["rtk"] = StateInstalled
 	}
 
-	// obsidian — only active if app is installed
-	if obsidianAppInstalled() {
-		states["obsidian"] = StateRunning
-	} else {
-		states["obsidian"] = StateNotInstalled
-	}
+	// /api/status carries vault state; /api/health only reports that the
+	// Obsidian integration is available without claiming an active vault.
+	states["obsidian"] = StateInactive
 
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states

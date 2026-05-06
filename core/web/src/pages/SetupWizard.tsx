@@ -73,9 +73,10 @@ export default function SetupWizard() {
   async function handleSave() {
     if (!projectPath) return
     setSaving(true)
+    const selectedTools = tools.includes('obsidian') ? tools : [...tools, 'obsidian']
     try {
-      await api.saveSetup({ tools, ias, providers: [], project_path: projectPath })
-      await api.installSetup({ tools, ias, providers: [], project_path: projectPath })
+      await api.saveSetup({ tools: selectedTools, ias, providers: [], project_path: projectPath })
+      await api.installSetup({ tools: selectedTools, ias, providers: [], project_path: projectPath })
       setInstalling(true)
     } catch { navigate('/dashboard') }
     finally { setSaving(false) }

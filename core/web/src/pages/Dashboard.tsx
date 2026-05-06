@@ -42,8 +42,11 @@ function fmtUptimeFromDet(det: ToolDetail | undefined): string {
 }
 
 function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): ToolState {
+  const raw = tool?.status || tool?.state
+  if (raw === 'not_installed' || raw === 'error') return 'not_installed'
+  if (raw === 'online' || raw === 'installed') return 'active'
   if (!det || det.uptime_secs === -1) return 'not_installed'
-  if (tool?.healthy) return 'active'
+  if (tool?.healthy || tool?.running) return 'active'
   return 'inactive'
 }
 
@@ -80,6 +83,8 @@ export default function Dashboard() {
   const [saveContent, setSaveContent] = useState('')
   const [mcpRegistry, setMCPRegistry] = useState<MCPRegistry>({})
   const [configuringMCP, setConfiguringMCP] = useState('')
+  const [kiroPower, setKiroPower] = useState<api.KiroPowerStatus | null>(null)
+  const [refreshingKiroPower, setRefreshingKiroPower] = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -99,7 +104,7 @@ export default function Dashboard() {
   const pollAll = useCallback(async () => {
     try { setTools((await api.getStatus()).tools || []) } catch { /* */ }
     try { setDetails(await api.getToolDetails(indexPath || undefined) || {}) } catch { /* */ }
-    try { setLogs((await fetch('http://127.0.0.1:2737/api/logs').then(r => r.json())).logs || {}) } catch { /* */ }
+    try { setLogs((await fetch('http://localhost:2737/api/logs').then(r => r.json())).logs || {}) } catch { /* */ }
     try {
       const ms = await api.getBrainStatus()
       if (ms.active && ms.stats) setObsidianStats(ms.stats)
@@ -108,6 +113,7 @@ export default function Dashboard() {
       const reg = await api.getMCPRegistry()
       if (reg.mcpServers) setMCPRegistry(reg.mcpServers)
     } catch { /* */ }
+    try { setKiroPower(await api.getKiroPowerStatus()) } catch { /* */ }
   }, [indexPath])
 
   useEffect(() => {
@@ -119,7 +125,7 @@ export default function Dashboard() {
   }, [searchParams])
 
   useEffect(() => {
-    const evtSource = new EventSource('http://127.0.0.1:2737/api/events')
+    const evtSource = new EventSource('http://localhost:2737/api/events')
     evtSource.addEventListener('status', (e) => {
       try {
         const data = JSON.parse(e.data)
@@ -199,17 +205,19 @@ export default function Dashboard() {
         if (!r.ready && r.started) {
           const waitStart = Date.now()
           const checkReady = setInterval(() => {
-            fetch('http://127.0.0.1:9749/health')
+            fetch('http://localhost:9749/health')
               .then(res => {
-                if (res.ok) { clearInterval(checkReady); window.open(r.url); pollAll() }
+                if (res.ok) { clearInterval(checkReady); window.open(r.url); pollAll(); setOpeningGraph(false) }
+                else if (Date.now() - waitStart > 15000) { clearInterval(checkReady); pollAll(); setOpeningGraph(false) }
               }).catch(() => {
-                if (Date.now() - waitStart > 15000) { clearInterval(checkReady); pollAll() }
+                if (Date.now() - waitStart > 15000) { clearInterval(checkReady); pollAll(); setOpeningGraph(false) }
               })
           }, 500)
-        } else { window.open(r.url) }
+        } else { window.open(r.url); setOpeningGraph(false) }
+      } else {
+        setOpeningGraph(false)
       }
-    } catch { pollAll() }
-    setOpeningGraph(false)
+    } catch { pollAll(); setOpeningGraph(false) }
   }
 
   async function handleConfigureMCP(name: string) {
@@ -392,6 +400,31 @@ export default function Dashboard() {
               <span style={{ fontSize: 10, color: 'var(--text)', fontFamily: 'monospace' }}>{String(obsidianStats.summary ?? '')}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {kiroPower && (
+        <div className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <span style={{ color: 'var(--blue)', fontWeight: 700, textTransform: 'uppercase' }}>{t.kiroPower}</span>
+            <span title={kiroPower.power_dir} style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
+            </span>
+            {kiroPower.errors && kiroPower.errors.length > 0 && (
+              <span style={{ color: 'var(--yellow)' }}>{kiroPower.errors.join(', ')}</span>
+            )}
+          </div>
+          <Button
+            variant="secondary"
+            size="xs"
+            label={refreshingKiroPower ? t.refreshing : t.kiroPowerRefresh}
+            loading={refreshingKiroPower}
+            onClick={async () => {
+              setRefreshingKiroPower(true)
+              try { setKiroPower(await api.refreshKiroPower()) } catch { /* */ }
+              setRefreshingKiroPower(false)
+            }}
+          />
         </div>
       )}
 

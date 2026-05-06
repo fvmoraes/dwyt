@@ -14,6 +14,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/security"
@@ -44,6 +45,8 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 
 	rs := state.Init(dwytHome)
 	rs.SetCurrentProject(project, filepath.Base(project))
+	var setupCfg Config
+	hasSetupCfg := false
 
 	pb, brainErr := brain.NewProjectObsidian(dwytHome, project)
 	if brainErr != nil {
@@ -54,6 +57,8 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 			if raw, err := store.GetConfig("setup"); err == nil {
 				var cfg Config
 				if json.Unmarshal([]byte(raw), &cfg) == nil {
+					setupCfg = cfg
+					hasSetupCfg = true
 					pb.SetConfig(cfg.Ias, cfg.Tools)
 					if len(cfg.Ias) > 0 {
 						rs.SetClients(cfg.Ias)
@@ -72,7 +77,7 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
 	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
-	procmanInstance.Register("obsidian-mcp", obsidianMCPBin, "", 0)
+	procmanInstance.Register("obsidian", obsidianMCPBin, "", 0)
 
 	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
 
@@ -94,23 +99,31 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	}
 
 	ds := &DashboardServer{
-		Port:           port,
-		DwytBin:        dwytBin,
-		DwytHome:       dwytHome,
-		StartCwd:       project,
-		DefaultProject: project,
-		Store:          store,
-		ProjectObsidian:   pb,
-		ProcMan:        procmanInstance,
-		RuntimeState:   rs,
-		HeadroomPort:   headroomPort,
-		sseClients:     make(map[chan string]bool),
-		installStatus:  make(map[string]string),
+		Port:            port,
+		DwytBin:         dwytBin,
+		DwytHome:        dwytHome,
+		StartCwd:        project,
+		DefaultProject:  project,
+		Store:           store,
+		ProjectObsidian: pb,
+		ProcMan:         procmanInstance,
+		RuntimeState:    rs,
+		HeadroomPort:    headroomPort,
+		sseClients:      make(map[chan string]bool),
+		installStatus:   make(map[string]string),
 	}
 
 	if store != nil {
 		store.TouchProject(project)
 		store.SetConfig("project_path", project)
+	}
+
+	if hasSetupCfg && (contains(setupCfg.Ias, "kiro") || contains(setupCfg.Clients, "kiro")) {
+		go func() {
+			if _, err := kiropow.EnsurePower(dwytHome, dwytBin, project); err != nil {
+				log.Warn("kiro power ensure failed", log.Fields{"error": err.Error()})
+			}
+		}()
 	}
 
 	return ds
@@ -153,7 +166,7 @@ func (ds *DashboardServer) Start() error {
 	go ds.broadcastLoop()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", ds.Port)
-	fmt.Printf("   Dashboard → http://%s\n", addr)
+	fmt.Printf("   Dashboard → http://localhost:%d\n", ds.Port)
 
 	ds.startHeadroomIfNeeded()
 	ds.startMCPsIfNeeded()
@@ -264,7 +277,7 @@ func (ds *DashboardServer) startMCPsIfNeeded() {
 		if _, err := os.Stat(filepath.Join(ds.DwytBin, "codebase-memory-mcp")); err == nil {
 			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
 				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
-				ds.RuntimeState.RegisterProcess("mcp-codebase", st.PID, st.Port)
+				ds.RuntimeState.RegisterProcess("codebase", st.PID, st.Port)
 			} else {
 				log.Warn("mcp codebase start failed", log.Fields{"error": err})
 			}
@@ -310,7 +323,11 @@ func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
 			cmd := exec.Command(headroomBin, "wrap", hrName)
 			cmd.Dir = projectPath
 			if out, err := cmd.CombinedOutput(); err != nil {
-				log.Warn("headroom wrap failed", log.Fields{"client": c, "error": err.Error(), "output": string(out)})
+				msg := "headroom wrap failed"
+				if c == "codex" {
+					msg = "Codex uses OAuth login — headroom wrap not applicable"
+				}
+				log.Warn(msg, log.Fields{"client": c, "error": err.Error(), "output": string(out)})
 			} else {
 				log.Info("headroom wrap", log.Fields{"client": c})
 			}

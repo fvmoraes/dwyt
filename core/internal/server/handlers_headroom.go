@@ -11,8 +11,14 @@ import (
 
 func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
 	status, err := ds.ProcMan.Start("headroom")
-	if err != nil || !status.Healthy {
-		c.JSON(500, gin.H{"error": status.Error})
+	if err != nil || status == nil || !status.Healthy {
+		errMsg := "headroom failed to start"
+		if status != nil && status.Error != "" {
+			errMsg = status.Error
+		} else if err != nil {
+			errMsg = err.Error()
+		}
+		c.JSON(500, gin.H{"status": "error", "error": errMsg})
 		return
 	}
 
@@ -33,8 +39,24 @@ func (ds *DashboardServer) apiHeadroomStopPM(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiHeadroomStatusPM(c *gin.Context) {
-	status := ds.ProcMan.Status("headroom")
-	c.JSON(200, status)
+	st := ds.ProcMan.Status("headroom")
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)
+	if health.ProbeURL(healthURL) {
+		st.Status = "online"
+		st.State = "online"
+		st.Running = true
+		st.Healthy = true
+		st.Port = ds.HeadroomPort
+		st.Error = ""
+	} else if isPortOpen(ds.HeadroomPort) {
+		st.Status = "port_open_no_health"
+		st.State = "port_open_no_health"
+		st.Running = false
+		st.Healthy = false
+		st.Port = ds.HeadroomPort
+		st.Error = "port open but healthcheck failed"
+	}
+	c.JSON(200, st)
 }
 
 func (ds *DashboardServer) apiHeadroomLogsPM(c *gin.Context) {
@@ -49,16 +71,15 @@ func (ds *DashboardServer) apiHeadroomLogsPM(c *gin.Context) {
 func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
 	proxyPort := fmt.Sprintf("%d", ds.HeadroomPort)
 	healthURL := fmt.Sprintf("http://127.0.0.1:%s/health", proxyPort)
-	statsURL  := fmt.Sprintf("http://127.0.0.1:%s/stats", proxyPort)
+	statsURL := fmt.Sprintf("http://127.0.0.1:%s/stats", proxyPort)
 
 	bin := fmt.Sprintf("%s/headroom", ds.DwytBin)
-	if _, err := os.Stat(bin); err != nil {
-		c.JSON(404, gin.H{"error": "headroom not installed", "url": ""})
-		return
-	}
-
 	if health.ProbeURL(healthURL) {
 		c.JSON(200, gin.H{"url": statsURL, "started": false})
+		return
+	}
+	if _, err := os.Stat(bin); err != nil {
+		c.JSON(404, gin.H{"status": "not_installed", "error": "headroom not installed", "url": ""})
 		return
 	}
 

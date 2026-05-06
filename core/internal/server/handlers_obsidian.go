@@ -9,10 +9,15 @@ import (
 
 func (ds *DashboardServer) apiObsidianStatus(c *gin.Context) {
 	if ds.ProjectObsidian == nil {
-		c.JSON(200, gin.H{"active": false, "error": "no Obsidian vault loaded"})
+		c.JSON(200, gin.H{"status": "inactive", "active": false, "error": "no Obsidian vault loaded"})
 		return
 	}
-	c.JSON(200, gin.H{"active": true, "stats": ds.ProjectObsidian.Stats()})
+	c.JSON(200, gin.H{
+		"status":     "online",
+		"active":     true,
+		"vault_path": ds.ProjectObsidian.GetBrainDir(),
+		"stats":      ds.ProjectObsidian.Stats(),
+	})
 }
 
 func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
@@ -124,10 +129,12 @@ func (ds *DashboardServer) apiObsidianInstallStatus(c *gin.Context) {
 
 func (ds *DashboardServer) obsidianStats() map[string]interface{} {
 	if ds.ProjectObsidian == nil {
-		return map[string]interface{}{"active": false}
+		return map[string]interface{}{"status": "inactive", "active": false}
 	}
 	return map[string]interface{}{
-		"active": true,
-		"stats":  ds.ProjectObsidian.Stats(),
+		"status":     "online",
+		"active":     true,
+		"vault_path": ds.ProjectObsidian.GetBrainDir(),
+		"stats":      ds.ProjectObsidian.Stats(),
 	}
 }

@@ -14,18 +14,18 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<Variant, { bg: string; color: string; border: string; hoverBg: string }> = {
-  primary:   { bg: '#25262b', color: '#74c0fc', border: '#4a5568', hoverBg: '#2c2e33' },
-  secondary: { bg: '#25262b', color: '#909296', border: '#373a40', hoverBg: '#2c2e33' },
-  success:   { bg: '#1a3a1a', color: '#69db7c', border: '#2f9e44', hoverBg: '#1e4520' },
-  danger:    { bg: '#3a1a1a', color: '#ff8787', border: '#e03131', hoverBg: '#451e1e' },
-  ghost:     { bg: 'transparent', color: '#909296', border: 'transparent', hoverBg: '#25262b' },
-  icon:      { bg: 'transparent', color: '#909296', border: 'transparent', hoverBg: '#25262b' },
+  primary:   { bg: 'rgba(91, 141, 238, 0.85)', color: '#fff', border: 'rgba(91, 141, 238, 0.4)', hoverBg: 'rgba(91, 141, 238, 1)' },
+  secondary: { bg: 'rgba(255, 255, 255, 0.07)', color: '#e8eaf0', border: 'rgba(255, 255, 255, 0.12)', hoverBg: 'rgba(255, 255, 255, 0.12)' },
+  success:   { bg: 'rgba(74, 222, 128, 0.12)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.35)', hoverBg: 'rgba(74, 222, 128, 0.18)' },
+  danger:    { bg: 'rgba(248, 113, 113, 0.12)', color: '#f87171', border: 'rgba(248, 113, 113, 0.35)', hoverBg: 'rgba(248, 113, 113, 0.18)' },
+  ghost:     { bg: 'transparent', color: '#8b90a0', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
+  icon:      { bg: 'transparent', color: '#8b90a0', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
 }
 
 const sizeStyles = {
-  xs: { padding: '2px 6px', fontSize: 9, borderRadius: 3 },
-  sm: { padding: '3px 8px', fontSize: 10, borderRadius: 4 },
-  md: { padding: '4px 10px', fontSize: 11, borderRadius: 5 },
+  xs: { padding: '4px 8px', fontSize: 12, borderRadius: 4 },
+  sm: { padding: '6px 12px', fontSize: 13, borderRadius: 5 },
+  md: { padding: '8px 16px', fontSize: 15, borderRadius: 6 },
 }
 
 export default function Button({

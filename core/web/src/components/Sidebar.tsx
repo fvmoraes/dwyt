@@ -39,7 +39,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
   async function switchTo(path: string) {
     setSwitching(path)
     try {
-      const r = await fetch('http://127.0.0.1:2737/api/project/switch', {
+      const r = await fetch('http://localhost:2737/api/project/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path }),

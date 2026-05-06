@@ -1,27 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  --bg:     #1a1b1e;
-  --card:   #25262b;
-  --border: #373a40;
-  --text:   #c1c2c5;
-  --muted:  #5c5f66;
-  --green:  #2f9e44;
-  --yellow: #f08d49;
-  --red:    #f03e3e;
-  --blue:   #339af0;
+  --bg:     #0f1117;
+  --card:   rgba(30, 33, 48, 0.95);
+  --inner:  rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.07);
+  --text:   #e8eaf0;
+  --muted:  #8b90a0;
+  --green:  #4ade80;
+  --yellow: #facc15;
+  --red:    #f87171;
+  --blue:   #5b8dee;
   --cyan:   #3bc9db;
 }
 
 * { box-sizing: border-box; }
 
 body {
-  background: var(--bg);
+  background: linear-gradient(135deg, #0f1117 0%, #1a1d27 50%, #0f1117 100%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 12px;
+  font-size: 15px;
   margin: 0;
   min-height: 100vh;
+}
+
+body * {
+  font-size: max(12px, 1em) !important;
 }
 
 /* ── Card ── */
@@ -29,7 +35,12 @@ body {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 /* ── Status dots ── */
@@ -45,23 +56,23 @@ body {
 
 /* ── Buttons — compact base ── */
 button {
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--text);
-  border: none;
-  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 12px;
   border-radius: 5px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.4;
   transition: all 0.12s;
   white-space: nowrap;
 }
-button:hover   { background: #4a4d55; }
+button:hover   { background: rgba(255, 255, 255, 0.12); }
 button:disabled { opacity: 0.38; cursor: default; }
 
-button.primary       { background: var(--blue); color: #fff; border: none; }
-button.primary:hover { background: #228be6; }
+button.primary       { background: rgba(91, 141, 238, 0.85); color: #fff; border: 1px solid rgba(91, 141, 238, 0.4); }
+button.primary:hover { background: rgba(91, 141, 238, 1); }
 button.danger        { background: var(--red);  color: #fff; border: none; }
 button.danger:hover  { background: #c92a2a; }
 
@@ -86,13 +97,13 @@ button.subtle-stop:hover { background: rgba(240,62,62,0.18); border-color: var(-
 
 /* ── Inputs ── */
 input[type="text"] {
-  background: var(--bg);
+  background: var(--inner);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 4px 8px;
+  padding: 8px 10px;
   border-radius: 5px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 15px;
   width: 100%;
   line-height: 1.4;
 }
@@ -123,6 +134,8 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
   background: var(--card);
   user-select: none;
   font-size: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .accordion-header:hover { border-color: var(--blue); }
 .accordion-body { overflow: hidden; transition: max-height 0.25s ease; }
@@ -138,4 +151,5 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
 @media (max-width: 768px) {
   .dashboard-grid { grid-template-columns: 1fr !important; }
   .header-actions { flex-wrap: wrap; gap: 3px; }
+  body { overflow-x: hidden; }
 }

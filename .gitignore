@@ -1,5 +1,4 @@
 .DS_Store
-AGENTS.md
 .codex
 .vscode/
 .dwyt/
@@ -8,10 +7,8 @@ AGENTS.md
 .claude/
 .mcp.json
 opencode.json
-.cursor/
-.kiro/
-.github/copilot-instructions.md
 .cursorrules
 CLAUDE.md
 .claude/mcp.json
+.kiro/mcp.json
 .vscode/mcp.json

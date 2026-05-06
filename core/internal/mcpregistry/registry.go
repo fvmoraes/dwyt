@@ -11,11 +11,11 @@ import (
 )
 
 type MCPServerEntry struct {
-	Command    string   `json:"command"`
-	Args       []string `json:"args,omitempty"`
-	Port       int      `json:"port,omitempty"`
-	HealthURL  string   `json:"healthURL,omitempty"`
-	Enabled    bool     `json:"enabled"`
+	Command   string   `json:"command"`
+	Args      []string `json:"args,omitempty"`
+	Port      int      `json:"port,omitempty"`
+	HealthURL string   `json:"healthURL,omitempty"`
+	Enabled   bool     `json:"enabled"`
 }
 
 type Registry struct {
@@ -48,6 +48,23 @@ func Load() (*Registry, error) {
 		json.Unmarshal(data, r)
 	}
 
+	migrated := false
+	legacyNames := map[string]string{
+		"dwyt":          "codebase",
+		"dwyt-codebase": "codebase",
+		"dwyt-obsidian": "obsidian",
+		"obsidian-mcp":  "obsidian",
+	}
+	for legacy, canonical := range legacyNames {
+		if entry, ok := r.MCPServers[legacy]; ok {
+			if _, exists := r.MCPServers[canonical]; !exists {
+				r.MCPServers[canonical] = entry
+			}
+			delete(r.MCPServers, legacy)
+			migrated = true
+		}
+	}
+
 	// Ensure default entries
 	binDir := filepath.Join(dwytHome(), "bin")
 	defaults := map[string]MCPServerEntry{
@@ -58,14 +75,21 @@ func Load() (*Registry, error) {
 			Enabled:   true,
 		},
 		"obsidian": {
-			Command:   filepath.Join(binDir, "dwyt-obsidian-mcp"),
-			Enabled:   true,
+			Command: filepath.Join(binDir, "dwyt-obsidian-mcp"),
+			Enabled: true,
 		},
 	}
 
 	for name, entry := range defaults {
 		if _, exists := r.MCPServers[name]; !exists {
 			r.MCPServers[name] = entry
+			migrated = true
+		}
+	}
+
+	if migrated {
+		if err := r.Save(); err != nil {
+			log.Warn("mcp registry migration save failed", log.Fields{"error": err.Error()})
 		}
 	}
 

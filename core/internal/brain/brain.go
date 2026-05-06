@@ -62,11 +62,11 @@ func safePath(dwytHome, target string) error {
 }
 
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
-	if err := safePath(dwytHome, projectPath); err != nil && projectPath != "" {
-		return nil, err
-	}
 	id := db.HashPath(projectPath)
 	baseDir := filepath.Join(dwytHome, "projects", id)
+	if err := safePath(dwytHome, baseDir); err != nil {
+		return nil, err
+	}
 
 	// Migrate old "brain" folder to "obsidian" if it exists
 	oldDir := filepath.Join(baseDir, "brain")
@@ -89,6 +89,7 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		ProjectID:   id,
 		ProjectName: filepath.Base(projectPath),
 		ProjectPath: projectPath,
+		UpdatedAt:   time.Now(),
 		baseDir:     baseDir,
 		brainDir:    brainDir,
 	}
@@ -99,9 +100,11 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		pb.CreatedAt = time.Now()
 		if info, err := os.Stat(contextFile); err == nil {
 			pb.CreatedAt = info.ModTime()
+			pb.UpdatedAt = info.ModTime()
 		}
 	} else {
 		pb.CreatedAt = time.Now()
+		pb.UpdatedAt = pb.CreatedAt
 		pb.RebuildSummary()
 	}
 
@@ -228,6 +231,7 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 	defer pb.mu.Unlock()
 
 	now := time.Now()
+	pb.UpdatedAt = now
 
 	switch entryType {
 	case "decision":
@@ -388,6 +392,7 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	}
 
 	pb.Summary = summary
+	pb.UpdatedAt = time.Now()
 	contextFile := filepath.Join(pb.brainDir, "context.md")
 	os.WriteFile(contextFile, []byte(summary), 0644)
 	return summary
@@ -411,17 +416,17 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	})
 
 	return map[string]interface{}{
-		"project_id":     pb.ProjectID,
-		"project_name":   pb.ProjectName,
-		"project_path":   pb.ProjectPath,
-		"total_files":    totalFiles,
-		"files_by_type":  typeCount,
-		"has_summary":    pb.Summary != "",
-		"summary":        pb.Summary,
-		"last_updated":   pb.UpdatedAt.Format(time.RFC3339),
-		"ai_enabled":     pb.AIEnabled,
-		"tools_enabled":  pb.ToolsEnabled,
-		"obsidian_dir":      pb.brainDir,
+		"project_id":    pb.ProjectID,
+		"project_name":  pb.ProjectName,
+		"project_path":  pb.ProjectPath,
+		"total_files":   totalFiles,
+		"files_by_type": typeCount,
+		"has_summary":   pb.Summary != "",
+		"summary":       pb.Summary,
+		"last_updated":  pb.UpdatedAt.Format(time.RFC3339),
+		"ai_enabled":    pb.AIEnabled,
+		"tools_enabled": pb.ToolsEnabled,
+		"obsidian_dir":  pb.brainDir,
 	}
 }
 
@@ -569,13 +574,13 @@ func formatTypeCount(tc map[string]int) string {
 }
 
 type ProjectMeta struct {
-	Name         string    `json:"name"`
-	Path         string    `json:"path"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastOpen     time.Time `json:"last_open"`
-	ToolsEnabled []string  `json:"tools_enabled"`
-	AIEnabled    []string  `json:"ai_enabled"`
-	ObsidianFiles   int       `json:"obsidian_files"`
+	Name          string    `json:"name"`
+	Path          string    `json:"path"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastOpen      time.Time `json:"last_open"`
+	ToolsEnabled  []string  `json:"tools_enabled"`
+	AIEnabled     []string  `json:"ai_enabled"`
+	ObsidianFiles int       `json:"obsidian_files"`
 }
 
 func ensureBrainJSON(baseDir, projectPath string) {

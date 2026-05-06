@@ -21,6 +21,20 @@
 
 ---
 
+## Status de Execução — 2026-05-06
+
+Plano executado no código, frontend, geração de configs, Kiro Power, testes e documentação.
+
+Resumo do que foi consolidado:
+
+- MCPs canônicos: `codebase` e `obsidian`, com migração automática de chaves legadas.
+- Obsidian vault por projeto corrigido para repositórios fora de `~/.dwyt`.
+- Contrato de status canônico via campo `status`, preservando compatibilidade com `state`, `running` e `healthy`.
+- Dashboard ajustado para RTK como CLI, Kiro Power, status coerente e visual glassmorphism.
+- Setup e geração de arquivos agora mesclam configs existentes e mantêm `.gitignore` coerente.
+- Kiro Power implementado em `core/internal/kiropow` com endpoints `/api/kiro/power/status` e `/api/kiro/power/refresh`.
+- Validação documentada em `docs/06052026/plan-execution.md`.
+
 ## Objetivo
 
 Este documento consolida os três planos enviados (`PLAN.md`, `PLAN2.md` e `PLAN3.md`) em um único plano de ajuste para o Codex executar no projeto **DWYT**.

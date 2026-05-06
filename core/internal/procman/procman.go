@@ -18,6 +18,8 @@ import (
 
 type ServiceStatus struct {
 	Name    string `json:"name"`
+	Status  string `json:"status"`
+	State   string `json:"state,omitempty"`
 	Running bool   `json:"running"`
 	Healthy bool   `json:"healthy"`
 	PID     int    `json:"pid"`
@@ -27,15 +29,15 @@ type ServiceStatus struct {
 }
 
 type ManagedProcess struct {
-	Name       string
-	Bin        string
-	Args       []string
-	Port       int
-	HealthURL  string
-	PID        int
-	StartedAt  time.Time
-	LogDir     string
-	mu         sync.Mutex
+	Name      string
+	Bin       string
+	Args      []string
+	Port      int
+	HealthURL string
+	PID       int
+	StartedAt time.Time
+	LogDir    string
+	mu        sync.Mutex
 }
 
 type ProcessManager struct {
@@ -86,7 +88,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 
 	binPath := mp.Bin
 	if _, err := os.Stat(binPath); err != nil {
-		return &ServiceStatus{Name: name, Error: fmt.Sprintf("binary not found: %s", binPath)}, err
+		return &ServiceStatus{Name: name, Status: "not_installed", State: "not_installed", Error: fmt.Sprintf("binary not found: %s", binPath)}, err
 	}
 
 	freePort := health.FindFreePort(mp.Port)
@@ -124,7 +126,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
-		return &ServiceStatus{Name: name, Error: fmt.Sprintf("failed to start: %v", err)}, err
+		return &ServiceStatus{Name: name, Status: "error", State: "error", Error: fmt.Sprintf("failed to start: %v", err)}, err
 	}
 
 	mp.PID = cmd.Process.Pid
@@ -147,7 +149,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 			}
 			mp.PID = 0
 			log.Warn("process started but healthcheck failed, killed", log.Fields{"service": name, "error": err.Error()})
-			return &ServiceStatus{Name: name, Running: false, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, err
+			return &ServiceStatus{Name: name, Status: "error", State: "error", Running: false, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, err
 		}
 		log.Info("process healthy", log.Fields{"service": name, "port": mp.Port})
 	}
@@ -250,16 +252,26 @@ func (pm *ProcessManager) statusLocked(mp *ManagedProcess) *ServiceStatus {
 		Running: mp.Running(),
 	}
 	if s.Running {
+		s.Status = "online"
+		s.State = "online"
 		s.Uptime = time.Since(mp.StartedAt).Round(time.Second).String()
 		if mp.HealthURL != "" {
 			healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", mp.Port, mp.HealthURL)
 			s.Healthy = probeURL(healthURL)
 			if !s.Healthy {
+				s.Status = "port_open_no_health"
+				s.State = "port_open_no_health"
 				s.Error = "healthcheck failed"
 			}
 		} else {
 			s.Healthy = true
 		}
+	} else if _, err := os.Stat(mp.Bin); err != nil {
+		s.Status = "not_installed"
+		s.State = "not_installed"
+	} else {
+		s.Status = "offline"
+		s.State = "offline"
 	}
 	return s
 }
@@ -273,7 +285,7 @@ func (mp *ManagedProcess) Running() bool {
 		mp.PID = 0
 		return false
 	}
-	
+
 	// Check if process is not a zombie (Linux only)
 	if runtime.GOOS == "linux" {
 		statPath := fmt.Sprintf("/proc/%d/stat", mp.PID)
@@ -288,7 +300,7 @@ func (mp *ManagedProcess) Running() bool {
 			return false
 		}
 	}
-	
+
 	err = proc.Signal(syscall.Signal(0))
 	if err != nil {
 		mp.PID = 0

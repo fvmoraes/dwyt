@@ -230,6 +230,8 @@ Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK.
 │   └── <sha12>/
 │       ├── obsidian/            # Obsidian vault (markdowns)
 │       └── project.json         # project metadata
+├── powers/
+│   └── dwyt-power/              # local Kiro Power (regenerable)
 ├── env.sh                       # environment variables
 ├── dwyt.db                      # SQLite (projects + config)
 └── state.json                   # runtime state (PIDs, ports, errors)
@@ -253,7 +255,7 @@ Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK.
 
 ## Generated project files
 
-Setup creates these files in the project directory (all added to `.gitignore`):
+Setup creates or updates these files in the project directory. Local configs with absolute paths are ignored; shared instruction files stay versionable by default.
 
 ```
 <project>/
@@ -289,9 +291,34 @@ Setup creates these files in the project directory (all added to `.gitignore`):
 | **Claude Code** | `CLAUDE.md`, `.claude/` |
 | **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` |
 | **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md` |
-| **Kiro** | `.kiro/steering/dwyt.md`, `AGENTS.md` |
+| **Kiro** | `.kiro/steering/dwyt.md`, `.kiro/mcp.json`, `AGENTS.md` |
 | **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md` |
 | **OpenCode** | `opencode.json`, `AGENTS.md`, `.mcp.json` |
+
+---
+
+## Kiro Power
+
+When Kiro is enabled, DWYT creates a local Power at:
+
+```txt
+~/.dwyt/powers/dwyt-power
+```
+
+It is linked into:
+
+```txt
+~/.kiro/powers/dwyt-power
+```
+
+Only real MCPs are placed in `mcp.json`: `codebase` and `obsidian`. RTK and Headroom are provided as steering instructions because RTK is a CLI tool and Headroom is an API proxy.
+
+Status endpoints:
+
+```txt
+GET  /api/kiro/power/status
+POST /api/kiro/power/refresh
+```
 
 ---
 

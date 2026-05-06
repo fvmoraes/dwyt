@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var dwytAPI = "http://127.0.0.1:2737/api"
+var dwytAPI = "http://localhost:2737/api"
 
 func SetAPIBase(url string) {
 	dwytAPI = url

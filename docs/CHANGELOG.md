@@ -4,6 +4,36 @@ All notable changes to DWYT are documented here.
 
 ---
 
+## v4.1.0 — Plan Execution, Status Contract, Kiro Power (2026-05-06)
+
+### Bug Fixes
+
+- Fixed project Obsidian vault creation for repositories outside `~/.dwyt`; vaults now resolve under `~/.dwyt/projects/<sha12>/obsidian/`.
+- Added canonical `status` values while keeping legacy `state`, `running`, and `healthy` fields for compatibility.
+- Aligned service status probes so Codebase and Headroom can report `online` when their health ports are already running outside ProcessManager.
+- Migrated legacy MCP registry keys (`dwyt`, `dwyt-codebase`, `dwyt-obsidian`, `obsidian-mcp`) to canonical `codebase` and `obsidian`.
+- Updated project MCP config generation to merge existing JSON files instead of only writing missing files.
+- Corrected `.gitignore` handling so shared instruction files are not ignored by default.
+
+### Features
+
+- Added Kiro Power generation at `~/.dwyt/powers/dwyt-power` with `POWER.md`, `mcp.json`, and steering files for Obsidian, Codebase, RTK, and Headroom.
+- Added Kiro Power API endpoints: `GET /api/kiro/power/status` and `POST /api/kiro/power/refresh`.
+- Added Dashboard visibility for Kiro Power status and refresh.
+- Made Obsidian Linux installer discover the latest AppImage via the GitHub release API instead of relying on a hardcoded version.
+- Added regression tests for Obsidian vault path safety, MCP registry migration, and Kiro Power generation/idempotency.
+
+### Validation
+
+- `go test ./...` passes with 33 tests.
+- `go vet ./...` passes.
+- `go build ./...` passes.
+- `npm run lint` passes.
+- `npm run build` passes.
+- `core/test-e2e.sh` passes.
+
+---
+
 ## v4.0.2 — Obsidian Installer + MCP Detection + Gitignore Fixes (2026-05-05)
 
 ### 🐛 Bug Fixes

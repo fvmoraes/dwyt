@@ -252,7 +252,7 @@ The MCP registry manages MCP server configurations for AI clients (Claude Deskto
 
 - **Load** — reads `mcp-registry.json` from `~/.dwyt/config/`, ensures default entries exist
 - **Save** — persists changes to disk
-- **ConfigureMCP** — writes MCP configs for all enabled servers to Claude Desktop (`claude_desktop_config.json`), VSCode (`.vscode/mcp.json`), and Kiro (`.kiro/mcp.json`)
+- **ConfigureMCP** — writes MCP configs for all enabled servers to Claude Desktop, VSCode, and project AI client configs (`.mcp.json`, `.claude/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
 - **ConfigureMCPByName(name)** — targets a single MCP server for configuration
 - **Toggle(name, enabled)** — enables/disables a server without removing it
 
@@ -268,7 +268,7 @@ When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards
 1. Saves the registry to disk
 2. Creates backup of current entries
 3. Writes Claude Desktop config → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/claude-desktop/` (Linux)
-4. Writes per-project `.vscode/mcp.json` and `.kiro/mcp.json`
+4. Writes per-project MCP configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
 5. Rolls back on failure
 
 ### API Endpoints
@@ -282,6 +282,36 @@ When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards
 | POST | `/api/mcp/services/restart` | Restart a server by name |
 | GET | `/api/mcp/services/status?name=` | Get server process status |
 | GET | `/api/mcp/services/logs?name=` | Get server logs |
+
+---
+
+## Kiro Power
+
+When Kiro is enabled in setup, DWYT ensures a local Power exists at
+`~/.dwyt/powers/dwyt-power` and registers it through the symlink
+`~/.kiro/powers/dwyt-power`.
+
+Generated files:
+
+```txt
+~/.dwyt/powers/dwyt-power/
+├── POWER.md
+├── mcp.json              # only codebase + obsidian MCPs when binaries exist
+└── steering/
+    ├── dwyt-context.md
+    ├── obsidian.md
+    ├── codebase.md
+    ├── rtk.md
+    └── headroom.md
+```
+
+RTK and Headroom are not MCP servers in the Power. They are steering instructions
+because RTK is a CLI and Headroom is an API proxy.
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/kiro/power/status` | Show installed state, symlink, MCP binary availability, and errors |
+| POST | `/api/kiro/power/refresh` | Regenerate the Power and recreate the Kiro symlink |
 
 ---
 
@@ -540,6 +570,8 @@ Component mounts
 │       │   └── logs/
 │       ├── project.json          # project metadata + last_open
 │       └── headroom-proxy.json   # headroom proxy state (when active)
+├── powers/
+│   └── dwyt-power/               # Kiro Power files (regenerable)
 ├── dwyt.db                       # SQLite (projects + config)
 ├── dwyt.log                      # DWYT log file
 ├── env.sh                        # Shell environment (sourced in .zshrc)
@@ -548,7 +580,7 @@ Component mounts
 ```
 
 > **Note:** DWYT never creates files inside your project directory except the AI client config files
-> (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) that you explicitly select during Setup.
+> (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) selected during Setup.
 > All DWYT state lives exclusively in `~/.dwyt/`.
 
 ---
@@ -572,6 +604,11 @@ The Setup creates these files in the user's project directory:
 │   └── steering/dwyt.md
 └── .gitignore                    # updated with dwyt entries
 ```
+
+Local files with absolute paths are ignored by default (`.mcp.json`, `.claude/mcp.json`,
+`.kiro/mcp.json`, `.vscode/mcp.json`, `opencode.json`, `CLAUDE.md`, `.cursorrules`).
+Shared instruction files such as `AGENTS.md`, `.cursor/rules/dwyt.mdc`,
+`.kiro/steering/dwyt.md`, and `.github/copilot-instructions.md` are not ignored by DWYT.
 
 ### Instruction Priority (all files)
 

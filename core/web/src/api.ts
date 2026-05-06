@@ -1,4 +1,4 @@
-const API = 'http://127.0.0.1:2737/api'
+const API = 'http://localhost:2737/api'
 
 export async function getStatus() {
   const r = await fetch(`${API}/status`)
@@ -227,4 +227,24 @@ export async function headroomStatus(): Promise<unknown> {
 export async function headroomLogs(tail?: number): Promise<string> {
   const r = await fetch(`${API}/services/headroom/logs?tail=${tail || 50}`)
   return r.text()
+}
+
+// ── Kiro Power endpoints ─────────────────────────────────────────────────
+export interface KiroPowerStatus {
+  installed: boolean
+  power_dir: string
+  kiro_link: string
+  mcps: Record<string, boolean>
+  updated_at: string
+  errors?: string[]
+}
+
+export async function getKiroPowerStatus(): Promise<KiroPowerStatus> {
+  const r = await fetch(`${API}/kiro/power/status`)
+  return r.json()
+}
+
+export async function refreshKiroPower(): Promise<KiroPowerStatus> {
+  const r = await fetch(`${API}/kiro/power/refresh`, { method: 'POST' })
+  return r.json()
 }

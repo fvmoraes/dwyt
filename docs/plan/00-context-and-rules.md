@@ -149,7 +149,7 @@ O endereço `127.0.0.1` **só pode aparecer** em:
 - Bind do servidor Go: `r.Run("127.0.0.1:2737")` — correto, mantém
 - Health probes internas: `http.Get("http://127.0.0.1:2737/api/health")` — correto, mantém
 
-**Arquivos de código que precisam ser corrigidos:**
+**Arquivos de código corrigidos na execução de 2026-05-06:**
 
 | Arquivo | Ocorrências | Ação |
 |---------|-------------|------|

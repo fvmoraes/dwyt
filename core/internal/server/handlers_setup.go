@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,7 +25,7 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 	config.Configured = true
 	config.LastSetup = time.Now().Format(time.RFC3339)
 
-	config.Tools = migrateToolList(config.Tools)
+	config.Tools = ensureRequiredTools(migrateToolList(config.Tools))
 	config.Ias = migrateToolList(config.Ias)
 
 	data, _ := json.Marshal(config)
@@ -46,7 +48,7 @@ func (ds *DashboardServer) apiSetupLoad(c *gin.Context) {
 	var config Config
 	json.Unmarshal([]byte(raw), &config)
 
-	config.Tools = migrateToolList(config.Tools)
+	config.Tools = ensureRequiredTools(migrateToolList(config.Tools))
 	config.Ias = migrateToolList(config.Ias)
 
 	c.JSON(200, config)
@@ -67,6 +69,8 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	config.Tools = ensureRequiredTools(migrateToolList(config.Tools))
+	config.Ias = migrateToolList(config.Ias)
 
 	ds.installMu.Lock()
 	if ds.installing {
@@ -78,6 +82,10 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 	ds.installStatus = make(map[string]string)
 	for _, t := range config.Tools {
 		ds.installStatus[t] = "pending"
+	}
+	if contains(config.Tools, "obsidian") {
+		ds.installStatus["obsidian-mcp"] = "pending"
+		ds.installStatus["obsidian-app"] = "pending"
 	}
 	ds.installMu.Unlock()
 
@@ -107,20 +115,23 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 			case "headroom":
 				err = install.Headroom(ds.DwytBin, ds.DwytHome)
 			case "obsidian":
-				err = nil
-				go func() {
-					install.ObsidianMCP(ds.DwytBin)
-				}()
-				go func() {
-					if !isObsidianAppInstalled() {
-						setStatus("obsidian-app", "installing")
-						if _, obsErr := install.InstallObsidianApp(); obsErr != nil {
-							setStatus("obsidian-app", "error: "+obsErr.Error())
-						} else {
-							setStatus("obsidian-app", "ok")
-						}
+				setStatus("obsidian-mcp", "installing")
+				if obsMcpErr := install.ObsidianMCP(ds.DwytBin); obsMcpErr != nil {
+					setStatus("obsidian-mcp", "error: "+obsMcpErr.Error())
+					err = obsMcpErr
+				} else {
+					setStatus("obsidian-mcp", "ok")
+				}
+				if isObsidianAppInstalled() {
+					setStatus("obsidian-app", "ok")
+				} else {
+					setStatus("obsidian-app", "installing")
+					if _, obsErr := install.InstallObsidianApp(); obsErr != nil {
+						setStatus("obsidian-app", "error: "+obsErr.Error())
+					} else {
+						setStatus("obsidian-app", "ok")
 					}
-				}()
+				}
 			case "obsidian-mcp":
 				err = install.ObsidianMCP(ds.DwytBin)
 			}
@@ -138,17 +149,50 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 				clients = strings.Join(config.Clients, ",")
 			}
 			integrate.Project(config.ProjectPath, clients, ds.DwytBin)
+			if ds.Store != nil {
+				ds.Store.TouchProject(config.ProjectPath)
+				ds.Store.SetConfig("project_path", config.ProjectPath)
+			}
+			if pb, err := brain.NewProjectObsidian(ds.DwytHome, config.ProjectPath); err == nil {
+				pb.SetConfig(config.Ias, config.Tools)
+				ds.projectMu.Lock()
+				ds.DefaultProject = config.ProjectPath
+				ds.StartCwd = config.ProjectPath
+				ds.ProjectObsidian = pb
+				ds.projectMu.Unlock()
+				stats := pb.Stats()
+				if c, ok := stats["total_files"].(int); ok {
+					ds.RuntimeState.UpdateProjectObsidian(config.ProjectPath, c)
+				}
+			} else {
+				setStatus("obsidian-vault", "error: "+err.Error())
+			}
+			ds.RuntimeState.SetCurrentProject(config.ProjectPath, filepath.Base(config.ProjectPath))
 			setStatus("integrate", "ok")
 
-			setStatus("index", "installing")
-			indexCmd := exec.Command(filepath.Join(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository",
-				fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath))
-			indexCmd.Env = append(indexCmd.Env, "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
-			err := indexCmd.Run()
-			if err != nil {
-				setStatus("index", "error: "+err.Error())
-			} else {
-				setStatus("index", "ok")
+			if contains(config.Tools, "cbmcp") {
+				setStatus("index", "installing")
+				indexCmd := exec.Command(filepath.Join(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository",
+					fmt.Sprintf(`{"repo_path":"%s"}`, config.ProjectPath))
+				indexCmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
+				err := indexCmd.Run()
+				if err != nil {
+					setStatus("index", "error: "+err.Error())
+				} else {
+					if ds.Store != nil {
+						nodes, edges := countCodebaseGraph(ds.DwytHome, config.ProjectPath)
+						ds.Store.MarkIndexed(config.ProjectPath, nodes, edges)
+					}
+					setStatus("index", "ok")
+				}
+			}
+			if contains(config.Ias, "kiro") || contains(config.Clients, "kiro") {
+				setStatus("kiro-power", "installing")
+				if _, err := kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, config.ProjectPath); err != nil {
+					setStatus("kiro-power", "error: "+err.Error())
+				} else {
+					setStatus("kiro-power", "ok")
+				}
 			}
 		}
 
@@ -229,6 +273,14 @@ func migrateToolList(list []string) []string {
 		}
 	}
 	return migrated
+}
+
+func ensureRequiredTools(list []string) []string {
+	list = migrateToolList(list)
+	if !contains(list, "obsidian") {
+		list = append(list, "obsidian")
+	}
+	return list
 }
 
 func contains(slice []string, item string) bool {

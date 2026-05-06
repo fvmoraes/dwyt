@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/gin-gonic/gin"
 )
@@ -16,11 +17,7 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 	}
 	result := make(map[string]interface{})
 	for name, entry := range reg.MCPServers {
-		pmName := name
-		if name == "obsidian" {
-			pmName = "obsidian-mcp"
-		}
-		st := ds.ProcMan.Status(pmName)
+		st := ds.ProcMan.Status(mcpProcessName(name))
 		installed := reg.IsBinaryInstalled(name)
 		status := "offline"
 		if st != nil && st.Running && st.Healthy {
@@ -78,17 +75,20 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(200, gin.H{"status": "configured", "note": "MCP configs written for Claude Desktop and VSCode"})
+	integrate.Project(body.ProjectPath, ds.clientsString(), ds.DwytBin)
+	c.JSON(200, gin.H{"status": "configured", "note": "MCP configs synced for project AI clients"})
 }
 
 func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
-	var body struct{ Name string `json:"name"` }
+	var body struct {
+		Name string `json:"name"`
+	}
 	c.BindJSON(&body)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Start(body.Name)
+	st, err := ds.ProcMan.Start(mcpProcessName(body.Name))
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -97,13 +97,15 @@ func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
-	var body struct{ Name string `json:"name"` }
+	var body struct {
+		Name string `json:"name"`
+	}
 	c.BindJSON(&body)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Stop(body.Name)
+	st, err := ds.ProcMan.Stop(mcpProcessName(body.Name))
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -112,13 +114,15 @@ func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiMCPRestart(c *gin.Context) {
-	var body struct{ Name string `json:"name"` }
+	var body struct {
+		Name string `json:"name"`
+	}
 	c.BindJSON(&body)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Restart(body.Name)
+	st, err := ds.ProcMan.Restart(mcpProcessName(body.Name))
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -133,7 +137,7 @@ func (ds *DashboardServer) apiMCPStatus(c *gin.Context) {
 		c.JSON(200, all)
 		return
 	}
-	c.JSON(200, ds.ProcMan.Status(name))
+	c.JSON(200, ds.ProcMan.Status(mcpProcessName(name)))
 }
 
 func (ds *DashboardServer) apiMCPLogs(c *gin.Context) {
@@ -146,6 +150,17 @@ func (ds *DashboardServer) apiMCPLogs(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	logs := ds.ProcMan.Logs(name, tail)
+	logs := ds.ProcMan.Logs(mcpProcessName(name), tail)
 	c.Data(200, "text/plain; charset=utf-8", []byte(logs))
+}
+
+func mcpProcessName(name string) string {
+	switch name {
+	case "dwyt", "dwyt-codebase":
+		return "codebase"
+	case "dwyt-obsidian", "obsidian-mcp":
+		return "obsidian"
+	default:
+		return name
+	}
 }

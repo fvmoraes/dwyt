@@ -490,33 +490,33 @@ func TestValidateMCPBinaries(t *testing.T)
 
 ### Backend Go
 
-- [ ] Criar `core/internal/kiropow/kiropow.go`
-- [ ] Implementar `EnsurePower()`
-- [ ] Implementar `ValidateMCPBinaries()`
-- [ ] Implementar `GeneratePowerMD()`
-- [ ] Implementar `GenerateMCPJSON()`
-- [ ] Implementar `GenerateSteeringFiles()`
-- [ ] Implementar `RegisterWithKiro()`
-- [ ] Implementar `NeedsUpdate()`
-- [ ] Criar `core/internal/kiropow/kiropow_test.go` com 14 testes
-- [ ] Integrar chamada em `root.go` → `runDefault()`
-- [ ] Integrar chamada em `server.go` → `New()`
-- [ ] Adicionar endpoint `GET /api/kiro/power/status`
-- [ ] Registrar rota em `routes.go`
+- [x] Criar `core/internal/kiropow/kiropow.go`
+- [x] Implementar `EnsurePower()`
+- [x] Implementar `ValidateMCPBinaries()`
+- [x] Implementar `GeneratePowerMD()`
+- [x] Implementar `GenerateMCPJSON()`
+- [x] Implementar `GenerateSteeringFiles()`
+- [x] Implementar `RegisterWithKiro()`
+- [x] Implementar `NeedsUpdate()`
+- [x] Criar `core/internal/kiropow/kiropow_test.go` com 14 testes
+- [x] Integrar chamada em `root.go` → `runDefault()`
+- [x] Integrar chamada em `server.go` → `New()`
+- [x] Adicionar endpoint `GET /api/kiro/power/status`
+- [x] Registrar rota em `routes.go`
 
 ### Frontend
 
-- [ ] Adicionar card ou seção "Kiro Power" no Dashboard
-- [ ] Exibir status: instalado/não instalado, MCPs ativos, erros
-- [ ] Botão "Refresh Power" → chama `POST /api/kiro/power/refresh`
-- [ ] Adicionar chaves i18n: `kiroPower`, `kiroPowerInstalled`, `kiroPowerMCPs`
+- [x] Adicionar card ou seção "Kiro Power" no Dashboard
+- [x] Exibir status: instalado/não instalado, MCPs ativos, erros
+- [x] Botão "Refresh Power" → chama `POST /api/kiro/power/refresh`
+- [x] Adicionar chaves i18n: `kiroPower`, `kiroPowerInstalled`, `kiroPowerMCPs`
 
 ### Segurança
 
-- [ ] Verificar que `EnsurePower` nunca deleta `~/.dwyt/projects/`
-- [ ] Verificar que `EnsurePower` nunca deleta `~/.dwyt/projects/*/obsidian/`
-- [ ] Verificar idempotência em execuções repetidas
-- [ ] Verificar que MCP ausente não causa erro fatal
+- [x] Verificar que `EnsurePower` nunca deleta `~/.dwyt/projects/`
+- [x] Verificar que `EnsurePower` nunca deleta `~/.dwyt/projects/*/obsidian/`
+- [x] Verificar idempotência em execuções repetidas
+- [x] Verificar que MCP ausente não causa erro fatal
 
 ---
 

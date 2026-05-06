@@ -1,0 +1,13 @@
+---
+description: DWYT project guidance
+alwaysApply: true
+---
+
+## DWYT Priority Order:
+1. **Obsidian FIRST**: consult project vault before any file operation.
+   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+   Save: POST http://localhost:2737/api/obsidian/save
+2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
+3. **RTK**: prefix shell commands with rtk.
+4. **Codebase MCP**: use ONLY for structural code exploration.
+Save important decisions to Obsidian after completion.

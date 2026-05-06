@@ -8,15 +8,21 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/gin-gonic/gin"
 )
 
 func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
-	var body struct{ Path string `json:"path"` }
+	var body struct {
+		Path string `json:"path"`
+	}
 	if err := c.BindJSON(&body); err != nil || body.Path == "" {
 		c.JSON(400, gin.H{"error": "path is required"})
 		return
+	}
+	if ds.Store != nil {
+		ds.Store.TouchProject(body.Path)
 	}
 
 	ds.codebaseProgress.mu.Lock()
@@ -105,13 +111,12 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 	uiURL := fmt.Sprintf("http://localhost:%d", uiPort)
 
 	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
-	if _, err := os.Stat(bin); err != nil {
-		c.JSON(404, gin.H{"error": "codebase-memory-mcp not installed", "url": ""})
-		return
-	}
-
 	if isPortOpen(uiPort) {
 		c.JSON(200, gin.H{"url": uiURL, "started": false, "ready": true})
+		return
+	}
+	if _, err := os.Stat(bin); err != nil {
+		c.JSON(404, gin.H{"status": "not_installed", "error": "codebase-memory-mcp not installed", "url": ""})
 		return
 	}
 
@@ -143,8 +148,23 @@ func (ds *DashboardServer) apiCodebaseStop(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseStatus(c *gin.Context) {
-	status := ds.ProcMan.Status("codebase")
-	c.JSON(200, status)
+	st := ds.ProcMan.Status("codebase")
+	if health.ProbeURL("http://127.0.0.1:9749/health") {
+		st.Status = "online"
+		st.State = "online"
+		st.Running = true
+		st.Healthy = true
+		st.Port = 9749
+		st.Error = ""
+	} else if isPortOpen(9749) {
+		st.Status = "port_open_no_health"
+		st.State = "port_open_no_health"
+		st.Running = false
+		st.Healthy = false
+		st.Port = 9749
+		st.Error = "port 9749 open but healthcheck failed"
+	}
+	c.JSON(200, st)
 }
 
 func (ds *DashboardServer) apiCodebaseLogs(c *gin.Context) {

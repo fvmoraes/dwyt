@@ -1,6 +1,7 @@
 package root
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -94,9 +95,10 @@ func runDefault(projectPath string) error {
 	if daemonOK := probeDaemon(); daemonOK {
 		if err := switchProject(projectPath); err == nil {
 			workspace.Touch(projectPath)
-			fmt.Printf("  \u2713 Dashboard \u2192 http://127.0.0.1:2737  (already running)\n")
+			fmt.Printf("  \u2713 Dashboard \u2192 http://localhost:2737  (already running)\n")
 			fmt.Printf("  \u2713 Project context updated\n\n")
-			openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
+			ensureKiroPowerIfEnabled(projectPath)
+			openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 			return nil
 		}
 		log.Warn("daemon probe ok but switch failed, restarting")
@@ -143,9 +145,10 @@ func runDefault(projectPath string) error {
 	}
 
 	workspace.Touch(projectPath)
-	fmt.Printf("  \u2713 Dashboard \u2192 http://127.0.0.1:2737\n")
+	fmt.Printf("  \u2713 Dashboard \u2192 http://localhost:2737\n")
 	fmt.Printf("  Stop: dwyt stop\n\n")
-	openBrowserURL("http://127.0.0.1:2737/#/dashboard?project=" + url.PathEscape(projectPath))
+	ensureKiroPowerIfEnabled(projectPath)
+	openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 	return nil
 }
 
@@ -192,6 +195,45 @@ func switchProject(projectPath string) error {
 		return fmt.Errorf("switch failed: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func ensureKiroPowerIfEnabled(projectPath string) {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://localhost:2737/api/setup/load")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	var cfg map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&cfg) != nil || !kiroEnabledInConfig(cfg) {
+		return
+	}
+	req, err := http.NewRequest("POST", "http://localhost:2737/api/kiro/power/refresh", nil)
+	if err != nil {
+		return
+	}
+	q := req.URL.Query()
+	q.Set("project", projectPath)
+	req.URL.RawQuery = q.Encode()
+	if refreshResp, err := client.Do(req); err == nil {
+		refreshResp.Body.Close()
+		if refreshResp.StatusCode < 300 {
+			fmt.Printf("  \u2713 Kiro Power ready\n")
+		}
+	}
+}
+
+func kiroEnabledInConfig(cfg map[string]interface{}) bool {
+	for _, key := range []string{"ias", "clients"} {
+		if values, ok := cfg[key].([]interface{}); ok {
+			for _, value := range values {
+				if s, ok := value.(string); ok && s == "kiro" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func startServicesAsync(dwytBin string) int {

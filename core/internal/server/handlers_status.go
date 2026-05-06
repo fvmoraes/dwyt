@@ -15,10 +15,14 @@ import (
 )
 
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
+	tools := make(map[string]status.ServiceState)
+	for _, tool := range status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil).Tools {
+		tools[tool.Name] = tool.Status
+	}
 	c.JSON(200, gin.H{
 		"status":  "ok",
 		"project": ds.DefaultProject,
-		"tools":   status.HealthStatus(ds.DwytBin),
+		"tools":   tools,
 	})
 }
 
@@ -73,7 +77,11 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		}
 	}
 	if service == "" || service == "obsidian" {
-		logs["obsidian"] = "obsidian: active (Obsidian vault)"
+		if ds.ProjectObsidian == nil {
+			logs["obsidian"] = "obsidian: inactive (no vault loaded)"
+		} else {
+			logs["obsidian"] = "obsidian: online (Obsidian vault)"
+		}
 	}
 
 	c.JSON(200, gin.H{"logs": logs})
@@ -307,7 +315,7 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	}
 	if d.UptimeLabel == "" {
 		d.UptimeSecs = 0
-		d.UptimeLabel = "active"
+		d.UptimeLabel = "online"
 	}
 	return d
 }

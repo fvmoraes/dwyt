@@ -1,8 +1,11 @@
 export interface ToolInfo {
   name: string
+  status?: string
+  state?: string
   running: boolean
   healthy: boolean
   details: string
+  error?: string
 }
 
 export interface ToolDetail {
@@ -34,6 +37,9 @@ export interface MCPEntry {
   port: number
   installed: boolean
   enabled: boolean
+  command?: string
+  healthURL?: string
+  pid?: number
 }
 
 export type MCPRegistry = Record<string, MCPEntry>

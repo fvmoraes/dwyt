@@ -1,6 +1,7 @@
 package install
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 func CBMCP(dwytBin string) error {
@@ -99,10 +101,10 @@ func Headroom(dwytBin, dwytHome string) error {
 	var pipBin, hrBin string
 	if runtime.GOOS == "windows" {
 		pipBin = filepath.Join(venvDir, "Scripts", "pip.exe")
-		hrBin  = filepath.Join(venvDir, "Scripts", "headroom.exe")
+		hrBin = filepath.Join(venvDir, "Scripts", "headroom.exe")
 	} else {
 		pipBin = filepath.Join(venvDir, "bin", "pip")
-		hrBin  = filepath.Join(venvDir, "bin", "headroom")
+		hrBin = filepath.Join(venvDir, "bin", "headroom")
 	}
 
 	exec.Command(pipBin, "install", "--quiet", "--upgrade", "pip").Run()
@@ -119,7 +121,6 @@ func Headroom(dwytBin, dwytHome string) error {
 	}
 	return nil
 }
-
 
 func ObsidianMCP(dwytBin string) error {
 	binPath := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
@@ -172,8 +173,11 @@ func installObsidianLinux() (string, error) {
 		}
 	}
 
-	// Download AppImage
-	url := "https://github.com/obsidianmd/obsidian-releases/releases/latest/download/Obsidian-1.9.7.AppImage"
+	// Download the latest Linux AppImage published by Obsidian.
+	url, err := latestObsidianLinuxAppImageURL()
+	if err != nil {
+		return "", err
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("obsidian download failed: %w", err)
@@ -199,6 +203,40 @@ func installObsidianLinux() (string, error) {
 	os.Symlink(appImagePath, symlinkPath)
 
 	return appImagePath, nil
+}
+
+func latestObsidianLinuxAppImageURL() (string, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "dwyt-installer")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("obsidian release lookup failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("obsidian release lookup returned HTTP %d", resp.StatusCode)
+	}
+
+	var release struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("obsidian release decode failed: %w", err)
+	}
+	for _, asset := range release.Assets {
+		name := strings.ToLower(asset.Name)
+		if strings.HasSuffix(name, ".appimage") && !strings.Contains(name, "arm") {
+			return asset.BrowserDownloadURL, nil
+		}
+	}
+	return "", fmt.Errorf("obsidian latest release has no Linux AppImage asset")
 }
 
 func installObsidianMacOS() (string, error) {
