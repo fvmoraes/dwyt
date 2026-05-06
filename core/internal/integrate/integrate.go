@@ -23,12 +23,15 @@ func Project(projectPath, clients, dwytBin string) {
 	ensureDWYT(gitignore)
 	clientList := normalizeClients(clients)
 
+	// Apenas configs MCP geradas com paths absolutos (por máquina) e estado
+	// local entram no .gitignore. Arquivos de instrução (CLAUDE.md, AGENTS.md,
+	// steering rules) ficam versionados — eles são editáveis pelo time.
 	cm := map[string][]string{
-		"claude":   {"CLAUDE.md", ".claude/mcp.json"},
-		"codex":    {".codex/", ".mcp.json", "AGENTS.md"},
-		"copilot":  {".github/copilot-instructions.md", ".vscode/mcp.json"},
-		"kiro":     {".kiro/mcp.json", ".kiro/settings/mcp.json", ".kiro/steering/dwyt.md"},
-		"cursor":   {".cursorrules", ".cursor/mcp.json", ".cursor/rules/dwyt.mdc"},
+		"claude":   {".claude/mcp.json"},
+		"codex":    {".codex/", ".mcp.json"},
+		"copilot":  {".vscode/mcp.json"},
+		"kiro":     {".kiro/mcp.json", ".kiro/settings/mcp.json"},
+		"cursor":   {".cursor/mcp.json"},
 		"opencode": {"opencode.json", ".mcp.json"},
 	}
 
@@ -145,22 +148,26 @@ func containsClient(clients []string, client string) bool {
 	return false
 }
 
+// dwytGeneratedIgnores retorna as entradas que o DWYT adiciona ao .gitignore
+// do projeto durante a integração. Inclui apenas:
+//   - configs MCP geradas (contêm paths absolutos para ~/.dwyt/bin/...,
+//     que variam por máquina);
+//   - diretórios de estado local de cada cliente.
+//
+// Arquivos de instrução (CLAUDE.md, AGENTS.md, .cursor/rules/dwyt.mdc,
+// .kiro/steering/dwyt.md, .github/copilot-instructions.md) NÃO são listados
+// aqui de propósito: o DWYT cria com template, mas a partir daí são
+// editáveis pelo time e devem ser versionados.
 func dwytGeneratedIgnores() []string {
 	return []string{
-		"CLAUDE.md",
 		".claude/mcp.json",
 		".codex/",
 		".mcp.json",
 		"opencode.json",
-		".cursorrules",
 		".kiro/mcp.json",
 		".kiro/settings/mcp.json",
 		".vscode/mcp.json",
-		"AGENTS.md",
 		".cursor/mcp.json",
-		".cursor/rules/dwyt.mdc",
-		".github/copilot-instructions.md",
-		".kiro/steering/dwyt.md",
 	}
 }
 
