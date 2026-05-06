@@ -85,6 +85,34 @@ func (ot *ObsidianTools) Save(args map[string]interface{}) (string, error) {
 	return "Entry saved", nil
 }
 
+func (ot *ObsidianTools) SaveContext(args map[string]interface{}) (string, error) {
+	if _, ok := args["client"]; !ok {
+		args["client"] = "mcp"
+	}
+	body, _ := json.Marshal(args)
+	resp, err := ot.client.Post(
+		fmt.Sprintf("%s/obsidian/context", dwytAPI),
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return "", fmt.Errorf("context save failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("context save returned HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		Status string `json:"status"`
+		File   string `json:"file"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result.File != "" {
+		return "Context saved: " + result.File, nil
+	}
+	return "Context saved", nil
+}
+
 func (ot *ObsidianTools) Status(args map[string]interface{}) (string, error) {
 	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/status", dwytAPI))
 	if err != nil {
@@ -160,6 +188,26 @@ func RegisterObsidianTools(s *Server) {
 		},
 		[]string{"content"},
 		ot.Save,
+	)
+
+	s.RegisterTool("obsidian_save_context",
+		"Save the current conversation context to the Obsidian vault. Call this at the end of each task with the user request, summary, changed files, decisions, actions, commands, errors, outcome, and next steps.",
+		map[string]Property{
+			"client":          {Type: "string", Description: "AI client name, for example codex, cursor, kiro, copilot, opencode, or claude"},
+			"conversation_id": {Type: "string", Description: "Optional conversation or session identifier"},
+			"user_request":    {Type: "string", Description: "The user's request for this conversation"},
+			"summary":         {Type: "string", Description: "Short summary of what happened"},
+			"context":         {Type: "string", Description: "Important context future agents should know"},
+			"outcome":         {Type: "string", Description: "Final result or current status"},
+			"files":           {Type: "array", Description: "Files read or changed"},
+			"decisions":       {Type: "array", Description: "Important decisions made"},
+			"actions":         {Type: "array", Description: "Actions completed"},
+			"commands":        {Type: "array", Description: "Commands run"},
+			"errors":          {Type: "array", Description: "Errors or blockers encountered"},
+			"next_steps":      {Type: "array", Description: "Recommended next steps"},
+		},
+		[]string{"summary"},
+		ot.SaveContext,
 	)
 
 	s.RegisterTool("obsidian_status",

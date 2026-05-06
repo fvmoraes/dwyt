@@ -26,6 +26,22 @@ type BrainEntry struct {
 	FilePath  string    `json:"file_path,omitempty"`
 }
 
+type ContextSnapshot struct {
+	Client         string            `json:"client,omitempty"`
+	ConversationID string            `json:"conversation_id,omitempty"`
+	UserRequest    string            `json:"user_request,omitempty"`
+	Summary        string            `json:"summary,omitempty"`
+	Context        string            `json:"context,omitempty"`
+	Outcome        string            `json:"outcome,omitempty"`
+	Files          []string          `json:"files,omitempty"`
+	Decisions      []string          `json:"decisions,omitempty"`
+	Actions        []string          `json:"actions,omitempty"`
+	Commands       []string          `json:"commands,omitempty"`
+	Errors         []string          `json:"errors,omitempty"`
+	NextSteps      []string          `json:"next_steps,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
+
 type ProjectObsidian struct {
 	ProjectID    string       `json:"project_id"`
 	ProjectName  string       `json:"project_name"`
@@ -243,6 +259,66 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 	default:
 		return pb.saveToKnowledgeLocked(entryType, content, tags, now)
 	}
+}
+
+func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+
+	if strings.TrimSpace(snapshot.Client) == "" {
+		snapshot.Client = "dwyt"
+	}
+	if strings.TrimSpace(snapshot.Summary) == "" && strings.TrimSpace(snapshot.Context) == "" && strings.TrimSpace(snapshot.UserRequest) == "" {
+		snapshot.Summary = "DWYT context snapshot"
+	}
+
+	now := time.Now()
+	pb.UpdatedAt = now
+
+	dir := filepath.Join(pb.brainDir, "logs", "sessions")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("obsidian context save: %w", err)
+	}
+	id := fmt.Sprintf("%s_context_%d", now.Format("2006-01-02_150405"), now.UnixNano()%10000)
+	path := filepath.Join(dir, id+".md")
+
+	f, err := os.Create(path)
+	if err != nil {
+		return "", fmt.Errorf("obsidian context save: %w", err)
+	}
+	defer f.Close()
+
+	writeContextFrontmatter(f, snapshot, pb, now)
+	fmt.Fprintf(f, "# Conversation Context - %s\n\n", now.Format("2006-01-02 15:04"))
+	fmt.Fprintf(f, "Project: %s\n\nPath: %s\n\nClient: %s\n\n", pb.ProjectName, pb.ProjectPath, snapshot.Client)
+	if snapshot.ConversationID != "" {
+		fmt.Fprintf(f, "Conversation: %s\n\n", snapshot.ConversationID)
+	}
+	writeMarkdownSection(f, "User Request", snapshot.UserRequest)
+	writeMarkdownSection(f, "Summary", snapshot.Summary)
+	writeMarkdownSection(f, "Context", snapshot.Context)
+	writeMarkdownSection(f, "Outcome", snapshot.Outcome)
+	writeMarkdownList(f, "Files", snapshot.Files)
+	writeMarkdownList(f, "Decisions", snapshot.Decisions)
+	writeMarkdownList(f, "Actions", snapshot.Actions)
+	writeMarkdownList(f, "Commands", snapshot.Commands)
+	writeMarkdownList(f, "Errors", snapshot.Errors)
+	writeMarkdownList(f, "Next Steps", snapshot.NextSteps)
+	if len(snapshot.Metadata) > 0 {
+		fmt.Fprintln(f, "## Metadata")
+		fmt.Fprintln(f)
+		keys := make([]string, 0, len(snapshot.Metadata))
+		for k := range snapshot.Metadata {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(f, "- %s: %s\n", k, snapshot.Metadata[k])
+		}
+		fmt.Fprintln(f)
+	}
+
+	return path, nil
 }
 
 func (pb *ProjectObsidian) appendToDecisionsLogLocked(content string, now time.Time) error {
@@ -594,6 +670,43 @@ func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Tim
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
 	fmt.Fprintf(f, "type: %s\n", entryType)
 	fmt.Fprintf(f, "---\n\n")
+}
+
+func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectObsidian, date time.Time) {
+	fmt.Fprintf(f, "---\n")
+	fmt.Fprintf(f, "tags: [dwyt, session, context, conversation]\n")
+	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
+	fmt.Fprintf(f, "type: session\n")
+	fmt.Fprintf(f, "client: %q\n", snapshot.Client)
+	fmt.Fprintf(f, "project: %q\n", pb.ProjectName)
+	fmt.Fprintf(f, "project_path: %q\n", pb.ProjectPath)
+	if snapshot.ConversationID != "" {
+		fmt.Fprintf(f, "conversation_id: %q\n", snapshot.ConversationID)
+	}
+	fmt.Fprintf(f, "---\n\n")
+}
+
+func writeMarkdownSection(f *os.File, title, content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	fmt.Fprintf(f, "## %s\n\n%s\n\n", title, content)
+}
+
+func writeMarkdownList(f *os.File, title string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(f, "## %s\n\n", title)
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		fmt.Fprintf(f, "- %s\n", strings.ReplaceAll(item, "\n", "\n  "))
+	}
+	fmt.Fprintln(f)
 }
 
 func extractTitle(content string) string {

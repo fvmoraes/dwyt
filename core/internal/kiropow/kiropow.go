@@ -284,6 +284,10 @@ inclusion: auto
 After important work, save decisions to Obsidian:
 POST http://localhost:2737/api/obsidian/save
 {"type":"decision","content":"..."}
+
+At the end of every task, save the conversation context:
+POST http://localhost:2737/api/obsidian/context
+{"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
 `
 }
 
@@ -300,11 +304,13 @@ Vault root: ~/.dwyt/projects/<id>/obsidian/
 ## API
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
 - Save:   POST http://localhost:2737/api/obsidian/save
+- Context: POST http://localhost:2737/api/obsidian/context
 - Status: GET http://localhost:2737/api/obsidian/status
 
 ## Rules
 - Always search Obsidian before reading project files.
 - Always save important decisions after completing work.
+- Always save conversation context at the end of each task.
 - Never delete vault files.
 `, projectPath)
 }

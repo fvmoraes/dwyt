@@ -337,7 +337,9 @@ func agentsMDTemplate(rtkBin string) string {
 		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
 		"The project vault is an Obsidian vault with markdown files.\n" +
 		"Search: GET http://localhost:2737/api/obsidian/search?q=<query>\n" +
-		"Save: POST http://localhost:2737/api/obsidian/save\n\n" +
+		"Save: POST http://localhost:2737/api/obsidian/save\n" +
+		"Save context at the end of every task: POST http://localhost:2737/api/obsidian/context\n" +
+		"Payload: {\"client\":\"codex\",\"user_request\":\"...\",\"summary\":\"...\",\"files\":[\"...\"],\"decisions\":[\"...\"],\"actions\":[\"...\"],\"outcome\":\"...\"}\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
@@ -358,6 +360,7 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 1. **Obsidian FIRST** — before any file read or context rebuild:
    - Search: GET http://localhost:2737/api/obsidian/search?q=your+query
    - Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+   - Save conversation context at task end: POST http://localhost:2737/api/obsidian/context {"client":"claude","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
    - Types: command, decision, action, error, note
    - Never mix vaults between projects — isolation is automatic.
 
@@ -379,6 +382,7 @@ alwaysApply: true
 1. **Obsidian FIRST**: consult project vault before any file operation.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
    Save: POST http://localhost:2737/api/obsidian/save
+   Save conversation context at task end: POST http://localhost:2737/api/obsidian/context
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
@@ -391,6 +395,7 @@ const kiroSteering = `# DWYT Steering
 1. **Obsidian FIRST**: check project vault before reading files.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
    Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+   Save context at task end: POST http://localhost:2737/api/obsidian/context {"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
 4. **Codebase MCP**: structural exploration only — use after Obsidian
@@ -404,6 +409,7 @@ const copilotMD = `# DWYT — GitHub Copilot
 1. **Obsidian FIRST**: check project vault before heavy file reads.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
    Save: POST http://localhost:2737/api/obsidian/save
+   Save conversation context at task end: POST http://localhost:2737/api/obsidian/context
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed

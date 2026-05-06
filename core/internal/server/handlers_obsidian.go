@@ -1,8 +1,13 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
+	"time"
 
+	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/gin-gonic/gin"
 )
@@ -59,6 +64,31 @@ func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"status": "saved"})
+}
+
+func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
+	if ds.ProjectObsidian == nil {
+		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
+		return
+	}
+	var body brain.ContextSnapshot
+	if err := c.ShouldBindJSON(&body); err != nil && err != io.EOF {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Context) == "" && strings.TrimSpace(body.Summary) == "" {
+		body.Context = ds.currentContextMarkdown()
+	}
+	if strings.TrimSpace(body.Client) == "" {
+		body.Client = "dwyt"
+	}
+	path, err := ds.ProjectObsidian.SaveContextSnapshot(body)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	summary := ds.ProjectObsidian.RebuildSummary()
+	c.JSON(200, gin.H{"status": "saved", "file": path, "summary": summary})
 }
 
 func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
@@ -125,6 +155,34 @@ func (ds *DashboardServer) apiObsidianInstallStatus(c *gin.Context) {
 	} else {
 		c.JSON(200, gin.H{"status": "error", "error": s})
 	}
+}
+
+func (ds *DashboardServer) currentContextMarkdown() string {
+	ds.projectMu.RLock()
+	project := ds.DefaultProject
+	ds.projectMu.RUnlock()
+
+	statusPayload := map[string]interface{}{}
+	if s := ds.obsidianStats(); s != nil {
+		statusPayload["obsidian"] = s
+	}
+	if ds.RuntimeState != nil {
+		statusPayload["state"] = ds.RuntimeState.Snapshot()
+	}
+	var setup Config
+	if ds.Store != nil {
+		if raw, err := ds.Store.GetConfig("setup"); err == nil {
+			json.Unmarshal([]byte(raw), &setup)
+		}
+	}
+	data, _ := json.MarshalIndent(statusPayload, "", "  ")
+	return fmt.Sprintf("DWYT saved this project context at %s.\n\nProject: %s\nClients: %s\nTools: %s\n\n```json\n%s\n```",
+		time.Now().Format(time.RFC3339),
+		project,
+		strings.Join(setup.Ias, ", "),
+		strings.Join(setup.Tools, ", "),
+		string(data),
+	)
 }
 
 func (ds *DashboardServer) obsidianStats() map[string]interface{} {

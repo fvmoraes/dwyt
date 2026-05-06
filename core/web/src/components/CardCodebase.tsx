@@ -32,7 +32,7 @@ export default function CardCodebase(props: Props) {
   const mcpValue = mcp?.status === 'online'
     ? `\uD83D\uDFE2 ${t.mcpOnline}`
     : mcpReady
-      ? `\uD83D\uDFE1 ${t.mcpConfigured}`
+      ? `\uD83D\uDFE2 ${t.mcpConfigured}`
       : `\uD83D\uDD34 ${t.mcpOffline}`
   const configureRunning = configuringMCP === 'codebase'
   const configureDisabled = configuringMCP !== ''

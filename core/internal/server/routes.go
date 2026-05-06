@@ -35,6 +35,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/obsidian/status", ds.apiObsidianStatus)
 		api.GET("/obsidian/search", ds.apiObsidianSearch)
 		api.POST("/obsidian/save", ds.apiObsidianSave)
+		api.POST("/obsidian/context", ds.apiObsidianSaveContext)
 		api.POST("/obsidian/summarize", ds.apiObsidianSummarize)
 		api.POST("/obsidian/open", ds.apiObsidianOpen)
 		api.POST("/obsidian/open-dir", ds.apiObsidianOpenDir)

@@ -21,13 +21,13 @@ body {
   background-attachment: fixed;
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 14px;
+  font-size: 13px;
   margin: 0;
   min-height: 100vh;
 }
 
 body * {
-  font-size: max(10px, 1em) !important;
+  font-size: max(9px, 1em) !important;
 }
 
 /* ── Card ── */
@@ -63,7 +63,7 @@ button {
   border-radius: 5px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   transition: all 0.12s;
   white-space: nowrap;
@@ -103,7 +103,7 @@ input[type="text"] {
   padding: 6px 8px;
   border-radius: 5px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
   width: 100%;
   line-height: 1.4;
 }
@@ -133,7 +133,7 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
   border-radius: 6px;
   background: var(--card);
   user-select: none;
-  font-size: 12px;
+  font-size: 11px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }

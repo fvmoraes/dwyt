@@ -37,3 +37,44 @@ func TestNewProjectObsidianAllowsProjectOutsideDwytHome(t *testing.T) {
 		t.Fatal("expected saved entry to be searchable")
 	}
 }
+
+func TestSaveContextSnapshot(t *testing.T) {
+	dwytHome := t.TempDir()
+	projectPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pb, err := NewProjectObsidian(dwytHome, projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := pb.SaveContextSnapshot(ContextSnapshot{
+		Client:      "codex",
+		UserRequest: "wire every conversation into obsidian",
+		Summary:     "Added conversation context saving",
+		Files:       []string{"core/internal/brain/brain.go"},
+		Decisions:   []string{"Use a dedicated context endpoint"},
+		Actions:     []string{"Saved session snapshot"},
+		Outcome:     "Context is persisted",
+	})
+	if err != nil {
+		t.Fatalf("SaveContextSnapshot failed: %v", err)
+	}
+	if !strings.Contains(path, filepath.Join("logs", "sessions")) {
+		t.Fatalf("expected session log path, got %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"type: session", "Added conversation context saving", "Use a dedicated context endpoint"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("saved context missing %q:\n%s", want, text)
+		}
+	}
+	if got := pb.Search("conversation context saving"); len(got) == 0 {
+		t.Fatal("expected saved context to be searchable")
+	}
+}
