@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -29,11 +30,14 @@ func (ot *ObsidianTools) Search(args map[string]interface{}) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?q=%s", dwytAPI, query))
+	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?q=%s", dwytAPI, url.QueryEscape(query)))
 	if err != nil {
 		return "", fmt.Errorf("obsidian search failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("obsidian search returned HTTP %d", resp.StatusCode)
+	}
 	var result struct {
 		Results []map[string]interface{} `json:"results"`
 		Count   int                      `json:"count"`
@@ -70,6 +74,9 @@ func (ot *ObsidianTools) Save(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("save failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("save returned HTTP %d", resp.StatusCode)
+	}
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
 	if status, ok := result["status"].(string); ok {
@@ -84,6 +91,9 @@ func (ot *ObsidianTools) Status(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("status check failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("status returned HTTP %d", resp.StatusCode)
+	}
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
 	data, _ := json.MarshalIndent(result, "", "  ")
@@ -100,6 +110,9 @@ func (ot *ObsidianTools) Summarize(args map[string]interface{}) (string, error) 
 		return "", fmt.Errorf("summarize failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("summarize returned HTTP %d", resp.StatusCode)
+	}
 	var result struct {
 		Status  string `json:"status"`
 		Summary string `json:"summary"`
@@ -121,6 +134,9 @@ func (ot *ObsidianTools) Open(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("open vault failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("open vault returned HTTP %d", resp.StatusCode)
+	}
 	return "Obsidian vault opened", nil
 }
 

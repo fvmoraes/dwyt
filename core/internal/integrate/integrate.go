@@ -21,19 +21,18 @@ func Project(projectPath, clients, dwytBin string) {
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
 	gitignore := filepath.Join(projectPath, ".gitignore")
 	ensureDWYT(gitignore)
-	removeDWYTLegacyIgnores(gitignore)
+	clientList := normalizeClients(clients)
 
 	cm := map[string][]string{
 		"claude":   {"CLAUDE.md", ".claude/mcp.json"},
-		"codex":    {".codex/", ".mcp.json"},
-		"copilot":  {},
-		"kiro":     {".kiro/mcp.json"},
-		"cursor":   {".cursorrules"},
+		"codex":    {".codex/", ".mcp.json", "AGENTS.md"},
+		"copilot":  {".github/copilot-instructions.md", ".vscode/mcp.json"},
+		"kiro":     {".kiro/mcp.json", ".kiro/settings/mcp.json", ".kiro/steering/dwyt.md"},
+		"cursor":   {".cursorrules", ".cursor/mcp.json", ".cursor/rules/dwyt.mdc"},
 		"opencode": {"opencode.json", ".mcp.json"},
 	}
 
-	for _, c := range strings.Split(clients, ",") {
-		c = strings.TrimSpace(c)
+	for _, c := range clientList {
 		if entries, ok := cm[c]; ok {
 			for _, e := range entries {
 				appendLine(gitignore, e)
@@ -41,13 +40,9 @@ func Project(projectPath, clients, dwytBin string) {
 		}
 	}
 
-	appendLine(gitignore, ".mcp.json")
-	appendLine(gitignore, ".vscode/mcp.json")
-	appendLine(gitignore, ".cursorrules")
-	appendLine(gitignore, "CLAUDE.md")
-	appendLine(gitignore, ".claude/mcp.json")
-	appendLine(gitignore, ".kiro/mcp.json")
-	appendLine(gitignore, "opencode.json")
+	for _, e := range dwytGeneratedIgnores() {
+		appendLine(gitignore, e)
+	}
 	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
 
 	// ── Use absolute paths in generated configs ────────────────────────
@@ -61,9 +56,10 @@ func Project(projectPath, clients, dwytBin string) {
 	}
 
 	writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin)
+	writeOrMergeVSCodeMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, rtkBin)
 
-	if strings.Contains(clients, "claude") {
+	if containsClient(clientList, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
@@ -71,21 +67,22 @@ func Project(projectPath, clients, dwytBin string) {
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
-	if strings.Contains(clients, "cursor") {
+	if containsClient(clientList, "cursor") {
 		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, cursorRule)
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
-	if strings.Contains(clients, "kiro") {
+	if containsClient(clientList, "kiro") {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, kiroSteering)
-		// Kiro also reads .kiro/mcp.json
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), cbmcpBin, obsidianMCPBin)
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
-	if strings.Contains(clients, "copilot") {
+	if containsClient(clientList, "copilot") {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, copilotMD)
@@ -122,31 +119,48 @@ func appendLine(path, line string) {
 	f.Write([]byte(line + "\n"))
 }
 
-func removeDWYTLegacyIgnores(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
+func normalizeClients(clients string) []string {
+	if strings.TrimSpace(clients) == "" {
+		return []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode"}
 	}
-	remove := map[string]bool{
-		"AGENTS.md":                       true,
-		".cursor/":                        true,
-		".kiro/":                          true,
-		".github/copilot-instructions.md": true,
-		".cursor/rules/dwyt.mdc":          true,
-		".kiro/steering/dwyt.md":          true,
-	}
-	lines := strings.Split(string(data), "\n")
-	kept := make([]string, 0, len(lines))
-	changed := false
-	for _, line := range lines {
-		if remove[strings.TrimSpace(line)] {
-			changed = true
+	seen := map[string]bool{}
+	var result []string
+	for _, c := range strings.Split(clients, ",") {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
 			continue
 		}
-		kept = append(kept, line)
+		seen[c] = true
+		result = append(result, c)
 	}
-	if changed {
-		os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0644)
+	return result
+}
+
+func containsClient(clients []string, client string) bool {
+	for _, c := range clients {
+		if c == client {
+			return true
+		}
+	}
+	return false
+}
+
+func dwytGeneratedIgnores() []string {
+	return []string{
+		"CLAUDE.md",
+		".claude/mcp.json",
+		".codex/",
+		".mcp.json",
+		"opencode.json",
+		".cursorrules",
+		".kiro/mcp.json",
+		".kiro/settings/mcp.json",
+		".vscode/mcp.json",
+		"AGENTS.md",
+		".cursor/mcp.json",
+		".cursor/rules/dwyt.mdc",
+		".github/copilot-instructions.md",
+		".kiro/steering/dwyt.md",
 	}
 }
 
@@ -168,15 +182,27 @@ func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
 		servers = map[string]interface{}{}
 	}
 	removeLegacyMCPKeys(servers)
-	servers["codebase"] = map[string]interface{}{
-		"type":    "stdio",
-		"command": cbmcpBin,
-	}
-	servers["obsidian"] = map[string]interface{}{
-		"type":    "stdio",
-		"command": obsidianMCPBin,
-	}
+	servers["codebase"] = stdioMCPConfig(cbmcpBin, false)
+	servers["obsidian"] = stdioMCPConfig(obsidianMCPBin, false)
 	config["mcpServers"] = servers
+	writeJSON(path, config)
+}
+
+func writeOrMergeVSCodeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
+	config := map[string]interface{}{}
+	if data, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(data, &config)
+	}
+	servers, _ := config["servers"].(map[string]interface{})
+	if servers == nil {
+		servers = map[string]interface{}{}
+	}
+	removeLegacyMCPKeys(servers)
+	servers["codebase"] = stdioMCPConfig(cbmcpBin, true)
+	servers["obsidian"] = stdioMCPConfig(obsidianMCPBin, true)
+	config["inputs"] = []interface{}{}
+	config["servers"] = servers
+	delete(config, "mcpServers")
 	writeJSON(path, config)
 }
 
@@ -217,6 +243,22 @@ func writeOrMergeOpenCodeJSON(path, cbmcpBin, obsidianMCPBin, _ string) {
 	config["permission"] = permission
 
 	writeJSON(path, config)
+}
+
+func stdioMCPConfig(command string, includeType bool) map[string]interface{} {
+	cfg := map[string]interface{}{
+		"command": command,
+		"args":    []interface{}{},
+	}
+	if includeType {
+		cfg["type"] = "stdio"
+	} else {
+		cfg["type"] = "stdio"
+	}
+	if strings.Contains(filepath.Base(command), "dwyt-obsidian-mcp") {
+		cfg["env"] = map[string]interface{}{"DWYT_API_URL": "http://localhost:2737/api"}
+	}
+	return cfg
 }
 
 func removeLegacyMCPKeys(m map[string]interface{}) {

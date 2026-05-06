@@ -39,13 +39,23 @@ export default function CardObsidian({
   setSaveType, setSaveContent, setSearchQuery,
   onSave, onSearch, onSummarize, onOpenVault, onOpenDir, onConfigure,
 }: Props) {
+  const mcp = mcpRegistry['obsidian']
+  const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
+  const mcpValue = mcp?.status === 'online'
+    ? `\uD83D\uDFE2 ${t.mcpOnline}`
+    : mcpReady
+      ? `\uD83D\uDFE1 ${t.mcpConfigured}`
+      : `\uD83D\uDD34 ${t.mcpOffline}`
+  const configureRunning = configuringMCP === 'obsidian'
+  const configureDisabled = configuringMCP !== ''
+
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <CardHeader label={t.obsidianActive} color="#f08d49" state={state} badgeText={badgeText} />
       <Hr />
       <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
-      <Row label="MCP" value={mcpRegistry['obsidian']?.status === 'online' ? `\uD83D\uDFE2 ${t.mcpOnline}` : mcpRegistry['obsidian']?.status === 'installed' ? `\uD83D\uDFE1 ${t.mcpConfigured}` : mcpRegistry['obsidian']?.status === 'port_open_no_health' ? '\uD83D\uDFE1 Starting...' : `\uD83D\uDD34 ${t.mcpOffline}`} />
+      <Row label="MCP" value={mcpValue} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
       <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -67,7 +77,8 @@ export default function CardObsidian({
       </div>
       {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
       <Button variant="primary" size="xs"
-        label={configuringMCP === 'obsidian' ? t.mcpConfiguring : t.mcpConfigure}
+        label={configureRunning ? t.mcpConfiguring : (mcpReady ? t.mcpReconfigure : t.mcpConfigure)}
+        loading={configureRunning} disabled={configureDisabled}
         onClick={onConfigure} />
       <div style={{ display: 'flex', gap: 4 }}>
         <Button variant="primary" size="xs" label={summarizing ? '...' : t.rebuildSummary} onClick={onSummarize} />

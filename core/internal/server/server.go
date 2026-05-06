@@ -14,6 +14,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -76,6 +77,9 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
+	if err := install.ObsidianMCP(dwytBin); err != nil {
+		log.Warn("obsidian MCP self-install failed", log.Fields{"error": err.Error()})
+	}
 	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
 	procmanInstance.Register("obsidian", obsidianMCPBin, "", 0)
 
@@ -287,21 +291,28 @@ func (ds *DashboardServer) startMCPsIfNeeded() {
 
 func (ds *DashboardServer) clientsString() string {
 	if ds.Store == nil {
-		return ""
+		return defaultClientsString()
 	}
 	raw, err := ds.Store.GetConfig("setup")
 	if err != nil {
-		return ""
+		return defaultClientsString()
 	}
 	var cfg Config
 	if json.Unmarshal([]byte(raw), &cfg) != nil {
-		return ""
+		return defaultClientsString()
 	}
 	clients := strings.Join(cfg.Ias, ",")
 	if clients == "" {
 		clients = strings.Join(cfg.Clients, ",")
 	}
+	if clients == "" {
+		clients = defaultClientsString()
+	}
 	return clients
+}
+
+func defaultClientsString() string {
+	return "claude,codex,copilot,kiro,cursor,opencode"
 }
 
 var headroomWrapMap = map[string]string{

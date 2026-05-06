@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,5 +39,73 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 		if _, ok := reg.MCPServers[legacyName]; ok {
 			t.Fatalf("legacy MCP key still present: %s", legacyName)
 		}
+	}
+}
+
+func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	t.Setenv("HOME", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := t.TempDir()
+	if err := reg.ConfigureMCP(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	var vscode map[string]interface{}
+	readJSONFile(t, filepath.Join(projectPath, ".vscode", "mcp.json"), &vscode)
+	if _, ok := vscode["servers"].(map[string]interface{}); !ok {
+		t.Fatalf("expected VS Code servers config: %#v", vscode)
+	}
+
+	var cursor map[string]interface{}
+	readJSONFile(t, filepath.Join(projectPath, ".cursor", "mcp.json"), &cursor)
+	if _, ok := cursor["mcpServers"].(map[string]interface{}); !ok {
+		t.Fatalf("expected Cursor mcpServers config: %#v", cursor)
+	}
+
+	var kiro map[string]interface{}
+	readJSONFile(t, filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), &kiro)
+	if _, ok := kiro["mcpServers"].(map[string]interface{}); !ok {
+		t.Fatalf("expected Kiro mcpServers config: %#v", kiro)
+	}
+
+	codex, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(codex), "[mcp_servers.codebase]") ||
+		!strings.Contains(string(codex), "[mcp_servers.obsidian]") {
+		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
+	}
+}
+
+func touchExecutable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readJSONFile(t *testing.T, path string, out interface{}) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		t.Fatalf("%s: %v", path, err)
 	}
 }

@@ -107,7 +107,12 @@ func (ds *DashboardServer) apiCodebaseIndexStatus(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
-	const uiPort = 9749
+	uiPort := 9749
+	if st := ds.ProcMan.Status("codebase"); st != nil && st.Running && st.Healthy && st.Port > 0 {
+		uiPort = st.Port
+		c.JSON(200, gin.H{"url": fmt.Sprintf("http://localhost:%d", uiPort), "started": false, "ready": true})
+		return
+	}
 	uiURL := fmt.Sprintf("http://localhost:%d", uiPort)
 
 	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
@@ -120,8 +125,14 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		return
 	}
 
+	uiPort = health.FindFreePort(uiPort)
+	uiURL = fmt.Sprintf("http://localhost:%d", uiPort)
+	if mpStatus := ds.ProcMan.Status("codebase"); mpStatus != nil && mpStatus.Port != uiPort {
+		// ProcessManager owns the actual port selection. Updating through start is
+		// intentionally avoided here; the returned URL is advisory for the browser.
+	}
 	ds.ProcMan.Stop("codebase")
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	go func() {
 		ds.ProcMan.Start("codebase")

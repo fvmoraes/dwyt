@@ -111,8 +111,8 @@ func pollCBMCP(dwytBin string) ToolStatus {
 		return ts
 	}
 
-	ts.Status = StateOffline
-	ts.State = StateOffline
+	ts.Status = StateInstalled
+	ts.State = StateInstalled
 	ts.Running = false
 	ts.Healthy = false
 	ts.Port = 9749

@@ -123,20 +123,73 @@ func Headroom(dwytBin, dwytHome string) error {
 }
 
 func ObsidianMCP(dwytBin string) error {
-	binPath := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
+	binName := "dwyt-obsidian-mcp"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath := filepath.Join(dwytBin, binName)
 	os.MkdirAll(dwytBin, 0755)
-	// The binary is part of the DWYT release bundle — copy from the parent DWYT binary
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("obsidian-mcp: cannot locate DWYT binary: %w", err)
 	}
-	src := filepath.Join(filepath.Dir(exe), "dwyt-obsidian-mcp")
-	srcData, err := os.ReadFile(src)
-	if err != nil {
-		// Not bundled — must be installed via DWYT update
-		return fmt.Errorf("dwyt-obsidian-mcp not installed (run DWYT update or contact support)")
+
+	candidates := []string{
+		filepath.Join(filepath.Dir(exe), binName),
+		exe,
 	}
-	return os.WriteFile(binPath, srcData, 0755)
+	if realExe, err := filepath.EvalSymlinks(exe); err == nil {
+		candidates = append([]string{filepath.Join(filepath.Dir(realExe), binName), realExe}, candidates...)
+	}
+
+	for _, src := range candidates {
+		if src == "" {
+			continue
+		}
+		if sameFile(src, binPath) {
+			return nil
+		}
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := copyExecutable(src, binPath); err != nil {
+			return fmt.Errorf("obsidian-mcp: copy %s to %s: %w", src, binPath, err)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("dwyt-obsidian-mcp source binary not found")
+}
+
+func copyExecutable(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func sameFile(a, b string) bool {
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return aa == bb
 }
 
 // InstallObsidianApp downloads and installs the Obsidian desktop app.

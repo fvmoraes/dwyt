@@ -202,18 +202,25 @@ export default function Dashboard() {
     try {
       const r = await api.openCodebaseUI()
       if (r.url) {
+        const graphWindow = window.open(r.url)
         if (!r.ready && r.started) {
           const waitStart = Date.now()
+          const healthURL = new URL('/health', r.url).toString()
+          setOpeningGraph(false)
           const checkReady = setInterval(() => {
-            fetch('http://localhost:9749/health')
+            fetch(healthURL)
               .then(res => {
-                if (res.ok) { clearInterval(checkReady); window.open(r.url); pollAll(); setOpeningGraph(false) }
+                if (res.ok) {
+                  clearInterval(checkReady)
+                  if (graphWindow) graphWindow.location.href = r.url
+                  pollAll()
+                }
                 else if (Date.now() - waitStart > 15000) { clearInterval(checkReady); pollAll(); setOpeningGraph(false) }
               }).catch(() => {
                 if (Date.now() - waitStart > 15000) { clearInterval(checkReady); pollAll(); setOpeningGraph(false) }
               })
           }, 500)
-        } else { window.open(r.url); setOpeningGraph(false) }
+        } else { setOpeningGraph(false) }
       } else {
         setOpeningGraph(false)
       }
@@ -400,31 +407,26 @@ export default function Dashboard() {
               <span style={{ fontSize: 10, color: 'var(--text)', fontFamily: 'monospace' }}>{String(obsidianStats.summary ?? '')}</span>
             </div>
           )}
-        </div>
-      )}
-
-      {kiroPower && (
-        <div className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span style={{ color: 'var(--blue)', fontWeight: 700, textTransform: 'uppercase' }}>{t.kiroPower}</span>
-            <span title={kiroPower.power_dir} style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
-            </span>
-            {kiroPower.errors && kiroPower.errors.length > 0 && (
-              <span style={{ color: 'var(--yellow)' }}>{kiroPower.errors.join(', ')}</span>
-            )}
-          </div>
-          <Button
-            variant="secondary"
-            size="xs"
-            label={refreshingKiroPower ? t.refreshing : t.kiroPowerRefresh}
-            loading={refreshingKiroPower}
-            onClick={async () => {
-              setRefreshingKiroPower(true)
-              try { setKiroPower(await api.refreshKiroPower()) } catch { /* */ }
-              setRefreshingKiroPower(false)
-            }}
-          />
+          {kiroPower && (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span title={kiroPower.power_dir} style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--blue)', fontWeight: 700, textTransform: 'uppercase' }}>{t.kiroPower}: </span>
+                {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
+                {kiroPower.errors && kiroPower.errors.length > 0 ? ` · ${kiroPower.errors.join(', ')}` : ''}
+              </span>
+              <Button
+                variant="secondary"
+                size="xs"
+                label={refreshingKiroPower ? t.refreshing : t.kiroPowerRefresh}
+                loading={refreshingKiroPower}
+                onClick={async () => {
+                  setRefreshingKiroPower(true)
+                  try { setKiroPower(await api.refreshKiroPower()) } catch { /* */ }
+                  setRefreshingKiroPower(false)
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
 

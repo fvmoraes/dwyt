@@ -23,9 +23,9 @@ const variantStyles: Record<Variant, { bg: string; color: string; border: string
 }
 
 const sizeStyles = {
-  xs: { padding: '4px 8px', fontSize: 12, borderRadius: 4 },
-  sm: { padding: '6px 12px', fontSize: 13, borderRadius: 5 },
-  md: { padding: '8px 16px', fontSize: 15, borderRadius: 6 },
+  xs: { padding: '3px 7px', fontSize: 11, borderRadius: 4 },
+  sm: { padding: '5px 10px', fontSize: 12, borderRadius: 5 },
+  md: { padding: '7px 14px', fontSize: 14, borderRadius: 6 },
 }
 
 export default function Button({

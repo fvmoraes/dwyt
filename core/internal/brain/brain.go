@@ -438,19 +438,94 @@ func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
 }
 
 func (pb *ProjectObsidian) OpenInObsidian() error {
-	vaultURI := "obsidian://open?path=" + url.PathEscape(pb.brainDir)
+	if err := pb.RegisterObsidianVault(); err != nil {
+		return err
+	}
+	openPath := filepath.Join(pb.brainDir, "index.md")
+	vaultURI := "obsidian://open?path=" + url.QueryEscape(openPath)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "darwin" {
 		cmd = exec.Command("open", vaultURI)
 	} else if runtime.GOOS == "windows" {
-		cmd = exec.Command("start", vaultURI)
+		cmd = exec.Command("cmd", "/c", "start", "", vaultURI)
 	} else {
 		cmd = exec.Command("xdg-open", vaultURI)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("obsidian: failed to open vault via URI: %w", err)
 	}
 	return nil
+}
+
+func (pb *ProjectObsidian) RegisterObsidianVault() error {
+	configPath, err := obsidianConfigPath()
+	if err != nil {
+		return err
+	}
+
+	config := map[string]interface{}{}
+	if data, err := os.ReadFile(configPath); err == nil && len(data) > 0 {
+		json.Unmarshal(data, &config)
+	}
+
+	vaults, _ := config["vaults"].(map[string]interface{})
+	if vaults == nil {
+		vaults = map[string]interface{}{}
+	}
+
+	entry := map[string]interface{}{
+		"path": pb.brainDir,
+		"ts":   time.Now().UnixMilli(),
+		"open": true,
+	}
+	found := false
+	for id, raw := range vaults {
+		v, ok := raw.(map[string]interface{})
+		if !ok || v["path"] != pb.brainDir {
+			continue
+		}
+		vaults[id] = entry
+		found = true
+	}
+	if !found {
+		vaults[pb.ProjectID] = entry
+	}
+	config["vaults"] = vaults
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("obsidian: failed to encode vault registry: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("obsidian: failed to create config dir: %w", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("obsidian: failed to register vault: %w", err)
+	}
+	return nil
+}
+
+func obsidianConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("obsidian: cannot locate home dir: %w", err)
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "obsidian", "obsidian.json"), nil
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(home, "AppData", "Roaming")
+		}
+		return filepath.Join(appData, "obsidian", "obsidian.json"), nil
+	default:
+		configHome := os.Getenv("XDG_CONFIG_HOME")
+		if configHome == "" {
+			configHome = filepath.Join(home, ".config")
+		}
+		return filepath.Join(configHome, "obsidian", "obsidian.json"), nil
+	}
 }
 
 func (pb *ProjectObsidian) OpenBrainDir() error {

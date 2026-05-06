@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/gin-gonic/gin"
@@ -66,6 +68,9 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	}
 
 	ds.RuntimeState.SetCurrentProject(body.Path, filepath.Base(body.Path))
+	if strings.Contains(","+ds.clientsString()+",", ",kiro,") {
+		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.Path)
+	}
 
 	ds.broadcastSSE("project_switch", body.Path)
 

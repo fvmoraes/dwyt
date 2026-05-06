@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 )
@@ -83,13 +84,13 @@ func boolPtr(b bool) *bool { return &b }
 type ToolHandler func(args map[string]interface{}) (string, error)
 
 type Server struct {
-	name    string
-	version string
-	tools   []Tool
+	name     string
+	version  string
+	tools    []Tool
 	handlers map[string]ToolHandler
-	reader  *bufio.Reader
-	writer  io.Writer
-	logFile string
+	reader   *bufio.Reader
+	writer   io.Writer
+	logFile  string
 }
 
 func NewServer(name, version string) *Server {
@@ -98,13 +99,13 @@ func NewServer(name, version string) *Server {
 		home, _ := os.UserHomeDir()
 		logPath = home + "/.dwyt/logs/mcp-" + name + ".log"
 	}
-	os.MkdirAll(logPath[:len(logPath)-len(logPath)+len(logPath)-len(name+"\"")], 0755)
+	os.MkdirAll(filepath.Dir(logPath), 0755)
 
 	return &Server{
-		name:    name,
-		version: version,
-		reader:  bufio.NewReader(os.Stdin),
-		writer:  os.Stdout,
+		name:     name,
+		version:  version,
+		reader:   bufio.NewReader(os.Stdin),
+		writer:   os.Stdout,
 		handlers: make(map[string]ToolHandler),
 	}
 }

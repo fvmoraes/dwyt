@@ -2,9 +2,12 @@ package server
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/gin-gonic/gin"
 )
@@ -20,17 +23,18 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 		st := ds.ProcMan.Status(mcpProcessName(name))
 		installed := reg.IsBinaryInstalled(name)
 		status := "offline"
+		if installed {
+			status = "installed"
+		}
 		if st != nil && st.Running && st.Healthy {
 			status = "online"
 		} else if entry.Port > 0 && isPortOpen(entry.Port) {
 			healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", entry.Port, entry.HealthURL)
 			if health.ProbeURL(healthURL) {
 				status = "online"
-			} else {
+			} else if !installed {
 				status = "port_open_no_health"
 			}
-		} else if installed && entry.Port == 0 {
-			status = "installed"
 		}
 		pid := 0
 		if st != nil {
@@ -59,6 +63,13 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 		body.ProjectPath = ds.DefaultProject
 	}
 
+	if body.Name == "" || body.Name == "obsidian" {
+		if err := install.ObsidianMCP(ds.DwytBin); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	reg, err := mcpregistry.Load()
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -75,7 +86,11 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 			return
 		}
 	}
-	integrate.Project(body.ProjectPath, ds.clientsString(), ds.DwytBin)
+	clients := ds.clientsString()
+	integrate.Project(body.ProjectPath, clients, ds.DwytBin)
+	if strings.Contains(","+clients+",", ",kiro,") {
+		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath)
+	}
 	c.JSON(200, gin.H{"status": "configured", "note": "MCP configs synced for project AI clients"})
 }
 

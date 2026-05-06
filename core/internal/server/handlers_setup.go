@@ -13,6 +13,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -149,6 +150,13 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 				clients = strings.Join(config.Clients, ",")
 			}
 			integrate.Project(config.ProjectPath, clients, ds.DwytBin)
+			if reg, err := mcpregistry.Load(); err == nil {
+				if err := reg.ConfigureMCP(config.ProjectPath); err != nil {
+					setStatus("mcp-config", "error: "+err.Error())
+				} else {
+					setStatus("mcp-config", "ok")
+				}
+			}
 			if ds.Store != nil {
 				ds.Store.TouchProject(config.ProjectPath)
 				ds.Store.SetConfig("project_path", config.ProjectPath)

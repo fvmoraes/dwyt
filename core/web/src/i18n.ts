@@ -40,7 +40,7 @@ export const T = {
     toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
     toolHeadroom: 'Headroom', toolRTK: 'RTK',
     // MCP
-    mcpConfigure: 'Configure MCP', mcpOnline: 'MCP Online', mcpOffline: 'MCP Offline',
+    mcpConfigure: 'Configure MCP', mcpReconfigure: 'Reconfigure MCP', mcpOnline: 'MCP Online', mcpOffline: 'MCP Offline',
     mcpRestart: 'Restart', mcpLogs: 'MCP Logs', mcpConfigured: 'MCP configured',
     mcpConfiguring: 'Configuring...',
     kiroPower: 'Kiro Power',
@@ -107,7 +107,7 @@ export const T = {
     toolCodebase: 'Codebase', toolObsidian: 'Obsidian',
     toolHeadroom: 'Headroom', toolRTK: 'RTK',
     // MCP
-    mcpConfigure: 'Configurar MCP', mcpOnline: 'MCP Online', mcpOffline: 'MCP Offline',
+    mcpConfigure: 'Configurar MCP', mcpReconfigure: 'Reconfigurar MCP', mcpOnline: 'MCP Online', mcpOffline: 'MCP Offline',
     mcpRestart: 'Reiniciar', mcpLogs: 'Logs MCP', mcpConfigured: 'MCP configurado',
     mcpConfiguring: 'Configurando...',
     kiroPower: 'Kiro Power',

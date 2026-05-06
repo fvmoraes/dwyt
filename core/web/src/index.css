@@ -21,13 +21,13 @@ body {
   background-attachment: fixed;
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 15px;
+  font-size: 14px;
   margin: 0;
   min-height: 100vh;
 }
 
 body * {
-  font-size: max(12px, 1em) !important;
+  font-size: max(10px, 1em) !important;
 }
 
 /* ── Card ── */
@@ -63,7 +63,7 @@ button {
   border-radius: 5px;
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
   transition: all 0.12s;
   white-space: nowrap;
@@ -100,10 +100,10 @@ input[type="text"] {
   background: var(--inner);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 5px;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 13px;
   width: 100%;
   line-height: 1.4;
 }

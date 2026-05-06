@@ -27,6 +27,15 @@ export default function CardCodebase(props: Props) {
   const det = getDetail('codebase-memory-mcp')
   const state = toolState(cbmcp, det) as 'not_installed' | 'inactive' | 'active'
   const b = badge(state)
+  const mcp = mcpRegistry['codebase']
+  const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
+  const mcpValue = mcp?.status === 'online'
+    ? `\uD83D\uDFE2 ${t.mcpOnline}`
+    : mcpReady
+      ? `\uD83D\uDFE1 ${t.mcpConfigured}`
+      : `\uD83D\uDD34 ${t.mcpOffline}`
+  const configureRunning = configuringMCP === 'codebase'
+  const configureDisabled = configuringMCP !== ''
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -35,7 +44,7 @@ export default function CardCodebase(props: Props) {
       <Row label={t.tokensSavedLabel} value={'\u2014'} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
       <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
-      <Row label="MCP" value={mcpRegistry['codebase']?.status === 'online' ? `\uD83D\uDFE2 ${t.mcpOnline}` : mcpRegistry['codebase']?.status === 'port_open_no_health' ? '\uD83D\uDFE1 Starting...' : `\uD83D\uDD34 ${t.mcpOffline}`} />
+      <Row label="MCP" value={mcpValue} />
       <RepoRow projectName={props.repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
       {state === 'not_installed' ? (
@@ -62,7 +71,8 @@ export default function CardCodebase(props: Props) {
             loading={openingGraph} disabled={openingGraph}
             onClick={onOpenGraph} />
           <Button variant="primary" size="xs"
-            label={configuringMCP === 'codebase' ? t.mcpConfiguring : t.mcpConfigure}
+            label={configureRunning ? t.mcpConfiguring : (mcpReady ? t.mcpReconfigure : t.mcpConfigure)}
+            loading={configureRunning} disabled={configureDisabled}
             onClick={onConfigure} />
         </>
       )}

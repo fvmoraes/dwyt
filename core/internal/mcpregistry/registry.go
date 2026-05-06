@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 )
@@ -194,23 +195,151 @@ func (r *Registry) SyncVSCode(projectPath string) error {
 		if !entry.Enabled || !r.IsBinaryInstalled(name) {
 			continue
 		}
-		args := entry.Args
-		if args == nil {
-			args = []string{}
-		}
-		servers[name] = map[string]interface{}{
-			"command": entry.Command,
-			"args":    args,
-		}
+		servers[name] = mcpServerConfig(entry, true)
 	}
 
 	config := map[string]interface{}{
-		"inputs":     []interface{}{},
-		"mcpServers": servers,
+		"inputs":  []interface{}{},
+		"servers": servers,
 	}
 
 	data, _ := json.MarshalIndent(config, "", "  ")
 	return os.WriteFile(mcpPath, data, 0644)
+}
+
+// SyncCursor writes project-scoped MCP config for Cursor.
+func (r *Registry) SyncCursor(projectPath string) error {
+	mcpPath := filepath.Join(projectPath, ".cursor", "mcp.json")
+	servers := make(map[string]interface{})
+	for name, entry := range r.MCPServers {
+		if !entry.Enabled || !r.IsBinaryInstalled(name) {
+			continue
+		}
+		servers[name] = mcpServerConfig(entry, false)
+	}
+	return writeJSONFile(mcpPath, map[string]interface{}{"mcpServers": servers})
+}
+
+// SyncKiro writes both current and legacy Kiro workspace MCP config paths.
+func (r *Registry) SyncKiro(projectPath string) error {
+	servers := make(map[string]interface{})
+	for name, entry := range r.MCPServers {
+		if !entry.Enabled || !r.IsBinaryInstalled(name) {
+			continue
+		}
+		servers[name] = mcpServerConfig(entry, false)
+	}
+	config := map[string]interface{}{"mcpServers": servers}
+	if err := writeJSONFile(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), config); err != nil {
+		return err
+	}
+	return writeJSONFile(filepath.Join(projectPath, ".kiro", "mcp.json"), config)
+}
+
+// SyncCodexGlobal writes MCP servers to Codex's shared config file.
+func (r *Registry) SyncCodexGlobal() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(home, ".codex", "config.toml")
+	data, _ := os.ReadFile(configPath)
+	original := string(data)
+	content := removeManagedBlock(original, "# dwyt:mcp:start", "# dwyt:mcp:end")
+
+	block := r.codexTOMLBlock()
+	if block == "" {
+		if content == original {
+			return nil
+		}
+		os.MkdirAll(filepath.Dir(configPath), 0755)
+		return os.WriteFile(configPath, []byte(content), 0644)
+	}
+	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if strings.TrimSpace(content) != "" {
+		content += "\n"
+	}
+	content += block
+
+	os.MkdirAll(filepath.Dir(configPath), 0755)
+	return os.WriteFile(configPath, []byte(content), 0644)
+}
+
+func (r *Registry) codexTOMLBlock() string {
+	var b strings.Builder
+	b.WriteString("# dwyt:mcp:start\n")
+	wrote := false
+	for _, name := range []string{"codebase", "obsidian"} {
+		entry, ok := r.MCPServers[name]
+		if !ok || !entry.Enabled || !r.IsBinaryInstalled(name) {
+			continue
+		}
+		wrote = true
+		b.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
+		b.WriteString(fmt.Sprintf("command = %q\n", entry.Command))
+		b.WriteString("args = [")
+		for i, arg := range entry.Args {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(fmt.Sprintf("%q", arg))
+		}
+		b.WriteString("]\n")
+		b.WriteString("startup_timeout_sec = 20\n")
+		b.WriteString("tool_timeout_sec = 120\n\n")
+	}
+	b.WriteString("# dwyt:mcp:end\n")
+	if !wrote {
+		return ""
+	}
+	return b.String()
+}
+
+func mcpServerConfig(entry MCPServerEntry, includeType bool) map[string]interface{} {
+	args := entry.Args
+	if args == nil {
+		args = []string{}
+	}
+	cfg := map[string]interface{}{
+		"command": entry.Command,
+		"args":    args,
+	}
+	if includeType {
+		cfg["type"] = "stdio"
+	}
+	return cfg
+}
+
+func writeJSONFile(path string, value interface{}) error {
+	os.MkdirAll(filepath.Dir(path), 0755)
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+func removeManagedBlock(content, start, end string) string {
+	for {
+		startIdx := strings.Index(content, start)
+		if startIdx == -1 {
+			return content
+		}
+		endIdx := strings.Index(content[startIdx:], end)
+		if endIdx == -1 {
+			return content
+		}
+		endPos := startIdx + endIdx + len(end)
+		if endPos < len(content) && content[endPos] == '\n' {
+			endPos++
+		}
+		if startIdx > 0 && content[startIdx-1] == '\n' {
+			startIdx--
+		}
+		content = content[:startIdx] + content[endPos:]
+	}
 }
 
 // ConfigureMCPByName writes MCP configuration for a specific MCP server only.
@@ -222,15 +351,7 @@ func (r *Registry) ConfigureMCPByName(projectPath, name string) error {
 		return fmt.Errorf("mcp registry save failed: %w", err)
 	}
 
-	errors := []string{}
-	if err := r.SyncClaudeDesktop(); err != nil {
-		errors = append(errors, "claude: "+err.Error())
-	}
-	if projectPath != "" {
-		if err := r.SyncVSCode(projectPath); err != nil {
-			errors = append(errors, "vscode: "+err.Error())
-		}
-	}
+	errors := r.syncConfiguredTargets(projectPath)
 	if len(errors) > 0 {
 		return fmt.Errorf("sync errors: %v", errors)
 	}
@@ -251,17 +372,7 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 		backup[k] = v
 	}
 
-	errors := []string{}
-	if err := r.SyncClaudeDesktop(); err != nil {
-		errors = append(errors, "claude: "+err.Error())
-	}
-
-	// Sync per-project MCP configs
-	if projectPath != "" {
-		if err := r.SyncVSCode(projectPath); err != nil {
-			errors = append(errors, "vscode: "+err.Error())
-		}
-	}
+	errors := r.syncConfiguredTargets(projectPath)
 
 	if len(errors) > 0 {
 		// Rollback: restore registry to pre-sync state
@@ -272,6 +383,28 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 
 	log.Info("mcp configs synced", log.Fields{"project": projectPath})
 	return nil
+}
+
+func (r *Registry) syncConfiguredTargets(projectPath string) []string {
+	errors := []string{}
+	if err := r.SyncClaudeDesktop(); err != nil {
+		errors = append(errors, "claude: "+err.Error())
+	}
+	if err := r.SyncCodexGlobal(); err != nil {
+		errors = append(errors, "codex: "+err.Error())
+	}
+	if projectPath != "" {
+		if err := r.SyncVSCode(projectPath); err != nil {
+			errors = append(errors, "vscode: "+err.Error())
+		}
+		if err := r.SyncCursor(projectPath); err != nil {
+			errors = append(errors, "cursor: "+err.Error())
+		}
+		if err := r.SyncKiro(projectPath); err != nil {
+			errors = append(errors, "kiro: "+err.Error())
+		}
+	}
+	return errors
 }
 
 // SyncAll syncs MCP config for all agents using the given project path.
