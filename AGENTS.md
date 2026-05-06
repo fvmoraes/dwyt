@@ -3,6 +3,13 @@
 Este projeto usa ferramentas automáticas para reduzir consumo de tokens.
 **Todas as integrações são transparentes: você não precisa configurar nada.**
 
+## Commits
+
+- Use **Conventional Commits**: `<tipo>(escopo opcional): descrição`.
+  Tipos válidos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
+- Mensagem **curta** (uma linha, idealmente ≤ 72 caracteres). Sem corpo a menos que indispensável.
+- **Não** inclua linhas `Co-Authored-By:` nem qualquer outro coautor.
+
 ## Ordem de prioridade (siga sempre esta ordem):
 
 ### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)

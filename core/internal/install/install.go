@@ -90,13 +90,20 @@ func Headroom(dwytBin, dwytHome string) error {
 	venvDir := filepath.Join(dwytHome, "headroom-venv")
 	os.MkdirAll(dwytHome, 0755)
 
-	pythonBin := "python3"
-	if _, err := exec.LookPath("python3"); err != nil {
-		pythonBin = "python"
+	// Limpa instalação anterior parcial (venv sem pip, symlink quebrado, etc.)
+	// para que o passo seja idempotente em caso de retry.
+	os.Remove(wrapperPath)
+	os.RemoveAll(venvDir)
+
+	pythonBin, err := findCompatiblePython()
+	if err != nil {
+		return fmt.Errorf("headroom: %w", err)
 	}
 
-	fmt.Printf("  → headroom venv...\n")
-	exec.Command(pythonBin, "-m", "venv", venvDir).Run()
+	fmt.Printf("  → headroom venv (%s)...\n", pythonBin)
+	if out, vErr := exec.Command(pythonBin, "-m", "venv", venvDir).CombinedOutput(); vErr != nil {
+		return fmt.Errorf("headroom: criação do venv falhou: %w\n%s", vErr, string(out))
+	}
 
 	var pipBin, hrBin string
 	if runtime.GOOS == "windows" {
@@ -107,19 +114,70 @@ func Headroom(dwytBin, dwytHome string) error {
 		hrBin = filepath.Join(venvDir, "bin", "headroom")
 	}
 
-	exec.Command(pipBin, "install", "--quiet", "--upgrade", "pip").Run()
-	if err := exec.Command(pipBin, "install", "--quiet", "headroom-ai[proxy]").Run(); err != nil {
-		return fmt.Errorf("pip install headroom: %w", err)
+	// Algumas builds do Python (especialmente Homebrew bleeding-edge) criam
+	// venvs sem pip. Bootstrap via ensurepip antes de prosseguir.
+	if _, err := os.Stat(pipBin); err != nil {
+		venvPython := filepath.Join(filepath.Dir(pipBin), "python")
+		if runtime.GOOS == "windows" {
+			venvPython = filepath.Join(filepath.Dir(pipBin), "python.exe")
+		}
+		if out, eErr := exec.Command(venvPython, "-m", "ensurepip", "--upgrade").CombinedOutput(); eErr != nil {
+			return fmt.Errorf("headroom: pip ausente no venv e ensurepip falhou: %w\n%s", eErr, string(out))
+		}
+	}
+
+	if out, err := exec.Command(pipBin, "install", "--upgrade", "pip").CombinedOutput(); err != nil {
+		return fmt.Errorf("headroom: upgrade do pip falhou: %w\n%s", err, string(out))
+	}
+	if out, err := exec.Command(pipBin, "install", "headroom-ai[proxy]").CombinedOutput(); err != nil {
+		return fmt.Errorf("headroom: pip install headroom-ai[proxy] falhou: %w\n%s", err, string(out))
+	}
+
+	if _, err := os.Stat(hrBin); err != nil {
+		return fmt.Errorf("headroom: binário não encontrado em %s após instalação", hrBin)
 	}
 
 	if runtime.GOOS == "windows" {
-		// On Windows create a .bat launcher instead of a symlink
 		bat := fmt.Sprintf("@echo off\r\n%q %%*\r\n", hrBin)
-		os.WriteFile(wrapperPath, []byte(bat), 0644)
-	} else {
-		os.Symlink(hrBin, wrapperPath)
+		return os.WriteFile(wrapperPath, []byte(bat), 0644)
 	}
-	return nil
+	return os.Symlink(hrBin, wrapperPath)
+}
+
+// findCompatiblePython localiza um interpretador Python compatível com
+// headroom-ai. Versões 3.10–3.12 têm wheels disponíveis para todas as
+// dependências; 3.13+ frequentemente quebram (faltam wheels para libs com
+// extensões C). Em macOS isso costuma se manifestar como "no pip in venv"
+// quando o Homebrew default pula pra uma versão muito nova.
+func findCompatiblePython() (string, error) {
+	for _, name := range []string{"python3.12", "python3.11", "python3.10"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path, nil
+		}
+	}
+	for _, name := range []string{"python3", "python"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		if maj, min, ok := pythonMajorMinor(path); ok && (maj > 3 || (maj == 3 && min >= 13)) {
+			fmt.Printf("  ⚠ headroom: %s reportou Python %d.%d — pode não ter wheels para todas as dependências; recomendado 3.10–3.12\n", path, maj, min)
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf("python3 não encontrado no PATH (instale Python 3.10–3.12; macOS: brew install python@3.12)")
+}
+
+func pythonMajorMinor(bin string) (int, int, bool) {
+	out, err := exec.Command(bin, "-c", "import sys;print(sys.version_info[0],sys.version_info[1])").Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	var maj, min int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d %d", &maj, &min); err != nil {
+		return 0, 0, false
+	}
+	return maj, min, true
 }
 
 func ObsidianMCP(dwytBin string) error {
@@ -293,17 +351,179 @@ func latestObsidianLinuxAppImageURL() (string, error) {
 }
 
 func installObsidianMacOS() (string, error) {
-	// Check common install locations
+	home, _ := os.UserHomeDir()
 	locations := []string{
 		"/Applications/Obsidian.app/Contents/MacOS/Obsidian",
 		"/Applications/Tools/Obsidian.app/Contents/MacOS/Obsidian",
+	}
+	if home != "" {
+		locations = append(locations, filepath.Join(home, "Applications", "Obsidian.app", "Contents", "MacOS", "Obsidian"))
 	}
 	for _, loc := range locations {
 		if _, err := os.Stat(loc); err == nil {
 			return loc, nil
 		}
 	}
-	return "", fmt.Errorf("obsidian not found — install from https://obsidian.md/download (macOS)")
+
+	// 1) Homebrew Cask: caminho mais limpo, lida com gatekeeper e atualizações.
+	if brewPath, err := exec.LookPath("brew"); err == nil {
+		fmt.Printf("  → obsidian via homebrew cask...\n")
+		if out, bErr := exec.Command(brewPath, "install", "--cask", "obsidian").CombinedOutput(); bErr != nil {
+			fmt.Printf("  ⚠ homebrew falhou, tentando DMG: %s\n", strings.TrimSpace(string(out)))
+		} else {
+			for _, loc := range locations {
+				if _, err := os.Stat(loc); err == nil {
+					return loc, nil
+				}
+			}
+		}
+	}
+
+	// 2) Fallback: baixar DMG oficial do release mais recente e copiar via hdiutil.
+	url, err := latestObsidianMacDMGURL()
+	if err != nil {
+		return "", fmt.Errorf("obsidian: %w (instale manualmente: https://obsidian.md/download)", err)
+	}
+
+	dmgPath := filepath.Join(os.TempDir(), "Obsidian-dwyt.dmg")
+	fmt.Printf("  → obsidian: baixando DMG de %s\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("obsidian download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("obsidian download HTTP %d", resp.StatusCode)
+	}
+	dmgFile, err := os.Create(dmgPath)
+	if err != nil {
+		return "", fmt.Errorf("obsidian: criar dmg: %w", err)
+	}
+	if _, err := io.Copy(dmgFile, resp.Body); err != nil {
+		dmgFile.Close()
+		return "", fmt.Errorf("obsidian: leitura do dmg: %w", err)
+	}
+	dmgFile.Close()
+	defer os.Remove(dmgPath)
+
+	fmt.Printf("  → obsidian: montando DMG...\n")
+	attachOut, err := exec.Command("hdiutil", "attach", "-nobrowse", "-noautoopen", "-quiet", dmgPath).Output()
+	if err != nil {
+		return "", fmt.Errorf("obsidian: hdiutil attach: %w", err)
+	}
+	mount := parseHdiutilMountPoint(string(attachOut))
+	if mount == "" {
+		return "", fmt.Errorf("obsidian: ponto de montagem não detectado no output do hdiutil")
+	}
+	defer exec.Command("hdiutil", "detach", "-quiet", mount).Run()
+
+	src := filepath.Join(mount, "Obsidian.app")
+	if _, err := os.Stat(src); err != nil {
+		return "", fmt.Errorf("obsidian: Obsidian.app não encontrado em %s", mount)
+	}
+
+	// /Applications normalmente é gravável pelo usuário em macOS recentes,
+	// mas se não for caímos pra ~/Applications.
+	targetDir := "/Applications"
+	if !canWriteDir(targetDir) {
+		if home == "" {
+			return "", fmt.Errorf("obsidian: /Applications não é gravável e $HOME está vazio")
+		}
+		targetDir = filepath.Join(home, "Applications")
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			return "", fmt.Errorf("obsidian: criar %s: %w", targetDir, err)
+		}
+	}
+	target := filepath.Join(targetDir, "Obsidian.app")
+	os.RemoveAll(target)
+	fmt.Printf("  → obsidian: copiando para %s...\n", target)
+	if out, err := exec.Command("cp", "-R", src, targetDir+string(os.PathSeparator)).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("obsidian: cp: %w\n%s", err, string(out))
+	}
+	// Remove flag de quarentena para o app abrir sem prompt extra do Gatekeeper.
+	exec.Command("xattr", "-dr", "com.apple.quarantine", target).Run()
+
+	return filepath.Join(target, "Contents", "MacOS", "Obsidian"), nil
+}
+
+// parseHdiutilMountPoint extrai o mount point (ex: /Volumes/Obsidian 1.5.x)
+// da saída tabular de `hdiutil attach`. Cada linha tem
+// <device>\t<filesystem>\t<mount point> (campos podem faltar).
+func parseHdiutilMountPoint(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		cols := strings.Split(line, "\t")
+		if len(cols) < 3 {
+			continue
+		}
+		mp := strings.TrimSpace(cols[len(cols)-1])
+		if strings.HasPrefix(mp, "/Volumes/") {
+			return mp
+		}
+	}
+	return ""
+}
+
+func canWriteDir(dir string) bool {
+	probe := filepath.Join(dir, ".dwyt-write-probe")
+	f, err := os.Create(probe)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(probe)
+	return true
+}
+
+func latestObsidianMacDMGURL() (string, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "dwyt-installer")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("release lookup: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("release lookup HTTP %d", resp.StatusCode)
+	}
+	var release struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("release decode: %w", err)
+	}
+	var universal, archMatch string
+	for _, a := range release.Assets {
+		n := strings.ToLower(a.Name)
+		if !strings.HasSuffix(n, ".dmg") {
+			continue
+		}
+		if strings.Contains(n, "universal") {
+			universal = a.BrowserDownloadURL
+		}
+		switch runtime.GOARCH {
+		case "arm64":
+			if strings.Contains(n, "arm64") {
+				archMatch = a.BrowserDownloadURL
+			}
+		case "amd64":
+			if strings.Contains(n, "x64") || strings.Contains(n, "amd64") || strings.Contains(n, "intel") {
+				archMatch = a.BrowserDownloadURL
+			}
+		}
+	}
+	if universal != "" {
+		return universal, nil
+	}
+	if archMatch != "" {
+		return archMatch, nil
+	}
+	return "", fmt.Errorf("nenhum DMG de macOS encontrado no release")
 }
 
 func installObsidianWindows() (string, error) {
