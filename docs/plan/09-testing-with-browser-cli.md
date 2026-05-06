@@ -75,7 +75,7 @@ check "GET /api/health" "ok" "$(curl -s $BASE/api/health)"
 check "GET /api/status" "obsidian" "$(curl -s $BASE/api/status)"
 
 # Obsidian
-check "GET /api/obsidian/status" "vault" "$(curl -s $BASE/api/obsidian/status)"
+check "GET /api/obsidian/status" "status" "$(curl -s $BASE/api/obsidian/status)"
 check "POST /api/obsidian/save" "ok" \
   "$(curl -s -X POST $BASE/api/obsidian/save \
     -H 'Content-Type: application/json' \
@@ -84,8 +84,8 @@ check "GET /api/obsidian/search" "results" \
   "$(curl -s "$BASE/api/obsidian/search?q=e2e")"
 
 # MCP Registry
-check "GET /api/mcp/registry" "dwyt-codebase" "$(curl -s $BASE/api/mcp/registry)"
-check "GET /api/mcp/registry" "dwyt-obsidian" "$(curl -s $BASE/api/mcp/registry)"
+check "GET /api/mcp/registry" "codebase" "$(curl -s $BASE/api/mcp/registry)"
+check "GET /api/mcp/registry" "obsidian" "$(curl -s $BASE/api/mcp/registry)"
 
 # Projects
 check "GET /api/projects/current" "path" "$(curl -s $BASE/api/projects/current)"
@@ -217,21 +217,22 @@ test.describe('Obsidian', () => {
 })
 
 test.describe('MCP Registry', () => {
-  test('contém dwyt-codebase e dwyt-obsidian', async ({ request }) => {
+  test('contém codebase e obsidian', async ({ request }) => {
     const response = await request.get(`${BASE}/api/mcp/registry`)
     expect(response.ok()).toBeTruthy()
     const data = await response.json()
-    const names = data.servers?.map((s: { name: string }) => s.name) ?? []
-    expect(names).toContain('dwyt-codebase')
-    expect(names).toContain('dwyt-obsidian')
+    const names = Object.keys(data.mcpServers ?? {})
+    expect(names).toContain('codebase')
+    expect(names).toContain('obsidian')
   })
 
-  test('não contém nomes legados sem prefixo', async ({ request }) => {
+  test('não contém nomes legados', async ({ request }) => {
     const response = await request.get(`${BASE}/api/mcp/registry`)
     const text = await response.text()
-    expect(text).not.toContain('"codebase"')   // sem prefixo dwyt-
-    expect(text).not.toContain('"obsidian"')   // sem prefixo dwyt-
-    expect(text).not.toContain('obsidian-mcp')
+    expect(text).not.toContain('dwyt-codebase')
+    expect(text).not.toContain('dwyt-obsidian')
+    expect(text).not.toContain('"dwyt"')
+    expect(text).not.toContain('"obsidian-mcp"')
   })
 })
 
@@ -244,15 +245,18 @@ test.describe('Status Consistency', () => {
     ])
 
     // Se obsidian está inactive no endpoint específico,
-    // não pode estar active no geral
+    // não pode estar online/active no geral
     if (obsidian.status === 'inactive') {
-      expect(general.obsidian?.status).not.toBe('active')
+      const obsidianGeneral = general.tools?.find((t: { name: string }) => t.name === 'obsidian')
+      expect(obsidianGeneral?.status ?? obsidianGeneral?.state).not.toBe('online')
+      expect(obsidianGeneral?.status ?? obsidianGeneral?.state).not.toBe('active')
     }
 
     // Se codebase está offline no endpoint específico,
     // não pode estar online no geral
     if (!codebase.running) {
-      expect(general.codebase?.status).not.toBe('online')
+      const codebaseGeneral = general.tools?.find((t: { name: string }) => t.name === 'codebase-memory-mcp')
+      expect(codebaseGeneral?.status ?? codebaseGeneral?.state).not.toBe('online')
     }
   })
 })
@@ -298,7 +302,7 @@ cd core/web && npx playwright test
 
 # 6. Verificação manual de status
 curl -s http://localhost:2737/api/status | jq .
-curl -s http://localhost:2737/api/mcp/registry | jq '.servers[].name'
+curl -s http://localhost:2737/api/mcp/registry | jq '.mcpServers | keys'
 ```
 
 ---
@@ -312,5 +316,5 @@ curl -s http://localhost:2737/api/mcp/registry | jq '.servers[].name'
 - [ ] Playwright: todos os testes passam
 - [ ] Mobile 390x844 sem overflow horizontal
 - [ ] RTK card sem Start/Stop
-- [ ] MCP registry sem nomes legados
+- [ ] MCP registry contém `codebase` e `obsidian`, sem `dwyt-codebase`, `dwyt-obsidian`, `dwyt` genérico ou chave `obsidian-mcp`
 - [ ] Status endpoints consistentes

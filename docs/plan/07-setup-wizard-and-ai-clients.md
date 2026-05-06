@@ -95,9 +95,15 @@ Se vault já existe, não recriar. Se config já existe, não sobrescrever sem c
 
 Garantir templates atualizados com `/api/obsidian/*`, não `/api/brain/*`.
 
-### 9.2 — Garantir MCPs `dwyt-codebase` e `dwyt-obsidian` em todos os templates
+### 9.2 — Garantir MCPs `codebase` e `obsidian` em todos os templates
 
-Nenhum template deve gerar `dwyt` (genérico), `codebase` (sem prefixo) ou `obsidian` (sem prefixo).
+Nenhum template deve gerar `dwyt` (genérico), `dwyt-codebase`, `dwyt-obsidian` ou `obsidian-mcp` como chave de MCP. Os binários continuam sendo `codebase-memory-mcp` e `dwyt-obsidian-mcp`.
+
+Arquivos existentes devem ser tratados como migração:
+
+- Se o arquivo não existe, criar com o template atual.
+- Se o arquivo existe e tem nomes legados ou falta `obsidian`, atualizar de forma controlada.
+- Se o arquivo existe e já está correto, preservar conteúdo do usuário.
 
 ### 9.3 — Instruções obrigatórias em todos os arquivos gerados
 
@@ -122,17 +128,23 @@ Entradas mínimas a adicionar quando os arquivos são gerados:
 # dwyt — generated files (do not commit)
 CLAUDE.md
 .cursorrules
+.mcp.json
 .claude/mcp.json
+.kiro/mcp.json
 .vscode/mcp.json
+opencode.json
 ```
 
-Entradas que **não** devem ir para `.gitignore` (são úteis no repo):
+Entradas que **não** devem ir para `.gitignore` quando o objetivo for compartilhar instruções da equipe:
 
 ```
 AGENTS.md
 .kiro/steering/dwyt.md
 .github/copilot-instructions.md
+.cursor/rules/dwyt.mdc
 ```
+
+> **Nota:** projetos já existentes podem ter `AGENTS.md` ignorado por versões anteriores do DWYT. A migração deve remover essa entrada apenas com cuidado, sem apagar o arquivo e sem sobrescrever decisões explícitas do usuário.
 
 ---
 
@@ -160,10 +172,10 @@ ls -la .github/copilot-instructions.md
 
 # Verificar conteúdo dos MCPs
 cat .mcp.json | jq '.mcpServers | keys'
-# deve retornar: ["dwyt-codebase", "dwyt-obsidian"]
+# deve retornar: ["codebase", "obsidian"]
 
 # Verificar .gitignore
-grep -E "CLAUDE\.md|\.cursorrules|\.claude/mcp\.json" .gitignore
+grep -E "CLAUDE\.md|\.cursorrules|\.mcp\.json|\.claude/mcp\.json|\.kiro/mcp\.json|\.vscode/mcp\.json|opencode\.json" .gitignore
 
 # Verificar rotas nos templates
 grep -r "api/brain" AGENTS.md CLAUDE.md .kiro/steering/dwyt.md

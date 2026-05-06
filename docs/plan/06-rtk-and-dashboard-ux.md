@@ -29,13 +29,15 @@ rtk gain --project → métricas por projeto
 
 Endpoint: `GET /api/rtk/gain`
 
-### 6.4 — Garantir `.cursorrules` com instruções RTK
+### 6.4 — Garantir regras do Cursor com instruções RTK
 
-Quando Cursor estiver selecionado, o arquivo `.cursor/rules/dwyt.mdc` deve incluir:
+Quando Cursor estiver selecionado, o arquivo compartilhável `.cursor/rules/dwyt.mdc` deve incluir:
 
 ```
 Prefix all shell commands with rtk
 ```
+
+O arquivo legado `.cursorrules` só deve ser tratado como compatibilidade local quando já existir.
 
 ---
 
@@ -307,7 +309,7 @@ body {
 - Transições de hover: `0.15s ease` — rápidas, não lentas
 - Não usar `background: white` ou `background: #fff` em nenhum componente
 
-### 7.8 — Tema Visual: Glassmorphism Cinza
+## Critérios de Aceite — Dashboard
 
 - [ ] `npm run lint` sem erros
 - [ ] Dashboard desktop não mostra estados contraditórios

@@ -24,7 +24,7 @@ Antes de modificar qualquer arquivo, o executor deve:
 **Status:** Parcialmente resolvido em v4.0.1. Verificar se ainda há resíduos.
 
 **Sintomas originais:**
-- Registry usando `dwyt-codebase` e `dwyt-obsidian`
+- Registry usando nomes legados com prefixo `dwyt-`
 - Dashboard procurando `codebase` e `obsidian-mcp`
 - `.mcp.json` gerando apenas `dwyt`
 - Obsidian MCP não sendo instalado quando a tool selecionada era apenas `obsidian`
@@ -186,7 +186,7 @@ Ao final dos ajustes, o DWYT deve se comportar assim:
 6. Cada projeto tem vault próprio e persistente
 7. Codebase, Headroom e Obsidian têm status real e consistente
 8. RTK aparece como CLI, não daemon
-9. MCPs `dwyt-codebase` e `dwyt-obsidian` são gerados corretamente para as IAs escolhidas
+9. MCPs `codebase` e `obsidian` são gerados corretamente para as IAs escolhidas
 10. `.gitignore` recebe todos os arquivos gerados que não devem ser versionados
 11. Dashboard não mostra informações falsas
 12. Mobile não quebra layout

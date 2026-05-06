@@ -4,7 +4,7 @@
 
 Gerar e manter automaticamente um **Kiro Power local** em `~/.dwyt/powers/dwyt-power` sempre que o usuário rodar `dwyt .` com Kiro habilitado na configuração.
 
-O Power expõe as quatro ferramentas do DWYT ao Kiro como MCPs nomeados, com steering files persistentes e ativação automática por palavras-chave.
+O Power expõe as quatro frentes do DWYT ao Kiro por steering files persistentes e ativação automática por palavras-chave. Apenas `codebase` e `obsidian` são MCPs reais; RTK e Headroom entram como instruções operacionais/API, porque RTK é CLI e Headroom é proxy/serviço.
 
 ---
 
@@ -13,7 +13,7 @@ O Power expõe as quatro ferramentas do DWYT ao Kiro como MCPs nomeados, com ste
 ```
 ~/.dwyt/powers/dwyt-power/
 ├── POWER.md              # documentação e instruções do Power para o Kiro
-├── mcp.json              # MCPs das 4 ferramentas do DWYT
+├── mcp.json              # MCPs reais: codebase e obsidian
 └── steering/
     ├── dwyt-context.md   # regras de contexto e prioridade
     ├── obsidian.md       # instruções de uso do vault
@@ -89,14 +89,14 @@ func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error)
 func IsKiroEnabled(setupConfig map[string]interface{}) bool
 
 // ValidateMCPBinaries verifica quais binários de MCP existem em dwytBin.
-// Retorna mapa nome → existe.
+// Retorna mapa nome → existe. Usar apenas as chaves "codebase" e "obsidian".
 func ValidateMCPBinaries(dwytBin string) map[string]bool
 
 // GeneratePowerMD gera o conteúdo do POWER.md com os MCPs disponíveis.
 func GeneratePowerMD(dwytBin, projectPath string, mcps map[string]bool) string
 
 // GenerateMCPJSON gera o conteúdo do mcp.json com os MCPs disponíveis.
-// Inclui apenas MCPs cujos binários existem.
+// Inclui apenas os MCPs reais cujos binários existem.
 func GenerateMCPJSON(dwytBin string, mcps map[string]bool) (string, error)
 
 // GenerateSteeringFiles gera os arquivos de steering do Power.
@@ -162,29 +162,20 @@ Compresses API calls ~34%. Auto-detected via env vars.
 ```json
 {
   "mcpServers": {
-    "dwyt-codebase": {
+    "codebase": {
       "command": "/home/<user>/.dwyt/bin/codebase-memory-mcp",
       "args": ["--ui=true", "--port=9749"]
     },
-    "dwyt-obsidian": {
+    "obsidian": {
       "command": "/home/<user>/.dwyt/bin/dwyt-obsidian-mcp",
       "args": []
-    },
-    "dwyt-rtk": {
-      "command": "/home/<user>/.dwyt/bin/rtk",
-      "args": []
-    },
-    "dwyt-headroom": {
-      "command": "/home/<user>/.dwyt/bin/headroom",
-      "args": ["proxy", "--port", "8787"]
     }
   }
 }
 ```
 
-> **Nota:** Os nomes `dwyt-*` são usados neste arquivo do Power e também nos arquivos de projeto
-> (`.kiro/mcp.json`, `.mcp.json`, etc.) — de forma consistente em todos os lugares (R4).
-> Apenas MCPs cujos binários existem em `~/.dwyt/bin/` são incluídos no arquivo gerado.
+> **Nota:** Os nomes `codebase` e `obsidian` devem ser os mesmos usados no registry, Dashboard e arquivos de projeto (`.kiro/mcp.json`, `.mcp.json`, etc.). Apenas MCPs cujos binários existem em `~/.dwyt/bin/` são incluídos no arquivo gerado.
+> RTK e Headroom não entram em `mcp.json`; eles ficam nos steering files `rtk.md` e `headroom.md`.
 
 ### `steering/dwyt-context.md`
 
@@ -389,10 +380,8 @@ Resposta do `GET /api/kiro/power/status`:
   "power_dir": "/home/user/.dwyt/powers/dwyt-power",
   "kiro_link": "/home/user/.kiro/powers/dwyt-power",
   "mcps": {
-    "dwyt-codebase": true,
-    "dwyt-obsidian": true,
-    "dwyt-rtk": true,
-    "dwyt-headroom": false
+    "codebase": true,
+    "obsidian": true
   },
   "updated_at": "2026-05-05T10:00:00Z",
   "errors": []

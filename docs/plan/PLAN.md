@@ -36,7 +36,7 @@ O Codex deve usar este documento como guia de implementação, validação e ref
 O DWYT é um orquestrador local que roda como um binário Go único, abre uma UI React em:
 
 ```txt
-http://127.0.0.1:2737
+http://localhost:2737
 ```
 
 Ele mantém seu estado em:
@@ -107,6 +107,11 @@ Estrutura esperada:
 ├── codebase/
 ├── headroom-venv/
 ├── logs/
+├── powers/
+│   └── dwyt-power/
+│       ├── POWER.md
+│       ├── mcp.json
+│       └── steering/
 ├── projects/
 │   └── <sha12>/
 │       ├── obsidian/
@@ -169,7 +174,7 @@ codebase
 obsidian
 ```
 
-Não usar nomes ambíguos ou divergentes como:
+Não usar nomes ambíguos ou divergentes como chave de MCP:
 
 ```txt
 dwyt
@@ -211,7 +216,7 @@ O projeto teve divergência de nomes entre registry, dashboard e arquivos de con
 
 Problemas identificados:
 
-- registry usando `dwyt-codebase` e `dwyt-obsidian`
+- registry usando nomes legados com prefixo `dwyt-`
 - dashboard procurando `codebase` e `obsidian-mcp`
 - `.mcp.json` gerando apenas `dwyt`
 - Obsidian MCP não sendo instalado quando a tool selecionada era apenas `obsidian`
@@ -382,7 +387,7 @@ Direção correta:
 Ao final dos ajustes, o DWYT deve se comportar assim:
 
 1. `dwyt .` inicia ou reaproveita o daemon local.
-2. A UI abre em `http://127.0.0.1:2737`.
+2. A UI abre em `http://localhost:2737`.
 3. O projeto atual é detectado pelo path onde o comando foi executado.
 4. O SetupWizard permite escolher ferramentas e clientes de IA.
 5. Obsidian é obrigatório como memória do projeto.
@@ -466,7 +471,7 @@ opencode.json
 Critérios de aceite:
 
 - Nenhum arquivo gerado usa `dwyt` como MCP genérico para Codebase.
-- Nenhum local usa `dwyt-codebase`, `dwyt-obsidian` ou `obsidian-mcp` como chave principal.
+- Nenhum local usa `dwyt`, `dwyt-codebase`, `dwyt-obsidian` ou `obsidian-mcp` como chave principal.
 - Dashboard mostra status de `codebase` e `obsidian` separadamente.
 - Botão “Configure MCP” de cada card configura o MCP correto.
 
@@ -837,8 +842,20 @@ Entradas mínimas esperadas no `.gitignore` quando geradas:
 ```txt
 CLAUDE.md
 .cursorrules
+.mcp.json
 .claude/mcp.json
+.kiro/mcp.json
 .vscode/mcp.json
+opencode.json
+```
+
+Entradas que não devem ir para `.gitignore` quando forem instruções compartilháveis do repositório:
+
+```txt
+AGENTS.md
+.kiro/steering/dwyt.md
+.github/copilot-instructions.md
+.cursor/rules/dwyt.mdc
 ```
 
 Critérios de aceite:
@@ -1078,7 +1095,7 @@ Regras obrigatórias:
 - Não alterar UX, layout ou comportamento sem necessidade técnica real.
 - Não quebrar o build unificado do binário Go.
 - Manter o frontend embarcado via `embed.FS`.
-- Nenhum arquivo deve exceder 250 linhas.
+- Meta final: nenhum arquivo deve exceder 250 linhas; arquivos legados acima disso devem ser reduzidos incrementalmente na fase de refatoração, sem bloquear correções funcionais urgentes.
 - Preferir funções pequenas, claras e com responsabilidade única.
 - Dividir arquivos grandes.
 - Reduzir duplicações.
@@ -1098,11 +1115,11 @@ Execute:
 4. Valide backend, frontend, CLI, build unificado, rotas principais e integrações externas.
 5. Rode build, testes e lint disponíveis.
 6. Corrija regressões encontradas.
-7. Faça commits organizados com mensagens claras.
+7. Prepare grupos de alterações e mensagens de commit claras; só execute `git commit` se o usuário pedir explicitamente.
 
 Resultado esperado:
 - Código mais limpo, modular, legível e testável.
-- Arquivos menores que 250 linhas.
+- Arquivos novos menores que 250 linhas e arquivos legados com plano de redução incremental.
 - Melhor separação de responsabilidades.
 - Menos duplicação.
 - Melhor tratamento de erros e validações.

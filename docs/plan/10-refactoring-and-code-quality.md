@@ -8,7 +8,8 @@ Melhorar qualidade interna, organização, manutenção, performance e boas prá
 
 ## Regras de Refatoração
 
-- Nenhum arquivo deve exceder **250 linhas**
+- Meta final: nenhum arquivo deve exceder **250 linhas**
+- Essa meta pertence à fase de refatoração; não deve bloquear correções funcionais urgentes de MCP, status, Obsidian ou setup
 - Funções devem ter **responsabilidade única**
 - Sem `interface{}` — usar `any` ou tipos concretos
 - Sem `any` desnecessário no TypeScript — usar tipos explícitos
@@ -207,8 +208,8 @@ find core/web/src -name "*.tsx" -o -name "*.ts" | xargs wc -l | sort -rn | head 
 
 ## Critérios de Aceite
 
-- [ ] Nenhum arquivo Go excede 250 linhas
-- [ ] Nenhum arquivo TypeScript/TSX excede 250 linhas
+- [ ] Nenhum arquivo Go novo excede 250 linhas; arquivos legados acima disso têm plano de redução incremental
+- [ ] Nenhum arquivo TypeScript/TSX novo excede 250 linhas; arquivos legados acima disso têm plano de redução incremental
 - [ ] `go vet ./...` sem warnings
 - [ ] `npm run lint` sem erros
 - [ ] Sem `interface{}` no Go (usar `any`)

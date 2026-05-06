@@ -41,7 +41,7 @@ ds.Store.MarkIndexed(projectPath, nodes, edges)
 db.MarkIndexed(path, 0, 0)
 
 // Por:
-nodes, edges := countCodebaseGraph(cacheDir)
+nodes, edges := countCodebaseGraph(ds.DwytHome, path)
 db.MarkIndexed(path, nodes, edges)
 ```
 

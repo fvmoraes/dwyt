@@ -102,18 +102,18 @@ Ao trocar de projeto, o backend recarrega o `ProjectObsidian` correspondente.
 
 ### R4 — MCPs obrigatórios com nomes exatos
 
-Os MCPs do DWYT devem usar o prefixo `dwyt-` em **todos os lugares** — registry, dashboard, arquivos de projeto e Kiro Power. Isso evita colisão com MCPs de outros projetos e deixa a origem clara.
+Os MCPs obrigatórios do DWYT devem usar os nomes curtos `codebase` e `obsidian` em **todos os lugares** — registry, dashboard, arquivos de projeto e Kiro Power. Esses nomes já expressam a ferramenta exposta ao cliente de IA e evitam divergência entre UI, API e arquivos gerados.
 
 Nomes canônicos:
 
 ```
-dwyt-codebase
-dwyt-obsidian
+codebase
+obsidian
 ```
 
-Nomes proibidos (legados): `dwyt`, `codebase` (sem prefixo), `obsidian` (sem prefixo), `obsidian-mcp`.
+Nomes proibidos como **chave de MCP** (legados): `dwyt`, `dwyt-codebase`, `dwyt-obsidian`, `obsidian-mcp`. O binário `dwyt-obsidian-mcp` continua correto.
 
-A UI, o registry, os arquivos `.mcp.json`, `.kiro/mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json` e o Kiro Power devem usar os mesmos nomes `dwyt-codebase` e `dwyt-obsidian` de forma consistente.
+A UI, o registry, os arquivos `.mcp.json`, `.kiro/mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json` e o Kiro Power devem usar os mesmos nomes `codebase` e `obsidian` de forma consistente.
 
 ### R5 — RTK não é daemon
 
@@ -129,7 +129,7 @@ Se uma ferramenta está ativa, instalada, online ou offline, todos os endpoints 
 
 ### R7 — Nenhum arquivo excede 250 linhas
 
-Arquivos grandes devem ser divididos. Funções devem ter responsabilidade única.
+Arquivos grandes devem ser divididos durante a fase de refatoração, sem bloquear correções funcionais urgentes. Funções devem ter responsabilidade única; se um arquivo existente ainda exceder 250 linhas, registrar como dívida técnica e reduzir incrementalmente.
 
 ### R8 — Sem regressões
 
@@ -148,7 +148,6 @@ http://localhost:2737
 O endereço `127.0.0.1` **só pode aparecer** em:
 - Bind do servidor Go: `r.Run("127.0.0.1:2737")` — correto, mantém
 - Health probes internas: `http.Get("http://127.0.0.1:2737/api/health")` — correto, mantém
-- `mcp/obsidian.go` → `dwytAPI` — corrigir para `localhost`
 
 **Arquivos de código que precisam ser corrigidos:**
 

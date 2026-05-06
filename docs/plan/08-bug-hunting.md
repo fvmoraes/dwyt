@@ -254,6 +254,25 @@ grep -rn "127\.0\.0\.1:2737" core/internal/integrate/ core/internal/mcp/ core/cm
 
 ---
 
+### BUG-12 — `NewProjectObsidian` rejeita projetos fora de `~/.dwyt`
+
+**Arquivo:** `core/internal/brain/brain.go`
+
+**Sintoma:** O vault por projeto deveria ser criado em `~/.dwyt/projects/<sha12>/obsidian/` para qualquer `projectPath`, mas a validação pode comparar o `projectPath` diretamente com `dwytHome` e rejeitar projetos normais do usuário.
+
+**Verificação:**
+
+```bash
+# Em um projeto fora de ~/.dwyt
+dwyt /tmp/dwyt-test-project
+curl -s http://localhost:2737/api/obsidian/status | jq .
+# deve retornar status online/active true e vault_path/obsidian_dir dentro de ~/.dwyt/projects/<sha12>/obsidian/
+```
+
+**Correção esperada:** validar que o caminho gerado do vault fica dentro de `dwytHome`; não exigir que o projeto de origem esteja dentro de `dwytHome`.
+
+---
+
 ## Checklist de Bugs
 
 - [ ] BUG-01: Race condition no Headroom startup
@@ -267,6 +286,7 @@ grep -rn "127\.0\.0\.1:2737" core/internal/integrate/ core/internal/mcp/ core/cm
 - [ ] BUG-09: Estado inconsistente após crash
 - [ ] BUG-10: Porta em uso ao reiniciar
 - [ ] BUG-11: `127.0.0.1:2737` hardcoded em código visível ao usuário e templates de IAs
+- [ ] BUG-12: `NewProjectObsidian` rejeitando projeto fora de `~/.dwyt`
 
 ---
 

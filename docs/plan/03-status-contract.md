@@ -29,6 +29,8 @@ GET /api/mcp/registry
 | `offline` | Processo não está rodando |
 | `starting` | Processo iniciado, aguardando health check |
 | `port_open_no_health` | Porta ocupada mas health check falhou |
+| `installed` | Binário ou recurso existe, mas não é processo persistente |
+| `inactive` | Recurso de projeto não carregado, por exemplo vault ausente |
 | `not_installed` | Binário não encontrado em `~/.dwyt/bin/` |
 | `error` | Erro ao iniciar ou verificar |
 
@@ -53,7 +55,8 @@ Nível 2: Porta + health probe (fallback)
 ### Obsidian
 
 - Se `ProjectObsidian == nil` → nunca retornar `active` ou `online`
-- `/api/obsidian/status` deve retornar `inactive` quando vault não carregado
+- `/api/obsidian/status` deve retornar `status:"inactive"` quando vault não carregado
+- Durante a migração, `/api/obsidian/status` pode manter `active:false` para compatibilidade, mas `status` é o campo canônico
 - `/api/status` deve concordar com `/api/obsidian/status`
 
 ### Codebase
@@ -81,10 +84,11 @@ Nível 2: Porta + health probe (fallback)
 ### 2.1 — Definir struct de status comum
 
 ```go
-// Adicionar em core/internal/server/types.go
+// Preferir um tipo compartilhado em core/internal/status/status.go.
+// Se precisar expor também pelo pacote server, criar type alias em core/internal/server/types.go.
 type ToolStatus struct {
     Name        string `json:"name"`
-    Status      string `json:"status"`      // online|offline|starting|port_open_no_health|not_installed|error
+    Status      string `json:"status"`      // online|offline|starting|port_open_no_health|installed|inactive|not_installed|error
     Installed   bool   `json:"installed"`
     Running     bool   `json:"running"`
     Healthy     bool   `json:"healthy"`
@@ -95,20 +99,33 @@ type ToolStatus struct {
 }
 ```
 
-> **Nota:** O `types.go` atual não tem `ToolStatus`. Adicionar lá, não criar arquivo separado.
+> **Nota:** O código atual usa `state` em `internal/status.ToolStatus` e `active` em `/api/obsidian/status`. Migrar de forma compatível: adicionar `status` como campo canônico, manter campos antigos somente enquanto o frontend e testes forem atualizados.
 
 ### 2.2 — Atualizar `detailObsidian()`
 
 ```go
 // Se ProjectObsidian == nil → retornar inactive
-if s.brain == nil {
-    return ToolStatus{Name: "obsidian", Status: "inactive", Installed: false}
+if ds.ProjectObsidian == nil {
+    return ToolStatus{Name: "obsidian", Status: "inactive", Installed: true}
 }
 ```
 
 ### 2.3 — Atualizar `apiMCPRegistry`
 
 Usar detecção em dois níveis para cada servidor MCP registrado.
+
+Resposta canônica:
+
+```json
+{
+  "mcpServers": {
+    "codebase": { "status": "online", "installed": true },
+    "obsidian": { "status": "installed", "installed": true }
+  }
+}
+```
+
+Não usar o formato legado `{"servers":[...]}` nos testes ou no frontend.
 
 ### 2.4 — Atualizar `/api/status`
 

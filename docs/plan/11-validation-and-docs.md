@@ -52,7 +52,7 @@ curl -s -X POST $BASE/api/obsidian/open-dir | jq .
 curl -s $BASE/api/mcp/registry | jq .
 curl -s -X POST $BASE/api/mcp/configure \
   -H "Content-Type: application/json" \
-  -d '{"name":"dwyt-codebase"}' | jq .
+  -d '{"name":"codebase"}' | jq .
 
 # Codebase
 curl -s -X POST $BASE/api/services/codebase/start | jq .
@@ -79,7 +79,7 @@ curl -s $BASE/api/kiro/power/status | jq .
 ```bash
 # Executar e comparar manualmente
 echo "=== /api/status ==="
-curl -s $BASE/api/status | jq '{obsidian: .obsidian, codebase: .codebase}'
+curl -s $BASE/api/status | jq '.tools[] | select(.name=="obsidian" or .name=="codebase-memory-mcp")'
 
 echo "=== /api/obsidian/status ==="
 curl -s $BASE/api/obsidian/status | jq '{status: .status}'
@@ -88,7 +88,7 @@ echo "=== /api/services/codebase/status ==="
 curl -s $BASE/api/services/codebase/status | jq '{running: .running, healthy: .healthy}'
 
 echo "=== /api/mcp/registry ==="
-curl -s $BASE/api/mcp/registry | jq '.servers[] | {name: .name, status: .status}'
+curl -s $BASE/api/mcp/registry | jq '.mcpServers | to_entries[] | {name: .key, status: .value.status}'
 ```
 
 Nenhum campo deve contradizer outro.
@@ -127,10 +127,10 @@ Já contém nota de referência para os arquivos segmentados `00` a `12`. Manter
 
 ## Documentação de Data (Formato Obrigatório)
 
-Criar pasta `docs/DDMMYYYY/` com exatamente 3 arquivos:
+Criar pasta `docs/<DDMMYYYY>/` usando a data da execução (ex.: em 6 de maio de 2026, `docs/06052026/`) com exatamente 3 arquivos:
 
 ```
-docs/05052026/
+docs/<DDMMYYYY>/
 ├── FIXES.md       # detalhes técnicos de cada correção
 ├── SUMMARY.md     # status final, métricas, commit sugerido
 └── VALIDATION.md  # comandos de validação e resultados
@@ -155,14 +155,14 @@ docs/05052026/
 
 ### MCP
 
-- [ ] Registry usa `dwyt-codebase` e `dwyt-obsidian`
-- [ ] Dashboard usa `dwyt-codebase` e `dwyt-obsidian`
-- [ ] `.mcp.json` usa `dwyt-codebase` e `dwyt-obsidian`
+- [ ] Registry usa `codebase` e `obsidian`
+- [ ] Dashboard usa `codebase` e `obsidian`
+- [ ] `.mcp.json` usa `codebase` e `obsidian`
 - [ ] `.claude/mcp.json` correto
 - [ ] `.kiro/mcp.json` correto
 - [ ] `.vscode/mcp.json` correto
 - [ ] OpenCode correto
-- [ ] Configure MCP é granular por serviço (`dwyt-codebase` ou `dwyt-obsidian`)
+- [ ] Configure MCP é granular por serviço (`codebase` ou `obsidian`)
 
 ### UI
 
@@ -207,7 +207,7 @@ memória persistente por projeto, UX do Dashboard, SetupWizard e validação com
 Regras obrigatórias:
 1. Não apague vaults em ~/.dwyt/projects/<id>/obsidian/
 2. Tudo que o DWYT gerencia deve ficar em ~/.dwyt/
-3. MCPs obrigatórios: exatamente "dwyt-codebase" e "dwyt-obsidian" em todos os lugares
+3. MCPs obrigatórios: exatamente "codebase" e "obsidian" em todos os lugares
 4. RTK é CLI, não daemon — sem Start/Stop no Dashboard
 5. Dashboard não pode mostrar status contraditório
 6. Obsidian nunca aparece active se ProjectObsidian for nil
