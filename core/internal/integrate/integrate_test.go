@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestProjectGeneratesClientMCPConfigsAndIgnores(t *testing.T) {
+func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
 	projectPath := t.TempDir()
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
@@ -16,15 +15,11 @@ func TestProjectGeneratesClientMCPConfigsAndIgnores(t *testing.T) {
 
 	Project(projectPath, "claude,codex,copilot,kiro,cursor,opencode", dwytBin)
 
-	gitignoreData, err := os.ReadFile(filepath.Join(projectPath, ".gitignore"))
-	if err != nil {
+	// DWYT não deve criar nem alterar o .gitignore do projeto.
+	if _, err := os.Stat(filepath.Join(projectPath, ".gitignore")); err == nil {
+		t.Fatalf(".gitignore should not be created by Project(); decisão é do time")
+	} else if !os.IsNotExist(err) {
 		t.Fatal(err)
-	}
-	gitignore := string(gitignoreData)
-	for _, entry := range dwytGeneratedIgnores() {
-		if !strings.Contains(gitignore, entry) {
-			t.Fatalf(".gitignore missing %s\n%s", entry, gitignore)
-		}
 	}
 
 	var vscode map[string]interface{}

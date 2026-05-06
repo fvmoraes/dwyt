@@ -19,34 +19,11 @@ func Project(projectPath, clients, dwytBin string) {
 	}
 
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
-	gitignore := filepath.Join(projectPath, ".gitignore")
-	ensureDWYT(gitignore)
 	clientList := normalizeClients(clients)
 
-	// Apenas configs MCP geradas com paths absolutos (por máquina) e estado
-	// local entram no .gitignore. Arquivos de instrução (CLAUDE.md, AGENTS.md,
-	// steering rules) ficam versionados — eles são editáveis pelo time.
-	cm := map[string][]string{
-		"claude":   {".claude/mcp.json"},
-		"codex":    {".codex/", ".mcp.json"},
-		"copilot":  {".vscode/mcp.json"},
-		"kiro":     {".kiro/mcp.json", ".kiro/settings/mcp.json"},
-		"cursor":   {".cursor/mcp.json"},
-		"opencode": {"opencode.json", ".mcp.json"},
-	}
-
-	for _, c := range clientList {
-		if entries, ok := cm[c]; ok {
-			for _, e := range entries {
-				appendLine(gitignore, e)
-			}
-		}
-	}
-
-	for _, e := range dwytGeneratedIgnores() {
-		appendLine(gitignore, e)
-	}
-	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
+	// O DWYT não toca no .gitignore do projeto. Decidir o que ignorar é
+	// responsabilidade do time (configs MCP têm paths absolutos por máquina,
+	// mas a equipe pode escolher versionar, reescrever ou ignorar).
 
 	// ── Use absolute paths in generated configs ────────────────────────
 	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
@@ -99,29 +76,6 @@ func Project(projectPath, clients, dwytBin string) {
 	fmt.Printf("  ✓ Projeto integrado: %s\n", projectPath)
 }
 
-func ensureDWYT(path string) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		os.WriteFile(path, []byte("# dwyt\n"), 0644)
-		return
-	}
-	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), "# dwyt") {
-		f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
-		f.Write([]byte("\n# dwyt\n"))
-		f.Close()
-	}
-}
-
-func appendLine(path, line string) {
-	data, _ := os.ReadFile(path)
-	if strings.Contains(string(data), line) {
-		return
-	}
-	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
-	defer f.Close()
-	f.Write([]byte(line + "\n"))
-}
-
 func normalizeClients(clients string) []string {
 	if strings.TrimSpace(clients) == "" {
 		return []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode"}
@@ -146,29 +100,6 @@ func containsClient(clients []string, client string) bool {
 		}
 	}
 	return false
-}
-
-// dwytGeneratedIgnores retorna as entradas que o DWYT adiciona ao .gitignore
-// do projeto durante a integração. Inclui apenas:
-//   - configs MCP geradas (contêm paths absolutos para ~/.dwyt/bin/...,
-//     que variam por máquina);
-//   - diretórios de estado local de cada cliente.
-//
-// Arquivos de instrução (CLAUDE.md, AGENTS.md, .cursor/rules/dwyt.mdc,
-// .kiro/steering/dwyt.md, .github/copilot-instructions.md) NÃO são listados
-// aqui de propósito: o DWYT cria com template, mas a partir daí são
-// editáveis pelo time e devem ser versionados.
-func dwytGeneratedIgnores() []string {
-	return []string{
-		".claude/mcp.json",
-		".codex/",
-		".mcp.json",
-		"opencode.json",
-		".kiro/mcp.json",
-		".kiro/settings/mcp.json",
-		".vscode/mcp.json",
-		".cursor/mcp.json",
-	}
 }
 
 func writeIfMissing(path, content string) {
