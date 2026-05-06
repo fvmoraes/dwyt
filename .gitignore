@@ -13,3 +13,5 @@ opencode.json
 .github/copilot-instructions.md
 .cursorrules
 CLAUDE.md
+.claude/mcp.json
+.vscode/mcp.json

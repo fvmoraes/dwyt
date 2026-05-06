@@ -1,5 +1,26 @@
 # Plano Unificado de Ajustes do DWYT para Execução no Codex
 
+> **Nota:** Este documento foi segmentado em arquivos numerados para facilitar a aplicação incremental.
+> Consulte os arquivos abaixo para o plano detalhado e atualizado:
+>
+> | Arquivo | Escopo |
+> |---------|--------|
+> | [00-context-and-rules.md](00-context-and-rules.md) | Contexto do produto e regras não negociáveis |
+> | [01-audit-and-diagnosis.md](01-audit-and-diagnosis.md) | Auditoria e diagnóstico de problemas |
+> | [02-mcp-standardization.md](02-mcp-standardization.md) | Padronização de MCPs (codebase + obsidian) |
+> | [03-status-contract.md](03-status-contract.md) | Contrato único de status entre endpoints |
+> | [04-obsidian-vault.md](04-obsidian-vault.md) | Obsidian como memória obrigatória por projeto |
+> | [05-codebase-and-headroom.md](05-codebase-and-headroom.md) | Codebase metrics reais + Headroom OAuth |
+> | [06-rtk-and-dashboard-ux.md](06-rtk-and-dashboard-ux.md) | RTK como CLI + UX do Dashboard |
+> | [07-setup-wizard-and-ai-clients.md](07-setup-wizard-and-ai-clients.md) | SetupWizard + geração de arquivos para IAs |
+> | [08-bug-hunting.md](08-bug-hunting.md) | Busca sistemática por bugs e falhas |
+> | [09-testing-with-browser-cli.md](09-testing-with-browser-cli.md) | Testes com browser CLI (endless/playwright) |
+> | [10-refactoring-and-code-quality.md](10-refactoring-and-code-quality.md) | Refatoração e qualidade de código |
+> | [11-validation-and-docs.md](11-validation-and-docs.md) | Validação final e documentação |
+> | [12-kiro-power.md](12-kiro-power.md) | Geração automática do Kiro Power local |
+
+---
+
 ## Objetivo
 
 Este documento consolida os três planos enviados (`PLAN.md`, `PLAN2.md` e `PLAN3.md`) em um único plano de ajuste para o Codex executar no projeto **DWYT**.
@@ -1034,3 +1055,58 @@ O resultado esperado é um DWYT mais confiável e maduro:
 - testes e documentação alinhados ao comportamento real
 
 O produto deve deixar de parecer um conjunto de integrações soltas e passar a parecer uma plataforma local organizada para conectar IAs ao contexto do projeto com economia de tokens.
+
+---
+
+Você é um engenheiro sênior especialista em Go, React, TypeScript, Vite, Tailwind, Gin, Cobra, SQLite e aplicações com frontend embarcado em binário Go.
+
+Refatore o projeto DWYT de forma completa, segura e incremental, visando melhorar qualidade interna, organização, manutenção, performance e boas práticas, sem alterar o comportamento atual.
+
+Contexto:
+- Backend em Go 1.25 com Gin, Cobra e SQLite modernc.
+- Frontend React SPA com TypeScript, Vite, Tailwind e React Router.
+- O frontend é embedado no backend via `embed.FS`.
+- Backend e frontend buildam juntos em um único binário Go.
+- O projeto orquestra ferramentas externas como Headroom, RTK, codebase-memory-mcp e Obsidian.
+- O projeto já funciona bem; o objetivo é melhorar sem quebrar.
+
+Regras obrigatórias:
+- Não remover funcionalidades.
+- Não mudar tecnologias principais.
+- Não introduzir complexidade desnecessária.
+- Não piorar performance.
+- Não alterar UX, layout ou comportamento sem necessidade técnica real.
+- Não quebrar o build unificado do binário Go.
+- Manter o frontend embarcado via `embed.FS`.
+- Nenhum arquivo deve exceder 250 linhas.
+- Preferir funções pequenas, claras e com responsabilidade única.
+- Dividir arquivos grandes.
+- Reduzir duplicações.
+- Melhorar nomes de arquivos, funções, tipos e componentes quando necessário.
+- Separar responsabilidades entre CLI, HTTP, regras de negócio, persistência, processos externos e frontend.
+- Padronizar tratamento de erros, logs, respostas HTTP, validações e chamadas de API.
+- Melhorar tipagem TypeScript e evitar `any` desnecessário.
+- Melhorar componentes React, hooks, serviços e estados de loading/erro/vazio.
+- Garantir segurança em paths, arquivos locais, comandos externos e dados persistentes.
+- Preservar dados do usuário e nunca apagar arquivos sensíveis sem regra explícita.
+- Refatorar de forma incremental, validando a cada etapa.
+
+Execute:
+1. Audite o projeto.
+2. Identifique problemas reais de organização, acoplamento, duplicação, arquivos grandes, tipagem, erros e performance.
+3. Aplique a refatoração com foco em boas práticas.
+4. Valide backend, frontend, CLI, build unificado, rotas principais e integrações externas.
+5. Rode build, testes e lint disponíveis.
+6. Corrija regressões encontradas.
+7. Faça commits organizados com mensagens claras.
+
+Resultado esperado:
+- Código mais limpo, modular, legível e testável.
+- Arquivos menores que 250 linhas.
+- Melhor separação de responsabilidades.
+- Menos duplicação.
+- Melhor tratamento de erros e validações.
+- Frontend mais organizado e tipado.
+- Backend mais robusto e previsível.
+- Nenhuma regressão funcional ou de performance.
+- Build final funcionando corretamente.
