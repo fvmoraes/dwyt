@@ -119,6 +119,26 @@ func ProbeURL(url string) bool {
 	return resp.StatusCode == 200
 }
 
+func IsPortOccupied(port int) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
+}
+
+func FindFreePort(defaultPort int) int {
+	for offset := 0; offset < 5; offset++ {
+		port := defaultPort + offset
+		if !IsPortOccupied(port) {
+			return port
+		}
+	}
+	return defaultPort
+}
+
 func StopAll() {
 	for _, p := range activeProcesses {
 		if p.Cmd != nil && p.Cmd.Process != nil {

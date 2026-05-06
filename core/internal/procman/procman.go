@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
 )
 
@@ -88,7 +89,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 		return &ServiceStatus{Name: name, Error: fmt.Sprintf("binary not found: %s", binPath)}, err
 	}
 
-	freePort := findFreePort(mp.Port)
+	freePort := health.FindFreePort(mp.Port)
 	if freePort != mp.Port {
 		log.Info("port was occupied, using alternative", log.Fields{"service": name, "original": mp.Port, "new": freePort})
 		mp.Port = freePort
@@ -293,26 +294,6 @@ func (mp *ManagedProcess) Running() bool {
 		mp.PID = 0
 		return false
 	}
-	return true
-}
-
-func findFreePort(defaultPort int) int {
-	for offset := 0; offset < 5; offset++ {
-		port := defaultPort + offset
-		if !probePort(port) {
-			return port
-		}
-	}
-	return defaultPort
-}
-
-func probePort(port int) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
 	return true
 }
 

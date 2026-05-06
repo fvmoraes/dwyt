@@ -1,8 +1,6 @@
 package brain
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -14,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/db"
 )
 
 type BrainEntry struct {
@@ -65,7 +65,7 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	if err := safePath(dwytHome, projectPath); err != nil && projectPath != "" {
 		return nil, err
 	}
-	id := hashPath(projectPath)
+	id := db.HashPath(projectPath)
 	baseDir := filepath.Join(dwytHome, "projects", id)
 
 	// Migrate old "brain" folder to "obsidian" if it exists
@@ -549,13 +549,6 @@ func extractContent(content string) string {
 		result = result[:297] + "..."
 	}
 	return result
-}
-
-func hashPath(path string) string {
-	abs, _ := filepath.Abs(path)
-	abs = filepath.Clean(abs)
-	h := sha256.Sum256([]byte(abs))
-	return hex.EncodeToString(h[:])[:12]
 }
 
 func totalCount(tc map[string]int) int {

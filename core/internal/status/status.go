@@ -55,12 +55,16 @@ var headroomDefaultPort = 8787
 
 func SetHeadroomPort(port int) { headroomDefaultPort = port }
 
-func PollAll(dwytBin string) *SystemStatus {
+func PollAll(dwytBin string, hasObsidianVault ...bool) *SystemStatus {
 	s := &SystemStatus{Timestamp: time.Now()}
 	s.Tools = append(s.Tools, pollCBMCP(dwytBin))
 	s.Tools = append(s.Tools, pollRTK(dwytBin))
 	s.Tools = append(s.Tools, pollHeadroom())
-	s.Tools = append(s.Tools, pollBrain())
+	vault := false
+	if len(hasObsidianVault) > 0 {
+		vault = hasObsidianVault[0]
+	}
+	s.Tools = append(s.Tools, pollBrain(vault))
 	return s
 }
 
@@ -138,19 +142,27 @@ func pollHeadroom() ToolStatus {
 	return ts
 }
 
-func pollBrain() ToolStatus {
+func pollBrain(hasVault bool) ToolStatus {
 	ts := ToolStatus{Name: "obsidian"}
 
-	// Check if Obsidian app is installed
-	if !obsidianAppInstalled() {
+	// The vault (ProjectObsidian) is the primary indicator of obsidian state.
+	// Desktop app installation is secondary — used only for "Open Vault" action.
+	if !hasVault {
 		ts.State = StateNotInstalled
 		ts.Running = false
 		ts.Healthy = false
-		ts.Details = "Obsidian app not installed"
+		ts.Details = "no vault loaded"
 		return ts
 	}
 
-	// Obsidian is installed — vault is always available (filesystem-based)
+	if !obsidianAppInstalled() {
+		ts.Running = true
+		ts.Healthy = true
+		ts.State = StateRunning
+		ts.Details = "vault loaded (Obsidian app not installed)"
+		return ts
+	}
+
 	ts.Running = true
 	ts.Healthy = true
 	ts.State = StateRunning

@@ -46,24 +46,24 @@ func Project(projectPath, clients, dwytBin string) {
 	// Note: .dwyt/ is no longer created inside projects — state lives in ~/.dwyt/projects/
 
 	// ── Use absolute paths in generated configs ────────────────────────
-	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
-	rtkBin    := filepath.Join(dwytBin, "rtk")
+	cbmcpBin      := filepath.Join(dwytBin, "codebase-memory-mcp")
+	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
+	rtkBin         := filepath.Join(dwytBin, "rtk")
 	if runtime.GOOS == "windows" {
 		cbmcpBin += ".exe"
+		obsidianMCPBin += ".exe"
 		rtkBin += ".exe"
 	}
 
-	projectName := filepath.Base(projectPath)
-
-	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
-	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSONTemplate(projectName, cbmcpBin, rtkBin))
+	writeIfMissing(filepath.Join(projectPath, ".mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
+	writeIfMissing(filepath.Join(projectPath, "opencode.json"), opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin))
 
 	if strings.Contains(clients, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeIfMissing(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 		// Claude also reads .claude/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
+		writeIfMissing(filepath.Join(projectPath, ".claude", "mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
 	}
 
 	if strings.Contains(clients, "cursor") {
@@ -77,7 +77,7 @@ func Project(projectPath, clients, dwytBin string) {
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeIfMissing(cp, kiroSteering)
 		// Kiro also reads .kiro/mcp.json
-		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(projectName, cbmcpBin))
+		writeIfMissing(filepath.Join(projectPath, ".kiro", "mcp.json"), mcpJSONTemplate(cbmcpBin, obsidianMCPBin))
 	}
 
 	if strings.Contains(clients, "copilot") {
@@ -127,24 +127,32 @@ func writeIfMissing(path, content string) {
 
 // ── Templates with absolute binary paths ──────────────────────────────────────
 
-func mcpJSONTemplate(projectName, cbmcpBin string) string {
+func mcpJSONTemplate(cbmcpBin, obsidianMCPBin string) string {
 	return fmt.Sprintf(`{
   "mcpServers": {
     "codebase": {
       "type": "stdio",
       "command": %q
+    },
+    "obsidian": {
+      "type": "stdio",
+      "command": %q
     }
   }
 }
-`, cbmcpBin)
+`, cbmcpBin, obsidianMCPBin)
 }
 
-func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
+func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
 	return fmt.Sprintf(`{
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["AGENTS.md"],
   "mcp": {
     "codebase": {
+      "type": "local",
+      "command": [%q]
+    },
+    "obsidian": {
       "type": "local",
       "command": [%q]
     }
@@ -156,7 +164,7 @@ func opencodeJSONTemplate(projectName, cbmcpBin, rtkBin string) string {
     "skill": "allow"
   }
 }
-`, cbmcpBin)
+`, cbmcpBin, obsidianMCPBin)
 }
 
 func agentsMDTemplate(rtkBin string) string {
