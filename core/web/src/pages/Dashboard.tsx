@@ -287,19 +287,19 @@ export default function Dashboard() {
   const releaseVersion = rawRelease && rawRelease !== 'dev' && !rawRelease.startsWith('v') ? `v${rawRelease}` : rawRelease
 
   return (
-    <div style={{ minHeight: '100vh', padding: '10px 14px', paddingLeft: sidebarOpen ? 284 : 14, transition: 'padding-left 0.2s ease' }}>
+    <div className="dashboard-compact" style={{ minHeight: '100vh', padding: '6px 10px', paddingLeft: sidebarOpen ? 280 : 10, transition: 'padding-left 0.2s ease' }}>
       <Sidebar open={sidebarOpen} onToggle={setSidebarOpen} projects={sidebarPjs} onProjectsLoaded={setSidebarPjs} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginLeft: 32 }}>
-        <Logo size={22} showText />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }} className="header-actions">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 6px' }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 2 }}>{t.auto}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, marginLeft: 28 }}>
+        <Logo size={18} showText />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} className="header-actions">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 5px' }}>
+            <span style={{ fontSize: 9, color: 'var(--muted)', marginRight: 1 }}>{t.auto}</span>
             {RELOAD_OPTIONS.map(o => (
               <button key={o.value} onClick={() => setReload(o.value)}
                 style={reloadSecs === o.value
-                  ? { background: '#339af0', color: '#fff', fontWeight: 700, boxShadow: '0 0 6px rgba(51,154,240,0.5)', fontSize: 10, padding: '2px 7px', borderRadius: 4 }
-                  : { background: 'transparent', color: 'var(--muted)', fontSize: 10, padding: '2px 7px', borderRadius: 4 }
+                  ? { background: '#339af0', color: '#fff', fontWeight: 700, boxShadow: '0 0 5px rgba(51,154,240,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
+                  : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
                 }
               >{o.label}</button>
             ))}
@@ -317,9 +317,9 @@ export default function Dashboard() {
       </div>
 
       {indexPath && (
-        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid #2f9e44', background: 'linear-gradient(135deg, #1a2a1a 0%, #1e1f23 100%)', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 10, color: '#2f9e44', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
-          <span style={{ fontSize: 11, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #2f9e44', background: 'linear-gradient(135deg, #1a2a1a 0%, #1e1f23 100%)', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
+          <span style={{ fontSize: 10, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
           <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>{t.protecting}</span>
           {obsidianCount > 0 && (
             <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
@@ -327,21 +327,21 @@ export default function Dashboard() {
             </span>
           )}
           {releaseVersion && (
-            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 9, color: '#8ce99a', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
+            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 8, color: '#8ce99a', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
               {t.releaseLabel} {releaseVersion}
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 10, color: '#339af0', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
+            <span style={{ fontSize: 9, color: '#339af0', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
         </div>
       )}
 
       {versionCheck?.update_available && (
-        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid #3bc9db', background: '#142329', padding: '7px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #3bc9db', background: '#142329', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: '#66d9e8', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+            <div style={{ fontSize: 10, color: '#66d9e8', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
+            <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>
               {t.currentVersion}: {versionCheck.current || releaseVersion || 'dev'} · {t.latestVersion}: {versionCheck.latest}
             </div>
           </div>
@@ -355,12 +355,12 @@ export default function Dashboard() {
       )}
 
       {versionCheck?.update_available && showUpdateInstructions && (
-        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: '#1e1f23', padding: '8px 12px' }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 5 }}>{t.updateCommandTitle}</div>
-          <div style={{ overflowX: 'auto', background: '#111318', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 9px' }}>
-            <code style={{ color: '#e8eaf0', fontSize: 11, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', background: '#1e1f23', padding: '6px 10px' }}>
+          <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>{t.updateCommandTitle}</div>
+          <div style={{ overflowX: 'auto', background: '#111318', border: '1px solid var(--border)', borderRadius: 4, padding: '5px 7px' }}>
+            <code style={{ color: '#e8eaf0', fontSize: 10, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 5 }}>{t.updateCommandHelp}</div>
+          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>{t.updateCommandHelp}</div>
         </div>
       )}
 
@@ -392,7 +392,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
         {hasData ? (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
@@ -400,17 +400,17 @@ export default function Dashboard() {
                 { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e' },
                 { label: t.withDwyt, value: fmtN(withDwyt), sub: t.tokensSpent, color: '#2f9e44' },
               ].map((col, i) => (
-                <div key={i} style={{ padding: '7px 14px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
+                <div key={i} style={{ padding: '5px 10px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.1 }}>{col.value}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.05 }}>{col.value}</div>
                   <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
                 </div>
               ))}
-              <div style={{ padding: '7px 14px', background: '#1a2a1a' }}>
+              <div style={{ padding: '5px 10px', background: '#1a2a1a' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: '#3bc9db', lineHeight: 1.1 }}>{fmtN(totalSaved)}</span>
-                  {savingsPct > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#2f9e44' }}>{'\u2193'} {savingsPct}%</span>}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: '#3bc9db', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
+                  {savingsPct > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#2f9e44' }}>{'\u2193'} {savingsPct}%</span>}
                 </div>
                 <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
                 {savingsPct > 0 && (
@@ -420,7 +420,7 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '4px 10px', background: '#1a1b1f', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '3px 8px', background: '#1a1b1f', gap: 6 }}>
               {[
                 { label: t.terminalOptimized, saved: rtkSaved, color: '#845ef7' },
                 { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
@@ -488,7 +488,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         <CardCodebase
           indexPath={indexPath} repoName={repoName}
           isIndexed={isIndexed} indexing={indexing} openingGraph={openingGraph}

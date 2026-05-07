@@ -21,13 +21,13 @@ body {
   background-attachment: fixed;
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px;
+  font-size: 12px;
   margin: 0;
   min-height: 100vh;
 }
 
 body * {
-  font-size: max(9px, 1em) !important;
+  font-size: max(8px, 1em);
 }
 
 /* ── Card ── */
@@ -53,6 +53,43 @@ body * {
 /* ── Progress bar ── */
 .progress-bar  { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .progress-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width 0.5s; }
+
+/* ── Dashboard compact mode ── */
+.dashboard-compact {
+  font-size: 11px;
+}
+
+.dashboard-compact .card {
+  padding: 10px !important;
+  border-radius: 6px;
+  box-shadow:
+    0 3px 16px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dashboard-compact button {
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  font-size: 9px !important;
+  line-height: 1.25 !important;
+}
+
+.dashboard-compact input[type="text"],
+.dashboard-compact select {
+  padding: 3px 5px !important;
+  border-radius: 4px !important;
+  font-size: 9px !important;
+  line-height: 1.25 !important;
+}
+
+.dashboard-compact .status-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.dashboard-compact .progress-bar {
+  height: 3px;
+}
 
 /* ── Buttons — compact base ── */
 button {

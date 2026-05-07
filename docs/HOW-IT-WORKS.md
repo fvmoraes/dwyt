@@ -101,9 +101,10 @@ dwyt .
   ├─ 1. detect.Detect()           → OS, shell, home dir, DWYT paths
   ├─ 2. env.Init()                → creates ~/.dwyt/env.sh, injects into .zshrc/.bashrc
   ├─ 3. obsidian check            → prints status (warning if not installed)
-  ├─ 4. probeDaemon()             → checks if daemon already running on :2737
-  │    └─ YES → switchProject()   → POST /api/project/switch, open browser, exit
-  │    └─ NO  → continue
+  ├─ 4. probeDaemon()             → checks :2737 and reads daemon version
+  │    └─ YES, same version → switchProject() → POST /api/project/switch, open browser, exit
+  │    └─ YES, stale/unknown version → stop old daemon and continue
+  │    └─ NO → continue
   ├─ 5. startServicesAsync()      → prints tool availability (no blocking)
   ├─ 6. spawn daemon process      → exec.Command(exe, "daemon")
   │    └─ detached with Setsid    → DWYT_PROJECT, DWYT_HEADROOM_PORT env vars

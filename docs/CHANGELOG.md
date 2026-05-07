@@ -23,6 +23,7 @@ All notable changes to DWYT are documented here.
 - New Obsidian vaults are seeded with richer structure: `instructions/`, `maps/`, `templates/`, `decisions/`, `tasks/`, `debug/`, `context/`, nested logs, and internal links for navigation.
 - Kiro workspace MCP config now treats `.kiro/settings/mcp.json` as the primary path and `.kiro/mcp.json` as legacy compatibility.
 - `dwyt reinstall` and `dwyt uninstall` messaging now reflects vault preservation instead of destructive cleanup.
+- `dwyt .` now restarts a stale dashboard daemon when the running daemon version is missing or differs from the current CLI binary, so the UI updates after installing a new DWYT release.
 
 ---
 

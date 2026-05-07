@@ -46,3 +46,10 @@ Implemented the rules from `docs/Rules/Rules.md` across status metrics, generate
 - CLI reinstall/uninstall text now says vaults are preserved.
 - Cleanup code continues to protect `~/.dwyt/projects/`.
 - Documentation no longer describes uninstall as removing Obsidian vaults.
+
+## Daemon Version Refresh
+
+- `/api/health` now exposes the running daemon version.
+- `dwyt .` compares the daemon version with the current CLI binary.
+- If the daemon version is missing or stale, the CLI stops the old daemon and starts a fresh one before opening the dashboard.
+- This fixes the case where installing a new DWYT release still showed the old embedded UI because the previous daemon stayed alive on port `2737`.

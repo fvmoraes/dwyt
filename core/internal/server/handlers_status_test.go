@@ -1,6 +1,12 @@
 package server
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
 
 func TestEstimateCodebaseTokenSavings(t *testing.T) {
 	saved, used := estimateCodebaseTokenSavings(1000, 3000)
@@ -52,5 +58,22 @@ func TestCalculateGlobalTokenSavingsUsesLocalEstimates(t *testing.T) {
 	}
 	if global.EstimationSource == "" {
 		t.Fatal("expected estimation source for local estimates")
+	}
+}
+
+func TestAPIHealthIncludesDaemonVersion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ds := &DashboardServer{ReleaseVersion: "v4.8.0"}
+
+	ds.apiHealth(ctx)
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["version"] != "v4.8.0" {
+		t.Fatalf("expected health version v4.8.0, got %#v", payload["version"])
 	}
 }
