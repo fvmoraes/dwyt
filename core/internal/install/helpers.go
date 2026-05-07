@@ -5,12 +5,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// httpClient é o client HTTP compartilhado pelos installers. Todos os
+// downloads (scripts curtos do install.sh upstream, DMGs de centenas de MB,
+// AppImages do Obsidian) precisam de um teto. Sem timeout, uma rede ruim
+// segura o install indefinidamente e o wizard fica preso em "installing".
+var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
 // fetch baixa o corpo de uma URL como string. Vazio se falhar — chamadores
 // devem checar se a string é vazia antes de seguir.
 func fetch(url string) string {
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return ""
 	}

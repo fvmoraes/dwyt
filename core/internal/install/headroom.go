@@ -1,12 +1,22 @@
 package install
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 )
+
+// pipInstallTimeout limita o tempo de cada chamada pip. Os installs do
+// headroom baixam ~50 wheels (onnxruntime, transformers, cryptography,
+// etc.) — em uma rede saudável termina em 1-3 min. 10 min é folgado o
+// suficiente para conexões lentas e protege contra travas de rede que
+// segurariam o wizard indefinidamente.
+const pipInstallTimeout = 10 * time.Minute
 
 // Headroom instala o headroom-ai num venv Python dedicado em
 // dwytHome/headroom-venv e cria um wrapper em dwytBin/headroom.
@@ -84,11 +94,25 @@ func ensurePipInVenv(pipBin, pyBin string) error {
 // próprio script enquanto está rodando. `python -m pip` carrega pip como
 // módulo, evitando o conflito de auto-substituição.
 func pipInstallHeadroom(pyBin string) error {
-	if out, err := exec.Command(pyBin, "-m", "pip", "install", "--upgrade", "pip").CombinedOutput(); err != nil {
-		return fmt.Errorf("headroom: upgrade do pip falhou: %w\n%s", err, string(out))
+	if err := runPip(pyBin, "upgrade do pip", "install", "--upgrade", "pip"); err != nil {
+		return err
 	}
-	if out, err := exec.Command(pyBin, "-m", "pip", "install", "headroom-ai[proxy]").CombinedOutput(); err != nil {
-		return fmt.Errorf("headroom: pip install headroom-ai[proxy] falhou: %w\n%s", err, string(out))
+	return runPip(pyBin, "pip install headroom-ai[proxy]", "install", "headroom-ai[proxy]")
+}
+
+// runPip executa `python -m pip <args...>` com timeout. O label aparece no
+// erro retornado, então deve descrever a etapa em português ("upgrade do
+// pip", "pip install headroom-ai[proxy]") para casar com o formato anterior.
+func runPip(pyBin, label string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), pipInstallTimeout)
+	defer cancel()
+	full := append([]string{"-m", "pip"}, args...)
+	out, err := exec.CommandContext(ctx, pyBin, full...).CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("headroom: %s expirou após %s (rede ruim?):\n%s", label, pipInstallTimeout, string(out))
+	}
+	if err != nil {
+		return fmt.Errorf("headroom: %s falhou: %w\n%s", label, err, string(out))
 	}
 	return nil
 }

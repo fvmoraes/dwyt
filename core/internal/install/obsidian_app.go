@@ -3,7 +3,6 @@ package install
 import (
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -71,7 +70,7 @@ func latestObsidianLinuxAppImageURL() (string, error) {
 }
 
 func downloadObsidianAppImage(url, dest string) error {
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("obsidian download failed: %w", err)
 	}

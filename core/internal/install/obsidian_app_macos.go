@@ -74,7 +74,7 @@ func installObsidianMacOSDMG() (string, error) {
 
 func downloadDMG(url, dmgPath string) error {
 	fmt.Printf("  → obsidian: baixando DMG de %s\n", url)
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("obsidian download: %w", err)
 	}

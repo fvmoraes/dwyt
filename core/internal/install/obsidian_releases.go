@@ -26,7 +26,7 @@ func fetchLatestObsidianAssets() ([]obsidianAsset, error) {
 	}
 	req.Header.Set("User-Agent", "dwyt-installer")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("obsidian release lookup: %w", err)
 	}
