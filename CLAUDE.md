@@ -49,8 +49,12 @@ this file covers **how code is written and organized**.
 
 - Bash files have the same 300-line ceiling. Extract repeated logic into
   functions defined at the top of the script.
-- For installer scripts that ship via `curl | bash`, prefer in-script
-  functions over sourced helper files — sourcing is unreliable when piped.
+- For installer scripts that ship via `curl | bash`, the orchestrator must
+  stay self-contained but can source helpers if it bootstraps them itself.
+  See `install.sh` + `install-lib/` for the working pattern: orchestrator
+  resolves a sibling `install-lib/` (clone) or downloads the lib files into
+  a tempdir (piped), then sources them. One concept per lib file
+  (`output.sh`, `platform.sh`, `download.sh`, etc.).
 
 ## When refactoring an oversized file you have to touch
 
