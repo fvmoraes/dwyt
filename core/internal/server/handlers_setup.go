@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -264,35 +263,7 @@ func (ds *DashboardServer) apiServicesStopAll(c *gin.Context) {
 }
 
 func isObsidianAppInstalled() bool {
-	if runtime.GOOS == "darwin" {
-		home, _ := os.UserHomeDir()
-		candidates := []string{
-			"/Applications/Obsidian.app/Contents/MacOS/Obsidian",
-			"/Applications/Tools/Obsidian.app/Contents/MacOS/Obsidian",
-		}
-		if home != "" {
-			candidates = append(candidates, filepath.Join(home, "Applications", "Obsidian.app", "Contents", "MacOS", "Obsidian"))
-		}
-		for _, loc := range candidates {
-			if _, err := os.Stat(loc); err == nil {
-				return true
-			}
-		}
-		return false
-	}
-	if _, err := exec.LookPath("obsidian"); err == nil {
-		return true
-	}
-	for _, loc := range []string{
-		"/usr/bin/obsidian",
-		"/usr/local/bin/obsidian",
-		"/opt/obsidian/obsidian",
-	} {
-		if _, err := os.Stat(loc); err == nil {
-			return true
-		}
-	}
-	return false
+	return brain.ObsidianInstalled()
 }
 
 func migrateToolList(list []string) []string {

@@ -11,6 +11,26 @@
 
 set -euo pipefail
 
+# ── Args ──────────────────────────────────────────────────────────────────────
+SKIP_DEPS=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-deps) SKIP_DEPS=1 ;;
+    --help|-h)
+      cat <<'USAGE'
+DWYT installer
+
+Usage:
+  install.sh [--skip-deps]
+
+Flags:
+  --skip-deps   Install only the dwyt binary; skip cbmcp/rtk/headroom/obsidian.
+                You can run `dwyt install` later to bootstrap the deps.
+USAGE
+      exit 0 ;;
+  esac
+done
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 BOLD="\033[1m"; CYAN="\033[36m"; GREEN="\033[32m"
 YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
@@ -61,6 +81,41 @@ install_binary() {
   cp "$src" "$tmp_dest"
   chmod +x "$tmp_dest"
   mv -f "$tmp_dest" "$DEST"
+}
+
+# Verify a candidate binary actually matches this host's OS/arch.
+# Local binaries (bundled in clones, leftover from cross-compilation) may be
+# for a different platform — copying them produces "exec format error" much
+# later. Returns 0 when usable, 1 otherwise.
+binary_matches_host() {
+  local path="$1"
+  if [[ ! -f "$path" || ! -x "$path" && ! -r "$path" ]]; then
+    return 1
+  fi
+  if ! command -v file &>/dev/null; then
+    # No `file` available; fall back to attempting execution.
+    "$path" version &>/dev/null && return 0
+    return 1
+  fi
+  local desc
+  desc="$(file -b "$path" 2>/dev/null || echo "")"
+  case "$GOOS" in
+    darwin)
+      [[ "$desc" == *"Mach-O"* ]] || return 1
+      case "$GOARCH" in
+        arm64) [[ "$desc" == *"arm64"* ]] || return 1 ;;
+        amd64) [[ "$desc" == *"x86_64"* ]] || return 1 ;;
+      esac ;;
+    linux)
+      [[ "$desc" == *"ELF"* ]] || return 1
+      case "$GOARCH" in
+        amd64) [[ "$desc" == *"x86-64"* || "$desc" == *"x86_64"* ]] || return 1 ;;
+        arm64) [[ "$desc" == *"aarch64"* || "$desc" == *"arm64"* ]] || return 1 ;;
+      esac ;;
+    windows)
+      [[ "$desc" == *"PE32"* || "$desc" == *"MS-DOS"* ]] || return 1 ;;
+  esac
+  return 0
 }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -114,13 +169,20 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 
+USED_LOCAL=0
 if [[ -f "$LOCAL_BIN" ]]; then
   # ── Case 1: binary is next to the install script (local clone / release zip)
-  info "Found local binary at $LOCAL_BIN"
-  install_binary "$LOCAL_BIN"
-  success "Copied from local file"
+  if binary_matches_host "$LOCAL_BIN"; then
+    info "Found local binary at $LOCAL_BIN"
+    install_binary "$LOCAL_BIN"
+    success "Copied from local file"
+    USED_LOCAL=1
+  else
+    warn "Local binary at $LOCAL_BIN does not match host ($GOOS/$GOARCH); will download instead"
+  fi
+fi
 
-else
+if [[ $USED_LOCAL -eq 0 ]]; then
   # ── Case 2: download from GitHub Releases
   info "Downloading from GitHub Releases..."
   DOWNLOAD_URL="${GITHUB_RELEASES}/${RELEASE_ARCHIVE}"
@@ -251,6 +313,23 @@ else
     info "PATH already configured in $SHELL_RC"
   fi
   export PATH="${INSTALL_DIR}:${PATH}"
+fi
+
+# ── Install dependencies ──────────────────────────────────────────────────────
+# The dwyt binary alone is not enough — codebase-memory-mcp, rtk, headroom and
+# the Obsidian app/MCP must be bootstrapped before the dashboard is usable.
+# Until this section existed, users had to open the dashboard and click
+# "Install →" to set those up; first-run experience was broken without it.
+if [[ $SKIP_DEPS -eq 1 ]]; then
+  header "Skipping dependencies (--skip-deps)"
+  info "Run 'dwyt install' later to bootstrap cbmcp, rtk, headroom and obsidian."
+else
+  header "Installing dependencies..."
+  if "$DEST" install; then
+    success "Dependencies installed"
+  else
+    warn "Some dependencies failed (see output above). Re-run 'dwyt install' to retry."
+  fi
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
