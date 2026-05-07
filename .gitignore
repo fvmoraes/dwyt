@@ -5,15 +5,15 @@
 
 # dwyt
 .claude/
-.claude/mcp.json
-.mcp.json
-opencode.json
-.cursorrules
-.kiro/mcp.json
-.kiro/settings/mcp.json
-.vscode/mcp.json
+.vscode/
 .codex/
+.kiro/
+.github/copilot-instructions.md
+.codebase-memory/
 .cursor/mcp.json
 .cursor/rules/dwyt.mdc
-.github/copilot-instructions.md
-.kiro/steering/dwyt.md
+.cursorrules
+CLAUDE.md
+AGENTS.md
+.mcp.json
+opencode.json
