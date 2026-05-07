@@ -27,11 +27,11 @@ func Headroom(dwytBin, dwytHome string) error {
 		return fmt.Errorf("headroom: criação do venv falhou: %w\n%s", vErr, string(out))
 	}
 
-	pipBin, hrBin := venvBinaries(venvDir)
-	if err := ensurePipInVenv(pipBin); err != nil {
+	pipBin, pyBin, hrBin := venvBinaries(venvDir)
+	if err := ensurePipInVenv(pipBin, pyBin); err != nil {
 		return err
 	}
-	if err := pipInstallHeadroom(pipBin); err != nil {
+	if err := pipInstallHeadroom(pyBin); err != nil {
 		return err
 	}
 	if _, err := os.Stat(hrBin); err != nil {
@@ -54,37 +54,40 @@ func cleanPartialHeadroom(wrapperPath, venvDir string) {
 	os.RemoveAll(venvDir)
 }
 
-func venvBinaries(venvDir string) (pipBin, hrBin string) {
+func venvBinaries(venvDir string) (pipBin, pyBin, hrBin string) {
 	if runtime.GOOS == "windows" {
 		return filepath.Join(venvDir, "Scripts", "pip.exe"),
+			filepath.Join(venvDir, "Scripts", "python.exe"),
 			filepath.Join(venvDir, "Scripts", "headroom.exe")
 	}
 	return filepath.Join(venvDir, "bin", "pip"),
+		filepath.Join(venvDir, "bin", "python"),
 		filepath.Join(venvDir, "bin", "headroom")
 }
 
 // ensurePipInVenv lida com builds de Python (especialmente Homebrew
 // bleeding-edge) que criam venvs sem pip. Bootstrap via ensurepip antes
 // dos pip installs subsequentes.
-func ensurePipInVenv(pipBin string) error {
+func ensurePipInVenv(pipBin, pyBin string) error {
 	if _, err := os.Stat(pipBin); err == nil {
 		return nil
 	}
-	venvPython := filepath.Join(filepath.Dir(pipBin), "python")
-	if runtime.GOOS == "windows" {
-		venvPython = filepath.Join(filepath.Dir(pipBin), "python.exe")
-	}
-	if out, err := exec.Command(venvPython, "-m", "ensurepip", "--upgrade").CombinedOutput(); err != nil {
+	if out, err := exec.Command(pyBin, "-m", "ensurepip", "--upgrade").CombinedOutput(); err != nil {
 		return fmt.Errorf("headroom: pip ausente no venv e ensurepip falhou: %w\n%s", err, string(out))
 	}
 	return nil
 }
 
-func pipInstallHeadroom(pipBin string) error {
-	if out, err := exec.Command(pipBin, "install", "--upgrade", "pip").CombinedOutput(); err != nil {
+// pipInstallHeadroom usa `python -m pip` em vez do binário pip diretamente.
+// O upgrade do pip via `pip install --upgrade pip` falha com OSError
+// "[Errno 2] No such file or directory" quando pip tenta substituir o
+// próprio script enquanto está rodando. `python -m pip` carrega pip como
+// módulo, evitando o conflito de auto-substituição.
+func pipInstallHeadroom(pyBin string) error {
+	if out, err := exec.Command(pyBin, "-m", "pip", "install", "--upgrade", "pip").CombinedOutput(); err != nil {
 		return fmt.Errorf("headroom: upgrade do pip falhou: %w\n%s", err, string(out))
 	}
-	if out, err := exec.Command(pipBin, "install", "headroom-ai[proxy]").CombinedOutput(); err != nil {
+	if out, err := exec.Command(pyBin, "-m", "pip", "install", "headroom-ai[proxy]").CombinedOutput(); err != nil {
 		return fmt.Errorf("headroom: pip install headroom-ai[proxy] falhou: %w\n%s", err, string(out))
 	}
 	return nil
