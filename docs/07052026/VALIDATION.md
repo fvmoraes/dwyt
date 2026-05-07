@@ -12,6 +12,8 @@ Expected result:
 
 - all Go packages pass;
 - status handlers serialize the new token fields;
+- `/api/health` includes the running daemon version;
+- CLI startup restarts stale daemons when the running daemon version is missing or different;
 - Obsidian vault tests confirm the new linked folder structure;
 - Kiro Power tests confirm frontmatter and steering priorities;
 - integration tests confirm DWYT blocks remain idempotent.

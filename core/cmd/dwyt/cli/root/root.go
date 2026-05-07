@@ -3,6 +3,7 @@ package root
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -92,18 +93,28 @@ func runDefault(projectPath string) error {
 		fmt.Println("  \u2192  obsidian               detected")
 	}
 
-	if daemonOK := probeDaemon(); daemonOK {
-		if err := switchProject(projectPath); err == nil {
+	if daemon := probeDaemon(); daemon.OK {
+		if daemonVersionNeedsRestart(daemon.Version) {
+			if daemon.Version == "" {
+				fmt.Printf("  \u2192  Dashboard daemon version unknown; restarting with %s\n", normalizeDaemonVersion(version))
+			} else {
+				fmt.Printf("  \u2192  Dashboard daemon %s found; restarting with %s\n", normalizeDaemonVersion(daemon.Version), normalizeDaemonVersion(version))
+			}
+			log.Info("daemon version mismatch, restarting", log.Fields{"daemon_version": daemon.Version, "cli_version": version})
+			stopDaemonProcess()
+			time.Sleep(300 * time.Millisecond)
+		} else if err := switchProject(projectPath); err == nil {
 			workspace.Touch(projectPath)
 			fmt.Printf("  \u2713 Dashboard \u2192 http://localhost:2737  (already running)\n")
 			fmt.Printf("  \u2713 Project context updated\n\n")
 			ensureKiroPowerIfEnabled(projectPath)
 			openBrowserURL("http://localhost:2737/#/dashboard?project=" + url.PathEscape(projectPath))
 			return nil
+		} else {
+			log.Warn("daemon probe ok but switch failed, restarting")
+			stopDaemonProcess()
+			time.Sleep(300 * time.Millisecond)
 		}
-		log.Warn("daemon probe ok but switch failed, restarting")
-		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
-		time.Sleep(300 * time.Millisecond)
 	}
 
 	headroomPort := startServicesAsync(e.DwytBin)
@@ -158,25 +169,76 @@ func banner() {
 	fmt.Printf("  \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D\n\n")
 }
 
-func probeDaemon() bool {
+type daemonProbe struct {
+	OK      bool
+	Version string
+}
+
+func probeDaemon() daemonProbe {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	resp, err := client.Get("http://127.0.0.1:2737/api/health")
 	if err != nil {
-		return false
+		return daemonProbe{}
 	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return daemonProbe{}
+	}
+	probe := daemonProbe{OK: true}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return probe
+	}
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(body, &payload) == nil {
+		probe.Version = payload.Version
+	}
+	return probe
 }
 
 func waitForDaemon(timeout, interval time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if probeDaemon() {
+		if probeDaemon().OK {
 			return true
 		}
 		time.Sleep(interval)
 	}
 	return false
+}
+
+func daemonVersionNeedsRestart(daemonVersion string) bool {
+	current := normalizeDaemonVersion(version)
+	if current == "dev" {
+		return false
+	}
+	if strings.TrimSpace(daemonVersion) == "" {
+		return true
+	}
+	return normalizeDaemonVersion(daemonVersion) != current
+}
+
+func normalizeDaemonVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "dev"
+	}
+	lower := strings.ToLower(v)
+	if lower == "dev" || lower == "development" {
+		return "dev"
+	}
+	v = strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	return "v" + v
+}
+
+func stopDaemonProcess() {
+	exe, _ := os.Executable()
+	if exe != "" {
+		exec.Command("pkill", "-f", exe+" daemon").Run()
+	}
+	exec.Command("pkill", "-f", "dwyt.*daemon").Run()
 }
 
 func switchProject(projectPath string) error {

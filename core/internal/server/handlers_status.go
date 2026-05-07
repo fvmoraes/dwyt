@@ -23,6 +23,7 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 		"status":  "ok",
 		"project": ds.DefaultProject,
 		"tools":   tools,
+		"version": ds.currentReleaseVersion(),
 	})
 }
 

@@ -6,10 +6,10 @@ export function CardHeader({ label, color, state, badgeText }: {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color }}>{label}</span>
-          <span style={{ fontSize: 10 }}>{badgeText.icon}</span>
-          <span style={{ fontSize: 9, fontWeight: 700, color: badgeText.color }}>{badgeText.text}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color }}>{label}</span>
+          <span style={{ fontSize: 9 }}>{badgeText.icon}</span>
+          <span style={{ fontSize: 8, fontWeight: 700, color: badgeText.color }}>{badgeText.text}</span>
         </div>
         <span className={`status-dot ${getDotClass(state)}`} />
       </div>
@@ -20,14 +20,14 @@ export function CardHeader({ label, color, state, badgeText }: {
 export function Row({ label, value, valueColor = 'var(--text)', title }: { label: string; value: string; valueColor?: string; title?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
-      <span style={{ color: 'var(--muted)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
-      <span title={title} style={{ fontFamily: 'monospace', fontSize: 10, color: valueColor }}>{value || '\u2014'}</span>
+      <span style={{ color: 'var(--muted)', fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
+      <span title={title} style={{ fontFamily: 'monospace', fontSize: 9, color: valueColor }}>{value || '\u2014'}</span>
     </div>
   )
 }
 
 export function Hr() {
-  return <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+  return <div style={{ borderTop: '1px solid var(--border)', margin: '3px 0' }} />
 }
 
 export function RepoRow({ projectName, projectPath, label }: {
@@ -36,8 +36,8 @@ export function RepoRow({ projectName, projectPath, label }: {
   const name = projectName || projectPath?.split('/').pop() || '\u2014'
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
-      <span style={{ color: 'var(--muted)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
-      <span title={projectPath} style={{ fontSize: 9, color: '#339af0', fontFamily: 'monospace', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ color: 'var(--muted)', fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
+      <span title={projectPath} style={{ fontSize: 8, color: '#339af0', fontFamily: 'monospace', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {'\uD83D\uDCC1'} {name}
       </span>
     </div>

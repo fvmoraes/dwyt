@@ -10,10 +10,12 @@ DWYT now applies the Rules.md requirements across implementation and documentati
 - Kiro Power follows the current expected structure with `POWER.md`, `mcp.json`, and `steering/`.
 - Kiro workspace MCP config uses `.kiro/settings/mcp.json` as primary and preserves `.kiro/mcp.json` as legacy compatibility.
 - Reinstall and uninstall messaging preserve Obsidian project vaults.
+- `dwyt .` now detects stale dashboard daemons and restarts them so the UI reflects the newly installed binary.
 
 ## Files Touched
 
 - Backend status, metrics, Obsidian vault, Kiro Power, integration templates, and CLI command text.
+- CLI startup and `/api/health` daemon version reporting.
 - Frontend dashboard types and global savings calculation.
 - README and docs for laws, Kiro Power, token savings, architecture, changelog, and validation.
 - Local agent instruction files for Codex/AGENTS, Claude, Cursor, Kiro, and Copilot.
