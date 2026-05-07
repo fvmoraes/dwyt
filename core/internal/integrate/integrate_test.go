@@ -51,6 +51,11 @@ func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
 	if strings.Count(string(agents), instructionMarkerStart) != 1 {
 		t.Fatalf("expected one DWYT instruction block, got:\n%s", string(agents))
 	}
+	for _, want := range []string{"1. RTK", "2. Codebase MCP", "Lei do Codebase", "Lei do Obsidian"} {
+		if !strings.Contains(string(agents), want) {
+			t.Fatalf("expected generated AGENTS.md to contain %q:\n%s", want, string(agents))
+		}
+	}
 }
 
 func TestProjectUpdatesInstructionBlockWithoutOverwritingUserContent(t *testing.T) {

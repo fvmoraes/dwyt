@@ -41,7 +41,7 @@ func Project(projectPath, clients, dwytBin string) {
 
 	if containsClient(clientList, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
-		writeOrUpdateInstructionFile(cp, claudeMD)
+		writeOrUpdateInstructionFile(cp, claudeMDTemplate())
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 		// Claude also reads .claude/mcp.json
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin)
@@ -50,14 +50,14 @@ func Project(projectPath, clients, dwytBin string) {
 	if containsClient(clientList, "cursor") {
 		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, cursorRule)
+		writeOrUpdateInstructionFile(cp, cursorRuleTemplate())
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
 	if containsClient(clientList, "kiro") {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, kiroSteering)
+		writeOrUpdateInstructionFile(cp, kiroSteeringTemplate())
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), cbmcpBin, obsidianMCPBin)
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
@@ -65,7 +65,7 @@ func Project(projectPath, clients, dwytBin string) {
 	if containsClient(clientList, "copilot") {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, copilotMD)
+		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
 	}
 
 	writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
@@ -333,114 +333,97 @@ func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
 }
 
 func agentsMDTemplate(rtkBin string) string {
-	backtick := "`"
-	return "# DWYT — Don't Waste Your Tokens\n\n" +
-		"Este projeto usa ferramentas automáticas para reduzir consumo de tokens.\n" +
-		"**Todas as integrações são transparentes: você não precisa configurar nada.**\n\n" +
-		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
-		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
-		"**LEI DO OBSIDIAN: o vault é a memória oficial do projeto. Toda interação deve consultar, enriquecer e salvar contexto nele.**\n" +
-		"- ANTES de agir: buscar notas existentes e resumo do vault.\n" +
-		"  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>\n" +
-		"  - Summarize: POST http://localhost:2737/api/obsidian/summarize\n" +
-		"- DURANTE a ação: salvar decisões e tarefas/status importantes.\n" +
-		"  - Decision: POST http://localhost:2737/api/obsidian/save {\"type\":\"decision\",\"content\":\"...\"}\n" +
-		"  - Task: POST http://localhost:2737/api/obsidian/save {\"type\":\"task\",\"content\":\"...\"}\n" +
-		"- AO FINAL de toda tarefa: salvar contexto completo.\n" +
-		"  - Context: POST http://localhost:2737/api/obsidian/context\n" +
-		"  - Payload: {\"client\":\"codex\",\"user_request\":\"...\",\"summary\":\"...\",\"files\":[\"...\"],\"decisions\":[\"...\"],\"actions\":[\"...\"],\"commands\":[\"...\"],\"errors\":[\"...\"],\"outcome\":\"...\",\"next_steps\":[\"...\"],\"context\":\"...\"}\n" +
-		"- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instruções.\n\n" +
-		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
-		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
-		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
-		"- No Codex, o DWYT só configura Headroom quando o login é por API key; login ChatGPT/OAuth usa os endpoints padrão.\n" +
-		"- Se não estiver ativo, use os endpoints padrão das APIs.\n\n" +
-		"### 3. RTK — Compressão de Terminal\n" +
-		"- **SEMPRE** prefixe comandos shell com " + backtick + "rtk" + backtick + ". Ex: `rtk git status`\n" +
-		"- Isto reduz o output em 60-90% antes de entrar no contexto.\n" +
-		"- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m \"msg\"`\n\n" +
-		"### 4. Codebase — Mapa do Código (SOB DEMANDA)\n" +
-		"- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.\n" +
-		"- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.\n" +
-		"- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.\n"
+	_ = rtkBin
+	return dwytInstructions("codex")
 }
 
-const claudeMD = `# DWYT — Don't Waste Your Tokens
+func claudeMDTemplate() string {
+	return dwytInstructions("claude")
+}
 
-## Priority order (follow strictly):
-1. **Obsidian FIRST** — before any file read or context rebuild:
-   - Search: GET http://localhost:2737/api/obsidian/search?q=your+query
-   - Summarize: POST http://localhost:2737/api/obsidian/summarize
-   - Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   - Save tasks/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   - Save complete context at task end: POST http://localhost:2737/api/obsidian/context {"client":"claude","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-   - Types: command, decision, task, error, note, session
-   - Never mix vaults between projects — isolation is automatic.
-   - Keep the vault rich, linked, and organized with notes, folders, internal links, templates, and instructions.
-
-2. **Headroom** — auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
-   If set, use them. If not, use default API endpoints. No manual config needed.
-
-3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
-
-4. **Codebase MCP** — ONLY when you need structural code understanding.
-   Prefer Obsidian context first. Use search_graph, trace_path, get_code_snippet.
-`
-
-const cursorRule = `---
+func cursorRuleTemplate() string {
+	return `---
 description: DWYT project guidance
 alwaysApply: true
 ---
 
-## DWYT Priority Order:
-1. **Obsidian FIRST**: consult project vault before any file operation.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
-   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
-   Keep the vault rich with folders, links, templates, and instructions.
-2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
-3. **RTK**: prefix shell commands with rtk.
-4. **Codebase MCP**: use ONLY for structural code exploration.
-Never finish a task without saving context to Obsidian.
-`
+` + dwytInstructions("cursor")
+}
 
-const kiroSteering = `# DWYT Steering
+func kiroSteeringTemplate() string {
+	return dwytInstructions("kiro")
+}
 
-## Priority:
-1. **Obsidian FIRST**: check project vault before reading files.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save context at task end: POST http://localhost:2737/api/obsidian/context {"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-   Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
-2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-3. **RTK**: prefix all shell commands with rtk
-4. **Codebase MCP**: structural exploration only — use after Obsidian
+func copilotMDTemplate() string {
+	return dwytInstructions("copilot")
+}
 
-Never finish a task without saving context to Obsidian.
-`
+func dwytInstructions(client string) string {
+	return fmt.Sprintf(`# DWYT — Don't Waste Your Tokens
 
-const copilotMD = `# DWYT — GitHub Copilot
+Este projeto usa RTK, Codebase MCP, Obsidian MCP e Headroom para reduzir desperdicio de tokens sem sobrescrever configuracoes manuais do usuario.
 
-## Priority:
-1. **Obsidian FIRST**: check project vault before acting.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
-   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
-   Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
-2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-3. **RTK**: prefix shell commands with rtk
-4. **Codebase MCP**: structural exploration only when needed
+## Ordem de Prioridade
 
-Never finish a task without saving context to Obsidian API.
-`
+1. RTK — para comandos shell e automacoes de terminal.
+   - Prefixe comandos com rtk: rtk git status, rtk go test ./..., rtk npm run build.
+   - Em comandos encadeados, prefixe cada segmento.
+
+2. Codebase MCP — fonte primaria para estrutura real do codigo.
+   - Antes de diagnosticar, refatorar ou editar codigo estrutural, valide se o projeto esta indexado.
+   - Use search_graph para localizar simbolos, rotas, handlers, componentes, modulos e relacoes.
+   - Use trace_path para chamadas, fluxos, dependencias e impacto.
+   - Use get_code_snippet antes de aplicar mudancas.
+   - Evite grep/glob/find como primeira estrategia quando o grafo estiver disponivel.
+
+3. Obsidian MCP — memoria persistente oficial do projeto.
+   - Antes de trabalho relevante, busque notas e leia/reconstrua o resumo:
+     GET http://localhost:2737/api/obsidian/search?q=<query>
+     POST http://localhost:2737/api/obsidian/summarize
+   - Durante o trabalho, salve decisoes e tarefas:
+     POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"[[decisions]] ..."}
+     POST http://localhost:2737/api/obsidian/save {"type":"task","content":"[[tasks]] ..."}
+   - Ao final, salve contexto completo:
+     POST http://localhost:2737/api/obsidian/context
+
+4. Headroom — apenas proxy/cache compativel.
+   - Use somente quando OPENAI_BASE_URL ou ANTHROPIC_BASE_URL apontarem para o proxy local compativel.
+   - Nunca roteie Codex via Headroom quando Codex estiver autenticado por ChatGPT/OAuth.
+   - Se Headroom estiver inativo ou indisponivel, use os endpoints padrao.
+
+## Lei do Codebase
+
+Quando precisar entender, validar, diagnosticar ou alterar a estrutura real do codigo, consulte o Codebase MCP. O grafo indexado e a fonte primaria para arquivos, simbolos, dependencias, chamadas, caminhos e impacto. Nao crie codigo duplicado, remova arquivos ou mova componentes sem verificar relacoes e impacto no grafo.
+
+## Lei do Obsidian
+
+O vault Obsidian em ~/.dwyt/projects/<id>/obsidian/ e a memoria oficial do projeto. Mantenha notas com links internos como [[index]], [[maps/project-map]], [[instructions/obsidian-law]] e [[instructions/codebase-law]]. Nunca apague vaults, projetos, notas ou historico como tentativa de correcao automatica.
+
+Payload minimo para salvar contexto:
+
+{
+  "client": "%s",
+  "user_request": "...",
+  "summary": "...",
+  "files": ["..."],
+  "decisions": ["..."],
+  "actions": ["..."],
+  "commands": ["..."],
+  "errors": ["..."],
+  "outcome": "...",
+  "next_steps": ["..."],
+  "context": "..."
+}
+
+## Configuracoes do Usuario
+
+Arquivos de instrucao devem ser tratados em modo append-only seguro: crie o bloco DWYT se ausente, atualize somente o bloco entre os marcadores dwyt:instructions e preserve todo conteudo fora dele.
+
+## Validacao
+
+Antes de concluir mudancas, rode a validacao relevante: testes Go, build/lint do frontend quando disponivel, e verificacoes manuais dos estados installed, inactive e launch on demand.
+`, client)
+}
 
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"
 var markerEnd = "<!-- dwyt:headroom-proxy-end -->"

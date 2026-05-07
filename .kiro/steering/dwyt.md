@@ -1,36 +1,30 @@
 # DWYT Steering
 
-## Priority:
-1. **Obsidian FIRST**: check project vault before reading files.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
-   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
-   Keep the vault rich with folders, links, templates, and instructions.
-2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-3. **RTK**: prefix all shell commands with rtk
-4. **Codebase MCP**: structural exploration only — use after Obsidian
-
-Never finish a task without saving context to Obsidian.
-
 <!-- dwyt:instructions:start -->
 #dwyt
 
-# DWYT Steering
+# DWYT — Don't Waste Your Tokens
 
-## Priority:
-1. **Obsidian FIRST**: check project vault before reading files.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save context at task end: POST http://localhost:2737/api/obsidian/context {"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-   Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
-2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-3. **RTK**: prefix all shell commands with rtk
-4. **Codebase MCP**: structural exploration only — use after Obsidian
+## Priority
 
-Never finish a task without saving context to Obsidian.
+1. **RTK**: prefix shell commands with `rtk`.
+2. **Codebase MCP**: use the code graph before diagnosing, refactoring, or editing real code structure.
+3. **Obsidian MCP**: search/summarize project memory before relevant work, save decisions/tasks during work, and save context at task end.
+4. **Headroom**: use only when compatible env vars point to the local proxy; Codex ChatGPT/OAuth must not use Headroom.
+
+## Codebase Law
+
+Validate/index the project when needed, then use `search_graph`, `trace_path`, and `get_code_snippet` for symbols, calls, dependencies, flows, and impact.
+
+## Obsidian Law
+
+Use the project vault as durable memory:
+
+- `GET http://localhost:2737/api/obsidian/search?q=<query>`
+- `POST http://localhost:2737/api/obsidian/summarize`
+- `POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"[[decisions]] ..."}`
+- `POST http://localhost:2737/api/obsidian/save {"type":"task","content":"[[tasks]] ..."}`
+- `POST http://localhost:2737/api/obsidian/context`
+
+Final context must include `client`, `user_request`, `summary`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
 <!-- dwyt:instructions:end -->

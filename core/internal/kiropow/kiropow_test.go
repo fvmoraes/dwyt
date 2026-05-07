@@ -26,8 +26,14 @@ func TestEnsurePower_FirstRun(t *testing.T) {
 		}
 	}
 	powerMD, _ := os.ReadFile(filepath.Join(status.PowerDir, "POWER.md"))
-	if !strings.HasPrefix(string(powerMD), "---\nname: \"dwyt-power\"") {
+	if !strings.HasPrefix(string(powerMD), "---\nname: dwyt-power") {
 		t.Fatalf("expected Kiro Power frontmatter, got:\n%s", string(powerMD))
+	}
+	if !strings.Contains(string(powerMD), "displayName: DWYT Project Context") {
+		t.Fatalf("expected DWYT Project Context display name, got:\n%s", string(powerMD))
+	}
+	if !strings.Contains(string(powerMD), "1. RTK") || !strings.Contains(string(powerMD), "2. Codebase MCP") {
+		t.Fatalf("expected Rules.md priority order in POWER.md, got:\n%s", string(powerMD))
 	}
 }
 

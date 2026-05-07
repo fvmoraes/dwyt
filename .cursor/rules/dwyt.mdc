@@ -2,20 +2,26 @@
 description: DWYT project guidance
 alwaysApply: true
 ---
+
 <!-- dwyt:instructions:start -->
 #dwyt
 
-## DWYT Priority Order:
-1. **Obsidian FIRST**: consult project vault before any file operation.
-   Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Summarize: POST http://localhost:2737/api/obsidian/summarize
-   Save decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
-   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
-   Keep the vault rich with folders, links, templates, and instructions.
-2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
-3. **RTK**: prefix shell commands with rtk.
-4. **Codebase MCP**: use ONLY for structural code exploration.
-Never finish a task without saving context to Obsidian.
+# DWYT — Don't Waste Your Tokens
+
+## Ordem de Prioridade
+
+1. RTK — prefixe comandos shell com `rtk`.
+2. Codebase MCP — use `search_graph`, `trace_path` e `get_code_snippet` antes de analisar ou alterar estrutura real de codigo.
+3. Obsidian MCP — busque/resuma o vault antes de trabalho relevante e salve contexto ao final.
+4. Headroom — use somente quando compativel; Codex ChatGPT/OAuth nao usa Headroom.
+
+## Lei do Codebase
+
+O Codebase MCP e a fonte primaria para simbolos, rotas, handlers, componentes, dependencias, chamadas e impacto.
+
+## Lei do Obsidian
+
+O vault em `~/.dwyt/projects/<id>/obsidian/` e a memoria oficial. Salve decisoes em `decision`, tarefas/status em `task` e contexto final em `/api/obsidian/context`, sempre com links como `[[index]]`, `[[instructions/obsidian-law]]` e `[[instructions/codebase-law]]`.
+
+Campos obrigatorios do contexto: `user_request`, `summary`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, `context`.
 <!-- dwyt:instructions:end -->

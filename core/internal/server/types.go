@@ -28,22 +28,25 @@ type FsNode struct {
 }
 
 type ToolDetail struct {
-	TokensSaved    int64    `json:"tokens_saved"`
-	TokensUsed     int64    `json:"tokens_used,omitempty"`
-	UptimeSecs     int64    `json:"uptime_secs"`
-	UptimeLabel    string   `json:"uptime_label"`
-	Repos          []string `json:"repos"`
-	Requests       int64    `json:"requests,omitempty"`
-	CompressionPct float64  `json:"compression_pct,omitempty"`
-	ProxyPort      int      `json:"proxy_port,omitempty"`
-	TotalCommands  int64    `json:"total_commands,omitempty"`
-	PctSaved       float64  `json:"pct_saved,omitempty"`
-	IndexedNodes   int64    `json:"indexed_nodes,omitempty"`
-	IndexedEdges   int64    `json:"indexed_edges,omitempty"`
-	MemoryCount    int      `json:"memory_count,omitempty"`
-	MemoryBytes    int64    `json:"memory_bytes,omitempty"`
-	LastUpdated    string   `json:"last_updated,omitempty"`
-	SavingsBasis   string   `json:"savings_basis,omitempty"`
+	TokensSaved       int64    `json:"tokens_saved"`
+	TokensUsed        int64    `json:"tokens_used,omitempty"`
+	WithoutDWYTTokens int64    `json:"without_dwyt_tokens,omitempty"`
+	WithDWYTTokens    int64    `json:"with_dwyt_tokens,omitempty"`
+	UptimeSecs        int64    `json:"uptime_secs"`
+	UptimeLabel       string   `json:"uptime_label"`
+	Repos             []string `json:"repos"`
+	Requests          int64    `json:"requests,omitempty"`
+	CompressionPct    float64  `json:"compression_pct,omitempty"`
+	ProxyPort         int      `json:"proxy_port,omitempty"`
+	TotalCommands     int64    `json:"total_commands,omitempty"`
+	PctSaved          float64  `json:"pct_saved,omitempty"`
+	IndexedNodes      int64    `json:"indexed_nodes,omitempty"`
+	IndexedEdges      int64    `json:"indexed_edges,omitempty"`
+	MemoryCount       int      `json:"memory_count,omitempty"`
+	MemoryBytes       int64    `json:"memory_bytes,omitempty"`
+	LastUpdated       string   `json:"last_updated,omitempty"`
+	SavingsBasis      string   `json:"savings_basis,omitempty"`
+	EstimationSource  string   `json:"estimation_source,omitempty"`
 }
 
 type DashboardServer struct {

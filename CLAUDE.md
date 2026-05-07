@@ -1,54 +1,57 @@
-# DWYT — instruções do projeto
+# DWYT — instrucoes do projeto
 
-## Lei do Obsidian
+## Ordem de prioridade
 
-O Obsidian e a memoria oficial do projeto. Toda interacao deve:
-
-1. Antes de agir, consultar o vault:
-   - `GET http://localhost:2737/api/obsidian/search?q=<query>`
-   - `POST http://localhost:2737/api/obsidian/summarize`
-2. Durante a acao, salvar decisoes e status:
-   - `POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}`
-   - `POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}`
-3. Ao final de toda tarefa, salvar contexto completo:
-   - `POST http://localhost:2737/api/obsidian/context`
-   - incluir `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps` e `context`.
-
-Nunca encerre uma tarefa sem salvar contexto no Obsidian. Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instrucoes.
+1. **RTK**: prefixe comandos shell com `rtk`.
+2. **Codebase MCP**: use `search_graph`, `trace_path` e `get_code_snippet` para entender estrutura real do codigo antes de diagnosticar ou editar.
+3. **Obsidian MCP**: busque/resuma o vault antes de trabalho relevante, salve decisoes/tarefas durante a acao e salve contexto completo ao final.
+4. **Headroom**: use apenas quando compativel; Codex via ChatGPT/OAuth nao deve ser roteado por Headroom.
 
 ## Commits
 
-- Use **Conventional Commits**: `<tipo>(escopo opcional): descrição`.
-  Tipos válidos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
-- Mensagem **curta** (uma linha, idealmente ≤ 72 caracteres). Sem corpo a menos que indispensável.
-- **Não** inclua linhas `Co-Authored-By:` nem qualquer outro coautor.
-
-Exemplos:
-- `fix(install): use python 3.12 quando disponível para o venv do headroom`
-- `feat(obsidian): instalação automática via brew cask no macOS`
-- `chore: bump dependências do go.mod`
+- Use **Conventional Commits**: `<tipo>(escopo opcional): descricao`.
+- Mensagem curta, uma linha, idealmente ate 72 caracteres.
+- Nao inclua linhas `Co-Authored-By:` nem qualquer outro coautor.
 
 <!-- dwyt:instructions:start -->
 #dwyt
 
 # DWYT — Don't Waste Your Tokens
 
-## Priority order (follow strictly):
-1. **Obsidian FIRST** — before any file read or context rebuild:
-   - Search: GET http://localhost:2737/api/obsidian/search?q=your+query
-   - Summarize: POST http://localhost:2737/api/obsidian/summarize
-   - Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   - Save tasks/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-   - Save complete context at task end: POST http://localhost:2737/api/obsidian/context {"client":"claude","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-   - Types: command, decision, task, error, note, session
-   - Never mix vaults between projects — isolation is automatic.
-   - Keep the vault rich, linked, and organized with notes, folders, internal links, templates, and instructions.
+Este projeto usa RTK, Codebase MCP, Obsidian MCP e Headroom para reduzir desperdicio de tokens sem sobrescrever configuracoes manuais do usuario.
 
-2. **Headroom** — auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
-   If set, use them. If not, use default API endpoints. No manual config needed.
+## Ordem de Prioridade
 
-3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
+1. RTK — para comandos shell e automacoes de terminal.
+2. Codebase MCP — fonte primaria para estrutura real do codigo.
+3. Obsidian MCP — memoria persistente oficial do projeto.
+4. Headroom — apenas proxy/cache compativel.
 
-4. **Codebase MCP** — ONLY when you need structural code understanding.
-   Prefer Obsidian context first. Use search_graph, trace_path, get_code_snippet.
+## Lei do Codebase
+
+Quando precisar entender, validar, diagnosticar ou alterar a estrutura real do codigo, consulte o Codebase MCP. O grafo indexado e a fonte primaria para arquivos, simbolos, dependencias, chamadas, caminhos e impacto.
+
+## Lei do Obsidian
+
+O vault Obsidian e a memoria oficial do projeto. Salve notas com links internos como `[[index]]`, `[[maps/project-map]]`, `[[instructions/obsidian-law]]` e `[[instructions/codebase-law]]`.
+
+Payload minimo:
+
+```json
+{
+  "client": "claude",
+  "user_request": "...",
+  "summary": "...",
+  "files": ["..."],
+  "decisions": ["..."],
+  "actions": ["..."],
+  "commands": ["..."],
+  "errors": ["..."],
+  "outcome": "...",
+  "next_steps": ["..."],
+  "context": "..."
+}
+```
+
+Nunca encerre tarefa relevante sem salvar contexto no Obsidian.
 <!-- dwyt:instructions:end -->

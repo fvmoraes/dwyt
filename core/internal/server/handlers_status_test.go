@@ -28,3 +28,29 @@ func TestEstimateObsidianTokenSavings(t *testing.T) {
 		t.Fatalf("expected Obsidian MCP token cost, got %d", used)
 	}
 }
+
+func TestCalculateGlobalTokenSavingsUsesLocalEstimates(t *testing.T) {
+	details := map[string]*ToolDetail{
+		"codebase-memory-mcp": {
+			TokensSaved:       1000,
+			TokensUsed:        200,
+			WithoutDWYTTokens: 1200,
+			WithDWYTTokens:    200,
+			EstimationSource:  "local_estimate:codebase_graph_metadata",
+		},
+		"obsidian": {
+			TokensSaved:       500,
+			TokensUsed:        100,
+			WithoutDWYTTokens: 600,
+			WithDWYTTokens:    100,
+			EstimationSource:  "local_estimate:obsidian_markdown_bytes",
+		},
+	}
+	global := calculateGlobalTokenSavings(details)
+	if global.TokensSaved != 1500 || global.WithoutDWYTTokens != 1800 || global.WithDWYTTokens != 300 {
+		t.Fatalf("unexpected global savings: %#v", global)
+	}
+	if global.EstimationSource == "" {
+		t.Fatal("expected estimation source for local estimates")
+	}
+}

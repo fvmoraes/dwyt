@@ -1,37 +1,37 @@
 # Obsidian Law
 
-The Obsidian vault is the official memory of every DWYT project. Agents must treat it as the durable source of project context, decisions, task state, and handoff notes.
+The Obsidian vault is the official project memory in DWYT. Agents must use it to recover context, preserve decisions, track work, and hand off useful state to future agents.
 
-## Mandatory Agent Workflow
+Obsidian is memory, not code structure. For code symbols, dependencies, call paths, and impact analysis, follow the [Codebase Law](CODEBASE-LAW.md).
 
-Every interaction must follow this order:
+## Mandatory Workflow
 
-1. **Before acting**, consult Obsidian for context.
+1. **Before relevant work**, consult the vault.
    - Search existing notes: `GET /api/obsidian/search?q=<query>`
-   - Rebuild/read the current vault summary: `POST /api/obsidian/summarize`
+   - Rebuild or read the current summary: `POST /api/obsidian/summarize`
+   - Look for decisions, open tasks, debug notes, and previous context.
 
-2. **During work**, save important project state.
-   - Technical decisions and ADRs: `POST /api/obsidian/save` with `type: "decision"`
+2. **During work**, save meaningful state.
+   - Decisions and ADRs: `POST /api/obsidian/save` with `type: "decision"`
    - Tasks, progress, and status: `POST /api/obsidian/save` with `type: "task"`
-   - Errors, commands, sessions, and notes: use the matching entry type when useful.
+   - Investigation notes and failures: `POST /api/obsidian/save` with `type: "debug"`
+   - General notes: `POST /api/obsidian/save` with `type: "note"`
 
-3. **At the end of every task**, save complete context.
+3. **At the end of relevant work**, save complete context.
    - Endpoint: `POST /api/obsidian/context`
-   - Required fields: `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
+   - Required fields: `client`, `user_request`, `summary`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
 
-Never finish a task without saving context to Obsidian.
+Never finish a relevant task without saving context to Obsidian. If the MCP or API is unavailable, do not block the task or recreate vaults; report the failure and retry saving context when the service is available.
 
 ## Vault Quality Standard
 
-The vault must be rich, interlinked, and organized enough for a future agent to continue without reconstructing history.
+Vault files should be useful inside Obsidian itself:
 
-Use:
-
-- notes with clear headings and frontmatter;
-- folders for knowledge, logs, sessions, instructions, templates, and maps;
-- internal links such as `[[decisions]]`, `[[tasks]]`, and `[[instructions/obsidian-law]]`;
-- templates for decisions, tasks, and session context;
-- enough detail to explain why decisions were made, not only what changed.
+- use clear headings and frontmatter;
+- prefer internal links such as `[[instructions/obsidian-law]]`, `[[instructions/codebase-law]]`, `[[maps/project-map]]`, `[[decisions/index]]`, and `[[tasks/index]]`;
+- keep decisions, tasks, debug notes, and context in their folders;
+- explain why decisions were made, not only what changed;
+- avoid loose, unlinked files when a map or index should reference them.
 
 ## Default Vault Structure
 
@@ -41,16 +41,23 @@ New DWYT vaults are seeded with:
 obsidian/
 ├── index.md
 ├── context.md
-├── decisions.md
-├── tasks.md
 ├── instructions/
-│   └── obsidian-law.md
+│   ├── obsidian-law.md
+│   └── codebase-law.md
 ├── maps/
 │   └── project-map.md
 ├── templates/
 │   ├── decision-template.md
 │   ├── task-template.md
 │   └── session-context-template.md
+├── decisions/
+│   └── index.md
+├── tasks/
+│   └── index.md
+├── debug/
+│   └── index.md
+├── context/
+│   └── *.md
 ├── knowledge/
 └── logs/
     ├── sessions/
@@ -58,9 +65,15 @@ obsidian/
     └── commands/
 ```
 
+Legacy `decisions.md` and `tasks.md` may exist as compatibility pointers, but new entries are routed to `decisions/index.md` and `tasks/index.md`.
+
+## Persistence Rule
+
+Project vaults live under `~/.dwyt/projects/<id>/obsidian/`. Install, repair, reinstall, clean, reset, and uninstall flows must preserve `~/.dwyt/projects/` and must never delete vaults, notes, project memories, or history automatically.
+
 ## Context Payload
 
-Agents should save a complete context payload like this:
+Agents should save final context like this:
 
 ```json
 {
@@ -74,6 +87,6 @@ Agents should save a complete context payload like this:
   "errors": ["..."],
   "outcome": "...",
   "next_steps": ["..."],
-  "context": "Important details for future agents..."
+  "context": "Use links such as [[decisions/index]] and [[instructions/codebase-law]]."
 }
 ```

@@ -31,9 +31,18 @@ func (ds *DashboardServer) apiStatus(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {
+	projectPath := c.Query("path")
+	if projectPath == "" {
+		projectPath = ds.StartCwd
+	}
+	details := ds.toolDetails(projectPath)
 	c.JSON(200, gin.H{
-		"rtk":      status.GetRTKMetrics(ds.DwytBin),
-		"headroom": status.GetHeadroomMetrics(),
+		"rtk":          status.GetRTKMetrics(ds.DwytBin),
+		"headroom":     status.GetHeadroomMetrics(),
+		"codebase":     details["codebase-memory-mcp"],
+		"obsidian":     details["obsidian"],
+		"tool_details": details,
+		"global":       calculateGlobalTokenSavings(details),
 	})
 }
 
@@ -101,13 +110,67 @@ func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
 		projectPath = ds.StartCwd
 	}
 
-	out := map[string]*ToolDetail{
+	c.JSON(200, ds.toolDetails(projectPath))
+}
+
+func (ds *DashboardServer) toolDetails(projectPath string) map[string]*ToolDetail {
+	return map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(),
 		"obsidian":            ds.detailObsidian(),
 	}
-	c.JSON(200, out)
+}
+
+type GlobalTokenSavings struct {
+	WithoutDWYTTokens int64  `json:"without_dwyt_tokens"`
+	WithDWYTTokens    int64  `json:"with_dwyt_tokens"`
+	TokensSaved       int64  `json:"tokens_saved"`
+	EstimationSource  string `json:"estimation_source,omitempty"`
+}
+
+func calculateGlobalTokenSavings(details map[string]*ToolDetail) GlobalTokenSavings {
+	var out GlobalTokenSavings
+	hasLocalEstimates := false
+	for _, d := range details {
+		if d == nil || d.TokensSaved <= 0 {
+			continue
+		}
+		out.TokensSaved += d.TokensSaved
+
+		without := d.WithoutDWYTTokens
+		if without <= 0 {
+			switch {
+			case d.PctSaved > 0:
+				without = int64(float64(d.TokensSaved) / (d.PctSaved / 100))
+			case d.CompressionPct > 0:
+				without = int64(float64(d.TokensSaved) / (d.CompressionPct / 100))
+			case d.TokensUsed > 0:
+				without = d.TokensSaved + d.TokensUsed
+			default:
+				without = d.TokensSaved * 2
+			}
+		}
+		if without < d.TokensSaved {
+			without = d.TokensSaved
+		}
+		with := d.WithDWYTTokens
+		if with <= 0 {
+			with = without - d.TokensSaved
+		}
+		if with < 0 {
+			with = 0
+		}
+		out.WithoutDWYTTokens += without
+		out.WithDWYTTokens += with
+		if strings.HasPrefix(d.EstimationSource, "local_estimate") {
+			hasLocalEstimates = true
+		}
+	}
+	if hasLocalEstimates {
+		out.EstimationSource = "rtk/headroom real metrics plus local estimates for codebase/obsidian"
+	}
+	return out
 }
 
 // Context handler and helpers moved to handlers_context.go
@@ -209,10 +272,8 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 		if pj, err := ds.Store.GetProjectByPath(projectPath); err == nil && pj.IndexedAt != nil {
 			d.IndexedNodes = int64(pj.Nodes)
 			d.IndexedEdges = int64(pj.Edges)
-			d.TokensSaved, d.TokensUsed = estimateCodebaseTokenSavings(pj.Nodes, pj.Edges)
-			if d.TokensSaved > 0 {
-				d.SavingsBasis = "estimated from code graph nodes and edges avoided by MCP lookup"
-			}
+			saved, used := estimateCodebaseTokenSavings(pj.Nodes, pj.Edges)
+			applyTokenEstimate(d, saved, used, "local_estimate:codebase_graph_metadata", "estimated from code graph nodes and edges avoided by MCP lookup")
 		}
 	}
 	return d
@@ -321,10 +382,8 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	}
 	if totalBytes, ok := stats["total_bytes"].(int64); ok {
 		d.MemoryBytes = totalBytes
-		d.TokensSaved, d.TokensUsed = estimateObsidianTokenSavings(d.MemoryCount, totalBytes)
-		if d.TokensSaved > 0 {
-			d.SavingsBasis = "estimated from vault markdown bytes avoided by Obsidian MCP reuse"
-		}
+		saved, used := estimateObsidianTokenSavings(d.MemoryCount, totalBytes)
+		applyTokenEstimate(d, saved, used, "local_estimate:obsidian_markdown_bytes", "estimated from vault markdown bytes avoided by Obsidian MCP reuse")
 	}
 	if lu, ok := stats["last_updated"].(string); ok {
 		d.LastUpdated = lu
@@ -338,6 +397,17 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 		d.UptimeLabel = "online"
 	}
 	return d
+}
+
+func applyTokenEstimate(d *ToolDetail, saved, used int64, source, basis string) {
+	d.TokensSaved = saved
+	d.TokensUsed = used
+	d.WithDWYTTokens = used
+	d.WithoutDWYTTokens = saved + used
+	d.EstimationSource = source
+	if saved > 0 {
+		d.SavingsBasis = basis
+	}
 }
 
 func estimateCodebaseTokenSavings(nodes, edges int) (saved, used int64) {

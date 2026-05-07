@@ -11,6 +11,8 @@ export interface ToolInfo {
 export interface ToolDetail {
   tokens_saved: number
   tokens_used?: number
+  without_dwyt_tokens?: number
+  with_dwyt_tokens?: number
   uptime_secs: number
   uptime_label: string
   repos: string[] | null
@@ -25,6 +27,7 @@ export interface ToolDetail {
   memory_bytes?: number
   last_updated?: string
   savings_basis?: string
+  estimation_source?: string
 }
 
 export type Details = Record<string, ToolDetail>

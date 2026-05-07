@@ -157,7 +157,7 @@ func pollHeadroom(dwytBin string) ToolStatus {
 		}
 		ts.Status = StateOffline
 		ts.State = StateOffline
-		ts.Details = "installed (start on demand)"
+		ts.Details = "installed (launch on demand)"
 	}
 	return ts
 }

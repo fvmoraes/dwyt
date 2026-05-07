@@ -17,6 +17,7 @@ type PowerStatus struct {
 	PowerDir         string          `json:"power_dir"`
 	KiroLink         string          `json:"kiro_link"`
 	ActivationStatus string          `json:"activation_status"`
+	ActivationHint   string          `json:"activation_hint,omitempty"`
 	MCPs             map[string]bool `json:"mcps"`
 	UpdatedAt        string          `json:"updated_at"`
 	Errors           []string        `json:"errors,omitempty"`
@@ -50,6 +51,7 @@ func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
 	if err := RegisterWithKiro(powerDir); err != nil {
 		status.Errors = append(status.Errors, err.Error())
 		status.ActivationStatus = "manual_activation_required"
+		status.ActivationHint = "Add power from local path: " + powerDir
 		return status, nil
 	}
 
@@ -85,6 +87,7 @@ func Status(dwytHome, dwytBin string) *PowerStatus {
 		}
 		if st.ActivationStatus != "missing" {
 			st.ActivationStatus = "manual_activation_required"
+			st.ActivationHint = "Add power from local path: " + powerDir
 		}
 	} else if st.Installed {
 		st.ActivationStatus = "linked"
@@ -127,48 +130,53 @@ func ValidateMCPBinaries(dwytBin string) map[string]bool {
 
 func GeneratePowerMD(dwytBin, projectPath string, mcps map[string]bool) string {
 	return fmt.Sprintf(`---
-name: "dwyt-power"
-displayName: "DWYT Power"
-description: "Use DWYT project memory, code graph, RTK, and Headroom to reduce token usage while working in this repository."
-keywords: ["dwyt", "codebase", "obsidian", "mcp", "memory", "project memory", "token savings", "repo analysis", "arquitetura", "refatoracao", "debugging", "documentacao", "contexto do projeto"]
-author: "DWYT"
+name: dwyt-power
+displayName: DWYT Project Context
+description: DWYT integration for Codebase MCP, Obsidian memory, RTK command compression and compatible Headroom usage.
+keywords:
+  - dwyt
+  - codebase
+  - obsidian
+  - mcp
+  - memory
+  - project memory
+  - token savings
+  - repo analysis
+  - arquitetura
+  - refatoracao
+  - debugging
+  - documentacao
+  - contexto do projeto
+author: DWYT
 ---
 
-# DWYT Power
+# DWYT Project Context
 
-DWYT (Don't Waste Your Tokens) is a local orchestrator that reduces AI token consumption by managing Obsidian memory, the Codebase graph, RTK terminal compression, and the Headroom API proxy.
+DWYT (Don't Waste Your Tokens) is a local orchestrator that reduces AI token consumption by combining RTK terminal compression, the Codebase graph, Obsidian project memory, and compatible Headroom API proxy usage.
+
+## Priority Order
+
+1. RTK - prefix shell commands with `+"`rtk`"+` when terminal output enters the conversation.
+2. Codebase MCP - before technical diagnosis, refactors, or edits that depend on real code structure, validate/index the project and use `+"`search_graph`"+`, `+"`trace_path`"+`, and `+"`get_code_snippet`"+`.
+3. Obsidian MCP - before relevant work, search/summarize the project vault; during work save decisions/tasks; at the end save complete context.
+4. Headroom - use only when the client supports proxy/base-url configuration. Never route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
+
+## Codebase Law
+
+When you need to understand, validate, diagnose, or alter code structure, use the Codebase MCP as the primary source of truth. Do not rely on file names or memory alone. Prefer graph tools over manual grep/glob for symbols, relationships, dependencies, calls, and impact analysis.
+
+## Obsidian Law
+
+The Obsidian vault is the official durable memory for this project. Save notes with internal links such as `+"`[[decisions]]`"+`, `+"`[[tasks]]`"+`, `+"`[[instructions/obsidian-law]]`"+`, and `+"`[[instructions/codebase-law]]`"+`.
+
+Required completion payload for `+"`POST http://localhost:2737/api/obsidian/context`"+`: user request, summary, files, decisions, actions, commands, errors, outcome, next steps, and context for future agents.
 
 ## Tools
 
-### Obsidian - Project Memory (ALWAYS FIRST)
-Persistent markdown vault per project. It is the official project memory.
-- Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-- Summarize: POST http://localhost:2737/api/obsidian/summarize
-- Save:   POST http://localhost:2737/api/obsidian/save
-- Context: POST http://localhost:2737/api/obsidian/context
-- Types:  decision, task, note, error, command, session
-- Law: search/summarize before acting, save decisions/tasks during work, and save complete context at task end.
-- Vault quality: keep notes organized with folders, internal links, templates, and instructions.
-
-### Codebase - Code Knowledge Graph (ON DEMAND)
-Structural exploration of the codebase. Use only for architecture questions.
-- MCP tools: search_graph, trace_path, get_code_snippet
-- Start: POST http://localhost:2737/api/services/codebase/start
-
-### RTK - Terminal Compression (ALWAYS)
-Prefix all shell commands with rtk to reduce output before it enters context.
-- Usage: rtk git status, rtk go test ./...
-
-### Headroom - API Proxy (AUTOMATIC)
-Compresses API calls. Auto-detected via env vars.
-- Active when: OPENAI_BASE_URL or ANTHROPIC_BASE_URL point to 127.0.0.1:8787
-- Exception: Codex authenticated through ChatGPT/OAuth must not be routed through Headroom.
-
-## Priority Order
-1. Obsidian FIRST - search and summarize the vault before any action
-2. Headroom - auto via env vars
-3. RTK - prefix all shell commands
-4. Codebase - structural exploration only
+- RTK: `+"`rtk git status`"+`, `+"`rtk go test ./...`"+`, `+"`rtk npm run build`"+`
+- Codebase MCP: `+"`search_graph`"+`, `+"`trace_path`"+`, `+"`get_code_snippet`"+`
+- Obsidian MCP: `+"`/api/obsidian/search`"+`, `+"`/api/obsidian/summarize`"+`, `+"`/api/obsidian/save`"+`, `+"`/api/obsidian/context`"+`
+- Headroom: active only when compatible env vars point to the local proxy.
 
 ## Project
 
@@ -302,12 +310,20 @@ inclusion: always
 
 ## Priority Order
 
-1. Obsidian FIRST - before acting, search and summarize the project vault:
-   GET http://localhost:2737/api/obsidian/search?q=<your query>
-   POST http://localhost:2737/api/obsidian/summarize
-2. Headroom - auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL.
-3. RTK - prefix all shell commands with rtk.
-4. Codebase MCP - only for structural code exploration.
+1. RTK - prefix shell commands with rtk whenever terminal output enters context.
+2. Codebase MCP - use the graph before diagnosing, refactoring, or editing code structure.
+3. Obsidian MCP - search/summarize memory before relevant work and save context through the task.
+4. Headroom - use only when compatible env vars point to the local proxy.
+
+## Codebase Law
+
+When code structure matters, validate/index the project and use search_graph, trace_path, and get_code_snippet before proposing or applying changes.
+
+## Obsidian Law
+
+Before relevant work:
+GET http://localhost:2737/api/obsidian/search?q=<your query>
+POST http://localhost:2737/api/obsidian/summarize
 
 During work, save decisions and task/status updates to Obsidian:
 POST http://localhost:2737/api/obsidian/save
@@ -340,12 +356,12 @@ Vault root: ~/.dwyt/projects/<id>/obsidian/
 - Status: GET http://localhost:2737/api/obsidian/status
 
 ## Rules
-- Always search and summarize Obsidian before acting.
+- Search and summarize Obsidian before relevant work.
 - Save important decisions as type `+"`decision`"+` during work.
 - Save task/status updates as type `+"`task`"+` during work.
 - Always save complete conversation context at the end of each task.
 - Include user request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
-- Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
+- Keep the vault rich, interlinked, and organized with folders, links such as [[index]], [[instructions/obsidian-law]], and [[instructions/codebase-law]], templates, and instructions.
 - Never delete vault files.
 `, projectPath)
 }
@@ -357,12 +373,19 @@ inclusion: manual
 
 # Codebase - Code Knowledge Graph
 
-Use only when you need to understand code structure. Prefer Obsidian context first.
+Use Codebase MCP whenever you need to understand, validate, diagnose, or alter real code structure. It is the source of truth for symbols, calls, dependencies, relationships, and impact.
 
 ## MCP Tools
 - search_graph
 - trace_path
 - get_code_snippet
+
+## Rules
+- Validate whether the project is indexed before structural analysis.
+- Prefer search_graph over grep/glob for symbols, components, handlers, routes, and modules.
+- Use trace_path for callers, dependencies, flows, and blast-radius checks.
+- Use get_code_snippet before applying code edits.
+- Do not remove, rename, or move important code without tracing impact.
 
 ## API
 - Start: POST http://localhost:2737/api/services/codebase/start

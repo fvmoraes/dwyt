@@ -105,6 +105,10 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		"templates",
 		"instructions",
 		"maps",
+		"decisions",
+		"tasks",
+		"debug",
+		"context",
 		".obsidian",
 	}
 	for _, d := range dirs {
@@ -153,19 +157,20 @@ Welcome to the Project Brain. This vault contains the knowledge base for your pr
 
 ## Structure
 - [[context]] — Full project summary
-- [[decisions]] — Architecture and design decisions
-- [[tasks]] — Active tasks and progress
+- [[decisions/index|Decisions]] — Architecture and design decisions
+- [[tasks/index|Tasks]] — Active tasks and progress
+- [[debug/index|Debug]] — Errors, investigations, and root-cause notes
+- [[context/index|Context]] — Complete task/session handoffs
 - [[instructions/obsidian-law|Obsidian Law]] — Mandatory agent memory rules
+- [[instructions/codebase-law|Codebase Law]] — Mandatory code graph rules
 - [[maps/project-map|Project Map]] — Navigation hub for future agents
 - **knowledge/** — Knowledge base articles
-- **logs/sessions/** — Complete task/session contexts
-- **logs/errors/** — Error records
 - **logs/commands/** — Command records
 - **templates/** — Reusable note templates
 
 ## Agent Rule
 
-Before acting, search and summarize this vault. During work, save decisions and task status. At the end of every task, save complete context.
+For shell commands use RTK. For code structure use [[instructions/codebase-law|Codebase Law]]. For memory use [[instructions/obsidian-law|Obsidian Law]]. Before losing context, save a linked handoff in [[context/index]].
 `,
 		"decisions.md": `---
 type: decisions
@@ -175,7 +180,7 @@ tags: [decisions, architecture]
 
 # Decisions Log
 
-## Recent Decisions
+This legacy root note points to [[decisions/index]].
 `,
 		"tasks.md": `---
 type: tasks
@@ -185,7 +190,7 @@ tags: [tasks, progress]
 
 # Tasks
 
-## Active
+This legacy root note points to [[tasks/index]].
 `,
 		filepath.Join("instructions", "obsidian-law.md"): `---
 type: instruction
@@ -195,17 +200,85 @@ tags: [dwyt, obsidian, agents, memory]
 
 # Obsidian Law
 
-The Obsidian vault is the official project memory.
+The Obsidian vault is the official project memory. It works together with [[instructions/codebase-law|Codebase Law]] and [[maps/project-map|Project Map]].
 
 ## Mandatory workflow
 
-1. Before acting, search existing notes and rebuild/read the vault summary.
+1. Before relevant work, search existing notes and rebuild/read the vault summary.
 2. During work, save important decisions as ` + "`decision`" + ` entries and task/status updates as ` + "`task`" + ` entries.
-3. At the end of every task, save complete context with request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
+3. At the end of every task, save complete context in [[context/index]] with request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
 
 ## Vault quality
 
-Keep the vault rich, linked, and organized. Prefer internal links, folders, templates, clear headings, and enough context for a future agent to continue without reconstructing history.
+Keep the vault rich, linked, and organized. Prefer internal links, folders, templates, clear headings, and enough context for a future agent to continue without reconstructing history. Never delete vault files during install, uninstall, reinstall, clean, repair, or reset flows.
+`,
+		filepath.Join("instructions", "codebase-law.md"): `---
+type: instruction
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, codebase, agents, graph]
+---
+
+# Codebase Law
+
+Use the Codebase MCP whenever you need to understand, validate, diagnose, refactor, or alter the real code structure.
+
+## Mandatory workflow
+
+1. Validate whether the project is indexed.
+2. Use search_graph to find symbols, routes, components, modules, handlers, and relationships.
+3. Use trace_path for callers, dependencies, data flow, and impact.
+4. Use get_code_snippet before proposing or applying code edits.
+5. Save important findings and follow-up context to [[context/index]] and [[decisions/index]] through [[instructions/obsidian-law|Obsidian Law]].
+
+The graph is the primary source for files, symbols, dependencies, calls, paths, and impact. Avoid manual grep/glob as the first strategy when Codebase MCP is available.
+`,
+		filepath.Join("decisions", "index.md"): `---
+type: decisions
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, decisions, architecture]
+---
+
+# Decisions
+
+Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]
+
+## Recent Decisions
+`,
+		filepath.Join("tasks", "index.md"): `---
+type: tasks
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, tasks, progress]
+---
+
+# Tasks
+
+Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]
+
+## Active
+`,
+		filepath.Join("debug", "index.md"): `---
+type: debug
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, debug]
+---
+
+# Debug
+
+Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]
+
+## Investigations
+`,
+		filepath.Join("context", "index.md"): `---
+type: context
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, context, handoff]
+---
+
+# Context
+
+Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]
+
+Complete task/session handoffs are saved in this folder.
 `,
 		filepath.Join("maps", "project-map.md"): `---
 type: map
@@ -217,9 +290,12 @@ tags: [dwyt, map, navigation]
 
 - [[index|Project Index]]
 - [[context|Current Summary]]
-- [[decisions|Decision Log]]
-- [[tasks|Task Log]]
+- [[decisions/index|Decision Log]]
+- [[tasks/index|Task Log]]
+- [[debug/index|Debug Log]]
+- [[context/index|Context Handoffs]]
 - [[instructions/obsidian-law|Obsidian Law]]
+- [[instructions/codebase-law|Codebase Law]]
 - [[templates/decision-template|Decision Template]]
 - [[templates/task-template|Task Template]]
 - [[templates/session-context-template|Session Context Template]]
@@ -230,6 +306,8 @@ tags: [template, decision]
 ---
 
 # Decision - {{title}}
+
+Links: [[decisions/index]] [[maps/project-map]] [[instructions/codebase-law]] [[instructions/obsidian-law]]
 
 ## Context
 
@@ -245,6 +323,8 @@ tags: [template, task]
 ---
 
 # Task - {{title}}
+
+Links: [[tasks/index]] [[maps/project-map]] [[instructions/codebase-law]] [[instructions/obsidian-law]]
 
 ## Status
 
@@ -262,6 +342,8 @@ tags: [template, session, context]
 ---
 
 # Session Context - {{date}}
+
+Links: [[context/index]] [[maps/project-map]] [[instructions/codebase-law]] [[instructions/obsidian-law]]
 
 ## User Request
 
@@ -370,7 +452,7 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 		return pb.appendToDecisionsLogLocked(content, now)
 	case "task":
 		return pb.appendToTasksLogLocked(content, now)
-	case "error", "command", "session":
+	case "error", "debug", "command", "session":
 		return pb.saveToLogsLocked(entryType, content, tags, now)
 	default:
 		return pb.saveToKnowledgeLocked(entryType, content, tags, now)
@@ -391,7 +473,7 @@ func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string
 	now := time.Now()
 	pb.UpdatedAt = now
 
-	dir := filepath.Join(pb.brainDir, "logs", "sessions")
+	dir := filepath.Join(pb.brainDir, "context")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("obsidian context save: %w", err)
 	}
@@ -406,6 +488,7 @@ func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string
 
 	writeContextFrontmatter(f, snapshot, pb, now)
 	fmt.Fprintf(f, "# Conversation Context - %s\n\n", now.Format("2006-01-02 15:04"))
+	writeVaultLinks(f)
 	fmt.Fprintf(f, "Project: %s\n\nPath: %s\n\nClient: %s\n\n", pb.ProjectName, pb.ProjectPath, snapshot.Client)
 	if snapshot.ConversationID != "" {
 		fmt.Fprintf(f, "Conversation: %s\n\n", snapshot.ConversationID)
@@ -438,19 +521,27 @@ func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string
 }
 
 func (pb *ProjectObsidian) appendToDecisionsLogLocked(content string, now time.Time) error {
-	path := filepath.Join(pb.brainDir, "decisions.md")
-	entry := fmt.Sprintf("\n### %s\n\n%s\n\n*%s*\n\n---\n", now.Format("2006-01-02 15:04"), content, now.Format(time.RFC3339))
+	path := filepath.Join(pb.brainDir, "decisions", "index.md")
+	entry := fmt.Sprintf("\n### %s\n\nLinks: [[decisions/index]] [[maps/project-map]] [[instructions/codebase-law]] [[instructions/obsidian-law]]\n\n%s\n\n*%s*\n\n---\n", now.Format("2006-01-02 15:04"), content, now.Format(time.RFC3339))
 	return appendFile(path, entry)
 }
 
 func (pb *ProjectObsidian) appendToTasksLogLocked(content string, now time.Time) error {
-	path := filepath.Join(pb.brainDir, "tasks.md")
-	entry := fmt.Sprintf("\n- [ ] %s *(added %s)*\n", content, now.Format("2006-01-02 15:04"))
+	path := filepath.Join(pb.brainDir, "tasks", "index.md")
+	entry := fmt.Sprintf("\n- [ ] %s *(added %s)* — [[tasks/index]] [[maps/project-map]]\n", content, now.Format("2006-01-02 15:04"))
 	return appendFile(path, entry)
 }
 
 func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []string, now time.Time) error {
 	dir := filepath.Join(pb.brainDir, "logs")
+	switch entryType {
+	case "error", "debug":
+		dir = filepath.Join(pb.brainDir, "debug")
+	case "command":
+		dir = filepath.Join(pb.brainDir, "logs", "commands")
+	case "session":
+		dir = filepath.Join(pb.brainDir, "logs", "sessions")
+	}
 	os.MkdirAll(dir, 0755)
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
@@ -460,7 +551,9 @@ func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []st
 	}
 	defer f.Close()
 	writeFrontmatter(f, entryType, tags, now)
-	fmt.Fprintf(f, "# %s\n\n%s\n", entryType, content)
+	fmt.Fprintf(f, "# %s\n\n", entryType)
+	writeVaultLinks(f)
+	fmt.Fprintf(f, "%s\n", content)
 	return nil
 }
 
@@ -479,7 +572,9 @@ func (pb *ProjectObsidian) saveToKnowledgeLocked(entryType, content string, tags
 	if len(title) > 60 {
 		title = title[:57] + "..."
 	}
-	fmt.Fprintf(f, "# %s\n\n%s\n", title, content)
+	fmt.Fprintf(f, "# %s\n\n", title)
+	writeVaultLinks(f)
+	fmt.Fprintf(f, "%s\n", content)
 	return nil
 }
 
@@ -540,6 +635,14 @@ func detectType(brainDir, path string) string {
 		return "decision"
 	case base == "tasks.md":
 		return "task"
+	case strings.HasPrefix(rel, "decisions/"):
+		return "decision"
+	case strings.HasPrefix(rel, "tasks/"):
+		return "task"
+	case strings.HasPrefix(rel, "debug/"):
+		return "debug"
+	case strings.HasPrefix(rel, "context/"):
+		return "context"
 	case strings.HasPrefix(rel, "logs/"):
 		return "log"
 	case strings.HasPrefix(rel, "knowledge/"):
@@ -793,9 +896,9 @@ func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Tim
 
 func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectObsidian, date time.Time) {
 	fmt.Fprintf(f, "---\n")
-	fmt.Fprintf(f, "tags: [dwyt, session, context, conversation]\n")
+	fmt.Fprintf(f, "tags: [dwyt, context, session, conversation]\n")
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprintf(f, "type: session\n")
+	fmt.Fprintf(f, "type: context\n")
 	fmt.Fprintf(f, "client: %q\n", snapshot.Client)
 	fmt.Fprintf(f, "project: %q\n", pb.ProjectName)
 	fmt.Fprintf(f, "project_path: %q\n", pb.ProjectPath)
@@ -803,6 +906,11 @@ func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectOb
 		fmt.Fprintf(f, "conversation_id: %q\n", snapshot.ConversationID)
 	}
 	fmt.Fprintf(f, "---\n\n")
+}
+
+func writeVaultLinks(f *os.File) {
+	fmt.Fprintln(f, "Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]")
+	fmt.Fprintln(f)
 }
 
 func writeMarkdownSection(f *os.File, title, content string) {

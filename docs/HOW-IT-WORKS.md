@@ -143,23 +143,29 @@ dwyt daemon
 
 ```
 ~/.dwyt/projects/<sha256[:12]>/obsidian/
-├── index.md              # project index with structure overview
-├── context.md            # full summary (auto-rebuilt from all files)
-├── decisions.md          # architecture decisions (append-only log)
-├── tasks.md              # active tasks (append-only checklist)
+├── index.md                  # project index with structure overview
+├── context.md                # full summary, rebuilt from all files
 ├── instructions/
-│   └── obsidian-law.md   # mandatory agent memory workflow
+│   ├── obsidian-law.md       # mandatory memory workflow
+│   └── codebase-law.md       # mandatory code graph workflow
 ├── maps/
-│   └── project-map.md    # navigation hub with internal links
+│   └── project-map.md        # navigation hub with internal links
 ├── templates/
 │   ├── decision-template.md
 │   ├── task-template.md
 │   └── session-context-template.md
-├── knowledge/            # knowledge base articles (timestamped files)
+├── decisions/
+│   └── index.md              # architecture decisions log
+├── tasks/
+│   └── index.md              # active task/status log
+├── debug/
+│   └── index.md              # investigation notes and failures
+├── context/                  # complete task/session context snapshots
+├── knowledge/                # knowledge base articles
 └── logs/
-    ├── sessions/         # full task/session context
-    ├── errors/           # error records
-    └── commands/         # command records
+    ├── sessions/             # legacy session records
+    ├── errors/               # legacy error records
+    └── commands/             # command records
 ```
 
 ### Obsidian Law
@@ -168,11 +174,26 @@ The vault is the official memory of the project. Every AI agent must:
 
 1. Search and summarize Obsidian before acting.
 2. Save technical decisions as `decision` and task/status updates as `task` during work.
-3. Save complete context at the end of every task via `/api/obsidian/context`.
+3. Save debug/investigation notes as `debug` when useful.
+4. Save complete context at the end of every relevant task via `/api/obsidian/context`.
 
-Required context fields: `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
+Required context fields: `client`, `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
 
-The vault should remain rich and navigable through folders, internal links, templates, instructions, and project maps.
+The vault should remain rich and navigable through folders, internal links, templates, instructions, and project maps. New generated files include links such as `[[instructions/obsidian-law]]`, `[[instructions/codebase-law]]`, `[[maps/project-map]]`, `[[decisions/index]]`, and `[[tasks/index]]`.
+
+Legacy `decisions.md` and `tasks.md` can exist as compatibility pointers, but new entries are routed to folder indexes.
+
+### Codebase Law
+
+The Codebase MCP graph is the primary source for current code structure. Agents should use it before structural diagnosis, refactors, bug fixes, and impact analysis:
+
+1. Validate the project index.
+2. Use `search_graph` for symbols and relationships.
+3. Use `trace_path` for calls, dependencies, data flow, and impact.
+4. Use `get_code_snippet` for exact source before editing.
+5. Validate changes and save final context in Obsidian.
+
+Shell search remains appropriate for docs, configs, literal strings, and cases where the graph is unavailable.
 
 ### File Format (Frontmatter YAML)
 
@@ -206,9 +227,12 @@ SQLite provides embedded persistence without external dependencies...
 
 | Entry Type | Destination File |
 |-----------|-----------------|
-| `decision` | Append to `decisions.md` |
-| `task` | Append to `tasks.md` |
-| `error`, `command`, `session` | New file in `logs/` |
+| `decision` | Append to `decisions/index.md` |
+| `task` | Append to `tasks/index.md` |
+| `debug`, `error` | New file in `debug/` |
+| `command` | New file in `logs/commands/` |
+| `session` | New file in `logs/sessions/` |
+| `context` | New file in `context/` |
 | `note` | New file in `knowledge/` |
 
 ---
@@ -276,7 +300,7 @@ The MCP registry manages MCP server configurations for AI clients (Claude Deskto
 
 - **Load** — reads `mcp-registry.json` from `~/.dwyt/config/`, ensures default entries exist
 - **Save** — persists changes to disk
-- **ConfigureMCP** — writes MCP configs for all enabled servers to Claude Desktop, VSCode, and project AI client configs (`.mcp.json`, `.claude/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
+- **ConfigureMCP** — writes MCP configs for all enabled servers to Claude Desktop, VSCode, and project AI client configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
 - **ConfigureMCPByName(name)** — targets a single MCP server for configuration
 - **Toggle(name, enabled)** — enables/disables a server without removing it
 
@@ -292,7 +316,7 @@ When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards
 1. Saves the registry to disk
 2. Creates backup of current entries
 3. Writes Claude Desktop config → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/claude-desktop/` (Linux)
-4. Writes per-project MCP configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
+4. Writes per-project MCP configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
 5. Rolls back on failure
 
 ### API Endpoints
@@ -332,9 +356,38 @@ Generated files:
 RTK and Headroom are not MCP servers in the Power. They are steering instructions
 because RTK is a CLI and Headroom is an API proxy.
 
+The Power frontmatter is:
+
+```yaml
+---
+name: dwyt-power
+displayName: DWYT Project Context
+description: DWYT integration for Codebase MCP, Obsidian memory, RTK command compression and compatible Headroom usage.
+keywords:
+  - dwyt
+  - codebase
+  - obsidian
+  - mcp
+  - memory
+  - project memory
+  - token savings
+  - repo analysis
+  - arquitetura
+  - refatoracao
+  - debugging
+  - documentacao
+  - contexto do projeto
+author: DWYT
+---
+```
+
+For workspace MCP, DWYT writes `.kiro/settings/mcp.json` as the primary path and `.kiro/mcp.json` only for legacy compatibility. Existing user MCP servers are merged and preserved.
+
+If Kiro cannot be linked automatically, `/api/kiro/power/status` returns an `activation_hint` telling the user to add the local Power path manually.
+
 | Method | Route | Purpose |
 |--------|-------|---------|
-| GET | `/api/kiro/power/status` | Show installed state, symlink, MCP binary availability, and errors |
+| GET | `/api/kiro/power/status` | Show installed state, symlink, MCP binary availability, activation hint, and errors |
 | POST | `/api/kiro/power/refresh` | Regenerate the Power and recreate the Kiro symlink |
 
 ---
@@ -414,6 +467,21 @@ rtk git log --oneline
 - `rtk gain` → returns total commands + tokens saved (global)
 - `rtk gain --project` → per-project metrics (runs in project directory)
 - Parsed by `status.GetRTKMetrics()` and `status.GetRTKMetricsForPath()`
+
+## Tokens Saved Metrics
+
+DWYT separates real telemetry from transparent local estimates:
+
+| Tool | Source | Kind |
+|------|--------|------|
+| RTK | `rtk gain` / `rtk gain --project` | real metric |
+| Headroom | Headroom `/stats` | real metric |
+| Codebase MCP | graph metadata such as nodes and edges | local estimate |
+| Obsidian MCP | vault markdown count and total bytes | local estimate |
+
+`/api/metrics` and `/api/tool-details` expose `without_dwyt_tokens`, `with_dwyt_tokens`, `tokens_saved`, and `estimation_source` where available. The global dashboard summary includes all tools but stays defensive when a tool is inactive, unindexed, empty, or returning an older response shape.
+
+Codebase estimates use indexed graph size to approximate manual repository exploration avoided by MCP queries. Obsidian estimates use vault markdown bytes to approximate manual context rereads avoided by search/summarize/context APIs. Both are conservative and labeled local until those tools expose native telemetry.
 
 ---
 
@@ -589,11 +657,13 @@ Component mounts
 │       ├── obsidian/              # Obsidian vault
 │       │   ├── index.md
 │       │   ├── context.md
-│       │   ├── decisions.md
-│       │   ├── tasks.md
 │       │   ├── instructions/
 │       │   ├── maps/
 │       │   ├── templates/
+│       │   ├── decisions/
+│       │   ├── tasks/
+│       │   ├── debug/
+│       │   ├── context/
 │       │   ├── knowledge/
 │       │   └── logs/
 │       ├── project.json          # project metadata + last_open
@@ -610,6 +680,7 @@ Component mounts
 > **Note:** DWYT never creates files inside your project directory except the AI client config files
 > (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) selected during Setup.
 > All DWYT state lives exclusively in `~/.dwyt/`.
+> `~/.dwyt/projects/` is persistent project memory and is protected from automatic cleanup.
 
 ---
 
@@ -628,26 +699,27 @@ The Setup creates these files in the user's project directory:
 ├── .claude/mcp.json              # Claude Desktop MCP config
 ├── .vscode/mcp.json              # VSCode MCP config
 ├── .kiro/
-│   ├── mcp.json                  # Kiro MCP config
+│   ├── settings/mcp.json         # Kiro MCP config (primary)
+│   ├── mcp.json                  # Kiro MCP config (legacy compatibility)
 │   └── steering/dwyt.md
 └── .gitignore                    # updated with dwyt entries
 ```
 
 Local files with absolute paths are ignored by default (`.mcp.json`, `.claude/mcp.json`,
-`.kiro/mcp.json`, `.vscode/mcp.json`, `opencode.json`, `CLAUDE.md`, `.cursorrules`).
+`.kiro/settings/mcp.json`, `.kiro/mcp.json`, `.vscode/mcp.json`, `opencode.json`, `CLAUDE.md`, `.cursorrules`).
 Shared instruction files such as `AGENTS.md`, `.cursor/rules/dwyt.mdc`,
 `.kiro/steering/dwyt.md`, and `.github/copilot-instructions.md` are not ignored by DWYT.
 
 ### Instruction Priority (all files)
 
 ```
-1. Obsidian FIRST  → consult and summarize vault before any operation
-2. Headroom        → auto-detected via env vars
-3. RTK             → prefix shell commands with 'rtk'
-4. Codebase MCP    → ONLY for structural code exploration
+1. RTK          → prefix shell commands with 'rtk'
+2. Codebase MCP → use the graph before structural code work
+3. Obsidian MCP → recover memory and save context
+4. Headroom     → compatible proxy/cache optimization only
 ```
 
-All generated instruction files also require agents to save decisions/tasks during work and complete context at task end. See [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
+All generated instruction files also enforce the Codebase Law and Obsidian Law, require append-only safe DWYT blocks, and preserve user content outside managed sections. See [CODEBASE-LAW.md](CODEBASE-LAW.md) and [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
 
 ---
 
@@ -760,16 +832,19 @@ User runs: dwyt .
        │   → OPENAI_BASE_URL=http://127.0.0.1:8787/v1
        │   → ANTHROPIC_BASE_URL=http://127.0.0.1:8787
        │
+       ├─ Shell commands prefixed with rtk
+       │   → 60-98% output compression
+       │
        ├─ AI client reads AGENTS.md / CLAUDE.md
-       │   → Instructed to query and summarize Obsidian vault FIRST
+       │   → Instructed to use Codebase MCP for structural code work
+       │   → search_graph / trace_path / get_code_snippet
+       │
+       ├─ For project memory:
        │   → GET /api/obsidian/search?q=<task description>
        │   → POST /api/obsidian/summarize
        │
-       ├─ API calls pass through Headroom proxy
-       │   → ~34% token compression
-       │
-       ├─ Shell commands prefixed with rtk
-       │   → 60-98% output compression
+       ├─ Compatible API clients may pass through Headroom proxy
+       │   → compression/cache optimization when supported
        │
        ├─ During important changes:
            → POST /api/obsidian/save {"type":"decision","content":"..."}
@@ -785,12 +860,13 @@ User runs: dwyt .
 
 1. **Single binary** — no runtime dependencies. Frontend embedded via `//go:embed`.
 2. **Everything via UI** — no CLI configuration commands. Setup Wizard handles all tool/IA selection.
-3. **Obsidian as brain** — markdown files are universal, version-controllable, and visually navigable in Obsidian. No custom database for project knowledge.
+3. **Obsidian as memory** — markdown files are universal, version-controllable, and visually navigable in Obsidian. Vaults preserve decisions, tasks, debug notes, and handoff context.
 4. **ProcessManager** — centralized process lifecycle with healthchecks, log capture, and graceful shutdown. Prevents zombie processes.
-5. **Headroom transparency** — proxy config injected/removed automatically. env.sh sources into shell RC. User never touches env vars.
-6. **Codebase on-demand** — no automatic indexing. User controls when to index their codebase. Non-blocking if fails.
-7. **Resilience** — each tool can fail independently without crashing the dashboard. Errors are displayed in the UI and logged.
-8. **RTK preservation** — simplest and most reliable tool, left unchanged from its original design. Just prefix commands with `rtk`.
+5. **Codebase as structure source** — structural analysis should use graph tools before manual file exploration when available.
+6. **Headroom transparency** — proxy config injected/removed automatically only for compatible clients. Codex ChatGPT/OAuth is not proxied.
+7. **Codebase on-demand** — no automatic indexing. User controls when to index their codebase. Non-blocking if fails.
+8. **Resilience** — each tool can fail independently without crashing the dashboard. Errors are displayed in the UI and logged.
+9. **RTK preservation** — simplest and most reliable tool, left unchanged from its original design. Just prefix commands with `rtk`.
 
 ## Uninstall
 
@@ -800,17 +876,17 @@ To completely remove DWYT from your system:
 dwyt uninstall
 ```
 
-This command performs a **full cleanup** in order:
+This command performs cleanup while preserving project vaults in `~/.dwyt/projects/`:
 
 1. **Stops all running processes** — daemon, Headroom, Codebase, RTK
-2. **Removes `~/.dwyt/`** — bins, SQLite database, `state.json`, Obsidian vaults, logs, Headroom venv
+2. **Cleans tool/config data under `~/.dwyt/`** — bins, SQLite database, `state.json`, logs, Headroom venv, and regenerable cache
 3. **Removes symlinks** from `~/.local/bin/` — `dwyt`, `rtk`, `headroom`, `codebase-memory-mcp`
 4. **Removes RTK data** — `~/.rtk/`, `~/.config/rtk/`, `~/.local/share/rtk/`, RTK binaries outside `~/.dwyt`
 5. **Removes Headroom data** — `~/.headroom/`, `~/.config/headroom/`, pip uninstall `headroom-ai`
-6. **Removes Codebase data** — `~/.dwyt/codebase/` (indexes), `~/.cache/codebase-memory-mcp/` (fallback), runs `codebase-memory-mcp uninstall -y`
+6. **Removes Codebase cache** — `~/.dwyt/codebase/` (indexes), `~/.cache/codebase-memory-mcp/` (fallback), runs `codebase-memory-mcp uninstall -y`
 7. **Cleans shell RC files** — removes the `# dwyt:source` block from `.zshrc`, `.bashrc`, `.zprofile`, `.profile`
 
-> **Note:** The Obsidian app itself is NOT removed — only the DWYT-managed vaults inside `~/.dwyt/projects/`.
+> **Note:** The Obsidian app itself is NOT removed, and DWYT-managed project vaults inside `~/.dwyt/projects/` are preserved.
 
 > **Windows:** also removes the `dwytBin` entry from `HKCU\Environment\PATH` and cleans the PowerShell profile.
 
@@ -826,7 +902,10 @@ DWYT documentation follows a structured approach to maintain clarity and histori
 docs/
 ├── CHANGELOG.md              # Chronological list of all changes (organized by date)
 ├── HOW-IT-WORKS.md          # This file - always kept up-to-date with latest architecture
+├── CODEBASE-LAW.md          # Mandatory code graph workflow for agents
 ├── OBSIDIAN-LAW.md          # Mandatory memory workflow for agents
+├── TOKENS-SAVED.md          # Real metrics and local estimate formulas
+├── KIRO-POWER.md            # Kiro Power paths, frontmatter, and MCP behavior
 └── DDMMYYYY/                # Date-specific folders for detailed change documentation
     ├── FIXES.md             # Technical details of fixes implemented on this date
     ├── SUMMARY.md           # Final status, test results, and executive summary
@@ -950,6 +1029,12 @@ git commit -m "fix: critical stability improvements (v3.1.0)"
 ### Finding Documentation
 
 **For current architecture:** Read `docs/HOW-IT-WORKS.md`
+
+**For agent laws:** Read `docs/CODEBASE-LAW.md` and `docs/OBSIDIAN-LAW.md`
+
+**For savings calculations:** Read `docs/TOKENS-SAVED.md`
+
+**For Kiro integration:** Read `docs/KIRO-POWER.md`
 
 **For recent changes:** Check `docs/CHANGELOG.md` (top entries)
 

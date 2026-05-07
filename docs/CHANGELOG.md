@@ -6,14 +6,23 @@ All notable changes to DWYT are documented here.
 
 ## Unreleased
 
+### Features
+
+- Added Codebase token-savings estimates from graph metadata and included Codebase/Obsidian savings in the global dashboard summary.
+- Added `without_dwyt_tokens`, `with_dwyt_tokens`, and `estimation_source` fields for tool details so estimated savings are auditable.
+- Added Kiro Power activation hints and updated the generated Power frontmatter/steering to match the current DWYT priority rules.
+
 ### Documentation
 
-- Added `docs/OBSIDIAN-LAW.md`, making Obsidian the mandatory official project memory for every agent interaction.
-- Updated README, architecture docs, testing docs, release docs, and generated agent instructions to require Obsidian search/summarize before work, decision/task saves during work, and complete context saves at task end.
+- Added `docs/CODEBASE-LAW.md`, `docs/TOKENS-SAVED.md`, and `docs/KIRO-POWER.md`.
+- Updated `docs/OBSIDIAN-LAW.md`, README, architecture docs, and generated agent instructions to enforce the priority order RTK → Codebase MCP → Obsidian MCP → Headroom.
+- Documented that `~/.dwyt/projects/` vaults are persistent project memory and must be preserved by install, repair, reinstall, clean, reset, and uninstall flows.
 
 ### Improvements
 
-- New Obsidian vaults are seeded with richer structure: `instructions/`, `maps/`, `templates/`, nested log folders, and internal links for navigation.
+- New Obsidian vaults are seeded with richer structure: `instructions/`, `maps/`, `templates/`, `decisions/`, `tasks/`, `debug/`, `context/`, nested logs, and internal links for navigation.
+- Kiro workspace MCP config now treats `.kiro/settings/mcp.json` as the primary path and `.kiro/mcp.json` as legacy compatibility.
+- `dwyt reinstall` and `dwyt uninstall` messaging now reflects vault preservation instead of destructive cleanup.
 
 ---
 

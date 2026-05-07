@@ -1,47 +1,47 @@
 # DWYT — Don't Waste Your Tokens
 
-Este projeto usa ferramentas automáticas para reduzir consumo de tokens.
-**Todas as integrações são transparentes: você não precisa configurar nada.**
+Este projeto usa ferramentas automaticas para reduzir consumo de tokens.
+Todas as integracoes devem preservar conteudo manual do usuario fora dos blocos controlados pelo DWYT.
 
 ## Commits
 
-- Use **Conventional Commits**: `<tipo>(escopo opcional): descrição`.
-  Tipos válidos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
-- Mensagem **curta** (uma linha, idealmente ≤ 72 caracteres). Sem corpo a menos que indispensável.
-- **Não** inclua linhas `Co-Authored-By:` nem qualquer outro coautor.
+- Use **Conventional Commits**: `<tipo>(escopo opcional): descricao`.
+  Tipos validos: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.
+- Mensagem curta, uma linha, idealmente ate 72 caracteres.
+- Nao inclua linhas `Co-Authored-By:` nem qualquer outro coautor.
 
-## Ordem de prioridade (siga sempre esta ordem):
+## Ordem de Prioridade
 
-### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)
-**LEI DO OBSIDIAN — OBRIGATORIO:** o vault e a memoria oficial do projeto. Toda tarefa deve consultar, enriquecer e salvar contexto nele.
+1. **RTK** — use para comandos shell, automacoes de terminal e comandos repetitivos.
+2. **Codebase MCP** — use para entender, validar, diagnosticar ou alterar estrutura real do codigo.
+3. **Obsidian MCP** — use para recuperar e salvar memoria persistente, decisoes, historico e contexto futuro.
+4. **Headroom** — use apenas como proxy/cache quando compativel com o cliente de IA.
 
-- **ANTES de agir:** buscar notas existentes e resumir o vault.
-  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-  - Summarize: POST http://localhost:2737/api/obsidian/summarize
-- **DURANTE a acao:** salvar decisoes e tarefas/status importantes.
-  - Decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-  - Task: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-- **AO FINAL de toda tarefa:** salvar contexto completo.
-  - Context: POST http://localhost:2737/api/obsidian/context
-  - Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instrucoes.
-- Nunca encerre uma tarefa sem salvar contexto no Obsidian.
+## Lei do Codebase
 
-### 2. Headroom — Compressão de API (AUTOMÁTICO)
-- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.
-- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.
-- Se não estiver ativo, use os endpoints padrão das APIs.
+Antes de propor ou aplicar alteracoes tecnicas que dependam da estrutura do codigo:
 
-### 3. RTK — Compressão de Terminal
-- **SEMPRE** prefixe comandos shell com `rtk`. Ex: `rtk git status`
-- Isto reduz o output em 60-90% antes de entrar no contexto.
-- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m "msg"`
+- valide se o projeto esta indexado;
+- use `search_graph` para localizar simbolos, rotas, handlers, componentes, modulos e relacoes;
+- use `trace_path` para chamadas, fluxos, dependencias e impacto;
+- use `get_code_snippet` antes de editar codigo;
+- evite grep/glob/find como primeira estrategia quando o Codebase MCP estiver disponivel.
 
-### 4. Codebase — Mapa do Código (SOB DEMANDA)
-- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.
-- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.
-- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.
+## Lei do Obsidian
 
+O vault Obsidian em `~/.dwyt/projects/<id>/obsidian/` e a memoria oficial do projeto.
+
+- Antes de trabalho relevante, busque notas e leia/reconstrua o resumo.
+- Durante a tarefa, salve decisoes e tarefas/status importantes.
+- Ao final, salve contexto completo com `user_request`, `summary`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps` e `context`.
+- Use links internos como `[[index]]`, `[[maps/project-map]]`, `[[instructions/obsidian-law]]` e `[[instructions/codebase-law]]`.
+- Nunca apague vaults, projetos, notas ou historico como tentativa de correcao automatica.
+
+## Headroom
+
+- Use Headroom somente quando `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` apontarem para proxy compativel.
+- Codex autenticado via ChatGPT/OAuth nao deve usar Headroom.
+- Se Headroom estiver inativo, use endpoints padrao.
 
 <!-- headroom:rtk-instructions -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
@@ -91,37 +91,42 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 
 # DWYT — Don't Waste Your Tokens
 
-Este projeto usa ferramentas automáticas para reduzir consumo de tokens.
-**Todas as integrações são transparentes: você não precisa configurar nada.**
+Este projeto usa RTK, Codebase MCP, Obsidian MCP e Headroom para reduzir desperdicio de tokens sem sobrescrever configuracoes manuais do usuario.
 
-## Ordem de prioridade (siga sempre esta ordem):
+## Ordem de Prioridade
 
-### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)
-**LEI DO OBSIDIAN: o vault é a memória oficial do projeto. Toda interação deve consultar, enriquecer e salvar contexto nele.**
-- ANTES de agir: buscar notas existentes e resumo do vault.
-  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-  - Summarize: POST http://localhost:2737/api/obsidian/summarize
-- DURANTE a ação: salvar decisões e tarefas/status importantes.
-  - Decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-  - Task: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
-- AO FINAL de toda tarefa: salvar contexto completo.
-  - Context: POST http://localhost:2737/api/obsidian/context
-  - Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instruções.
+1. RTK — para comandos shell e automacoes de terminal.
+2. Codebase MCP — fonte primaria para estrutura real do codigo.
+3. Obsidian MCP — memoria persistente oficial do projeto.
+4. Headroom — apenas proxy/cache compativel.
 
-### 2. Headroom — Compressão de API (AUTOMÁTICO)
-- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.
-- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.
-- No Codex, o DWYT só configura Headroom quando o login é por API key; login ChatGPT/OAuth usa os endpoints padrão.
-- Se não estiver ativo, use os endpoints padrão das APIs.
+## Lei do Codebase
 
-### 3. RTK — Compressão de Terminal
-- **SEMPRE** prefixe comandos shell com `rtk`. Ex: `rtk git status`
-- Isto reduz o output em 60-90% antes de entrar no contexto.
-- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m "msg"`
+Quando precisar entender, validar, diagnosticar ou alterar a estrutura real do codigo, consulte o Codebase MCP. Use `search_graph`, `trace_path` e `get_code_snippet` antes de aplicar mudancas estruturais.
 
-### 4. Codebase — Mapa do Código (SOB DEMANDA)
-- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.
-- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.
-- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.
+## Lei do Obsidian
+
+Busque/resuma o vault antes de trabalho relevante, salve decisoes/tarefas durante a acao e salve contexto completo ao final. Use links internos como `[[index]]`, `[[maps/project-map]]`, `[[instructions/obsidian-law]]` e `[[instructions/codebase-law]]`.
+
+Payload minimo:
+
+```json
+{
+  "client": "codex",
+  "user_request": "...",
+  "summary": "...",
+  "files": ["..."],
+  "decisions": ["..."],
+  "actions": ["..."],
+  "commands": ["..."],
+  "errors": ["..."],
+  "outcome": "...",
+  "next_steps": ["..."],
+  "context": "..."
+}
+```
+
+## Validacao
+
+Antes de concluir mudancas, rode testes/build/lint relevantes e confirme que estados `installed`, `inactive` e `launch on demand` nao sao tratados como erro.
 <!-- dwyt:instructions:end -->

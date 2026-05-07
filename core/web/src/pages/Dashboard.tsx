@@ -56,6 +56,26 @@ function badge(s: ToolState, t: Record<string, string>): BadgeText {
   return { icon: '\uD83D\uDFE2', text: t.active, color: '#2f9e44' }
 }
 
+function calculateGlobalTokenSavings(details: Details) {
+  const values = Object.values(details)
+  const tokensSaved = values.reduce((a, d) => a + (d?.tokens_saved || 0), 0)
+  let withoutDwyt = 0
+  for (const d of values) {
+    if (!d?.tokens_saved) continue
+    if (d.without_dwyt_tokens && d.without_dwyt_tokens > 0) withoutDwyt += d.without_dwyt_tokens
+    else if (d.pct_saved && d.pct_saved > 0) withoutDwyt += d.tokens_saved / (d.pct_saved / 100)
+    else if (d.compression_pct && d.compression_pct > 0) withoutDwyt += d.tokens_saved / (d.compression_pct / 100)
+    else if (d.tokens_used) withoutDwyt += d.tokens_saved + d.tokens_used
+    else withoutDwyt += d.tokens_saved * 2
+  }
+  withoutDwyt = Math.round(Math.max(withoutDwyt, tokensSaved))
+  return {
+    tokensSaved,
+    withoutDwyt,
+    withDwyt: Math.max(withoutDwyt - tokensSaved, 0),
+  }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -249,27 +269,16 @@ export default function Dashboard() {
   const hrTool = getTool('headroom')
   const msTool = getTool('obsidian')
 
-  const totalSaved = Object.values(details).reduce((a, d) => a + (d?.tokens_saved || 0), 0)
+  const totals = calculateGlobalTokenSavings(details)
+  const totalSaved = totals.tokensSaved
   const rtkSaved = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
   const obsidianSaved = details['obsidian']?.tokens_saved || 0
   const codebaseSaved = details['codebase-memory-mcp']?.tokens_saved || 0
   const obsidianCount = typeof obsidianStats?.total_files === 'number' ? obsidianStats.total_files as number : 0
 
-  function calcWithout() {
-    let w = 0
-    for (const d of Object.values(details)) {
-      if (!d?.tokens_saved) continue
-      if (d.pct_saved && d.pct_saved > 0) w += d.tokens_saved / (d.pct_saved / 100)
-      else if (d.compression_pct && d.compression_pct > 0) w += d.tokens_saved / (d.compression_pct / 100)
-      else if (d.tokens_used) w += d.tokens_saved + d.tokens_used
-      else w += d.tokens_saved * 2
-    }
-    return Math.round(Math.max(w, totalSaved))
-  }
-
-  const withoutDwyt = calcWithout()
-  const withDwyt = Math.max(withoutDwyt - totalSaved, 0)
+  const withoutDwyt = totals.withoutDwyt
+  const withDwyt = totals.withDwyt
   const savingsPct = withoutDwyt > 0 ? Math.round((totalSaved / withoutDwyt) * 100) : 0
   const hasData = totalSaved > 0
   const repoName = projectCtx.project_state?.name || projectCtx.active_project?.split('/').pop() || '\u2014'
@@ -460,6 +469,7 @@ export default function Dashboard() {
               <span title={kiroPower.power_dir} style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ color: 'var(--blue)', fontWeight: 700, textTransform: 'uppercase' }}>{t.kiroPower}: </span>
                 {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {kiroPower.activation_status || 'unknown'} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
+                {kiroPower.activation_hint ? ` · ${kiroPower.activation_hint}` : ''}
                 {kiroPower.errors && kiroPower.errors.length > 0 ? ` · ${kiroPower.errors.join(', ')}` : ''}
               </span>
               <Button

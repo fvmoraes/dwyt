@@ -35,8 +35,8 @@ The UI opens at `http://localhost:2737` with your project pre-loaded. **Everythi
 | `dwyt stop` | Stop all services |
 | `dwyt status` | Quick terminal status |
 | `dwyt version` | Current version |
-| `dwyt reinstall` | Wipe `~/.dwyt` and reinstall |
-| `dwyt uninstall` | Remove all tools |
+| `dwyt reinstall` | Clean tool cache and reinstall while preserving project vaults |
+| `dwyt uninstall` | Remove DWYT tools/config while preserving project vaults |
 
 ---
 
@@ -57,62 +57,12 @@ dwyt .
 
 ## The Tools
 
-### Obsidian — mandatory
+DWYT coordinates tools in this order when the task calls for them:
 
-The brain of DWYT. Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>/obsidian/` with structured markdown files:
-
-```
-obsidian/
-├── index.md         # project index
-├── context.md       # auto-rebuilt summary
-├── decisions.md     # architecture decisions log
-├── tasks.md         # active tasks
-├── instructions/    # mandatory agent rules, including Obsidian Law
-├── maps/            # navigation maps and internal links
-├── templates/       # reusable decision/task/session templates
-├── knowledge/       # knowledge base articles
-└── logs/            # sessions, errors, commands
-```
-
-**Format**: frontmatter YAML (`tags`, `date`, `type`) in every file. Compatible with Obsidian's native search and Dataview plugin.
-
-**"Open in Obsidian"** button on the card opens the vault directory directly.
-
-**Obsidian Law**: IAs must query and summarize the vault before acting, save decisions and task/status during work, and save complete context at the end of every task. The vault should stay rich, interlinked, and organized with folders, internal links, templates, and instructions.
-
-| API | Purpose |
-|-----|---------|
-| `GET /api/obsidian/search?q=` | Search vault before starting a task |
-| `POST /api/obsidian/save` | Save a decision, error, task, or note |
-| `POST /api/obsidian/summarize` | Rebuild the vault summary |
-| `POST /api/obsidian/context` | Save complete task/session context |
-
-### Headroom — automatic API compression
-
-A proxy that compresses AI API calls in transit (~34% reduction). Uses Headroom's native commands to configure each AI client automatically:
-
-```bash
-# DWYT runs these automatically when Headroom starts:
-headroom wrap claude      # Claude Code
-headroom wrap codex       # Codex (API-key login only)
-headroom wrap cursor      # Cursor
-headroom wrap copilot     # GitHub Copilot CLI
-```
-
-When Headroom starts (via the Start button or automatically with `dwyt .`), DWYT runs `headroom wrap` for eligible enabled AI clients. Codex is skipped when it is logged in through ChatGPT/OAuth, because Headroom only applies to Codex API-key auth. When stopped, `headroom unwrap` cleans up.
-
-Environment variables are also auto-exported by `env.sh`:
-
-```bash
-export HEADROOM_PORT=8787
-export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
-```
-
-| Button | Action |
-|--------|--------|
-| **Open Stats** | Real-time compression statistics |
-| **Start/Stop** | Start/stop proxy + auto wrap/unwrap clients |
+1. **RTK** for shell commands and terminal output.
+2. **Codebase MCP** for current code structure.
+3. **Obsidian MCP** for memory, decisions, tasks, and handoff context.
+4. **Headroom** for compatible API proxy/cache optimization.
 
 ### RTK — terminal compression
 
@@ -126,15 +76,72 @@ rtk cargo test
 
 Metrics are filtered per project — the card shows commands executed and tokens saved in the current directory.
 
-### Codebase — structural code map (optional)
+### Codebase — structural code map
 
-A code graph that enables structural navigation without file-by-file grep. **On-demand indexing** — click "Index" when you want to analyze the codebase.
+A code graph that enables structural navigation without file-by-file grep. It is the source of truth for symbols, dependencies, calls, routes, and impact analysis. Indexing is on-demand: click "Index" when you want to analyze the project.
 
 Managed by the internal **ProcessManager**:
 - Start/Stop with healthcheck (5 retries, exponential backoff)
 - Stdout/stderr captured to `~/.dwyt/logs/codebase-*.log`
 - Dynamic port (9749, falls back to alternatives if occupied)
 - **View Logs** button for real diagnostics on failure
+
+The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/CODEBASE-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+
+### Obsidian — mandatory memory
+
+Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>/obsidian/` with structured markdown files:
+
+```txt
+obsidian/
+├── index.md
+├── context.md
+├── instructions/
+│   ├── obsidian-law.md
+│   └── codebase-law.md
+├── maps/
+│   └── project-map.md
+├── templates/
+│   ├── decision-template.md
+│   ├── task-template.md
+│   └── session-context-template.md
+├── decisions/
+│   └── index.md
+├── tasks/
+│   └── index.md
+├── debug/
+│   └── index.md
+├── context/
+├── knowledge/
+└── logs/
+    ├── sessions/
+    ├── errors/
+    └── commands/
+```
+
+**Obsidian Law**: agents must query and summarize the vault before relevant work, save decisions/task/debug state during work, and save complete context at the end. Vaults are persistent project memory and must not be deleted by install, repair, reinstall, clean, reset, or uninstall flows.
+
+| API | Purpose |
+|-----|---------|
+| `GET /api/obsidian/search?q=` | Search vault before starting a task |
+| `POST /api/obsidian/save` | Save a decision, debug note, task, or note |
+| `POST /api/obsidian/summarize` | Rebuild the vault summary |
+| `POST /api/obsidian/context` | Save complete task/session context |
+
+The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/OBSIDIAN-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+
+### Headroom — compatible API compression
+
+A proxy/cache optimization for compatible AI clients. DWYT can configure eligible clients with Headroom's native wrapping:
+
+```bash
+headroom wrap claude      # Claude Code
+headroom wrap codex       # Codex API-key login only
+headroom wrap cursor      # Cursor
+headroom wrap copilot     # GitHub Copilot CLI
+```
+
+Codex authenticated through ChatGPT/OAuth is skipped. Headroom is an optimization only; it is not memory and not a source of code truth. If installed but inactive, DWYT reports it as `installed (launch on demand)` instead of a critical error.
 
 ---
 
@@ -242,6 +249,8 @@ Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK.
 └── state.json                   # runtime state (PIDs, ports, errors)
 ```
 
+`~/.dwyt/projects/` contains persistent project vaults and is protected from automatic cleanup.
+
 ### Windows
 
 ```
@@ -277,17 +286,18 @@ Setup creates or updates these files in the project directory. Local configs wit
 ├── .vscode/
 │   └── mcp.json                   # VSCode MCP config
 └── .kiro/
-    ├── mcp.json                   # Kiro MCP config
+    ├── settings/mcp.json          # Kiro MCP config (primary)
+    ├── mcp.json                   # Kiro MCP config (legacy compatibility)
     └── steering/dwyt.md
 ```
 
 **All instruct IAs** in this priority order:
-1. **Obsidian FIRST** — query and summarize the vault before any operation
-2. **Headroom** — automatic compression via `headroom wrap`
-3. **RTK** — prefix shell commands with `rtk`
-4. **Codebase MCP** — structural exploration only when needed
+1. **RTK** — prefix shell commands with `rtk`
+2. **Codebase MCP** — use the graph before structural code work
+3. **Obsidian MCP** — search/summarize memory and save context
+4. **Headroom** — use only as compatible proxy/cache optimization
 
-The generated instructions also enforce the [Obsidian Law](docs/OBSIDIAN-LAW.md): save decisions as `decision`, tasks/status as `task`, and final handoff context with `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
+The generated instructions enforce the [Codebase Law](docs/CODEBASE-LAW.md) and [Obsidian Law](docs/OBSIDIAN-LAW.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
 
 ---
 
@@ -298,7 +308,7 @@ The generated instructions also enforce the [Obsidian Law](docs/OBSIDIAN-LAW.md)
 | **Claude Code** | `CLAUDE.md`, `.claude/` |
 | **Codex** | `AGENTS.md`, `.codex/`, `.mcp.json` |
 | **GitHub Copilot** | `.github/copilot-instructions.md`, `AGENTS.md` |
-| **Kiro** | `.kiro/steering/dwyt.md`, `.kiro/mcp.json`, `AGENTS.md` |
+| **Kiro** | `.kiro/steering/dwyt.md`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `AGENTS.md` |
 | **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md` |
 | **OpenCode** | `opencode.json`, `AGENTS.md`, `.mcp.json` |
 
@@ -320,12 +330,18 @@ It is linked into:
 
 Only real MCPs are placed in `mcp.json`: `codebase` and `obsidian`. RTK and Headroom are provided as steering instructions because RTK is a CLI tool and Headroom is an API proxy.
 
+DWYT writes Kiro workspace MCP config to `.kiro/settings/mcp.json` and also updates `.kiro/mcp.json` for legacy compatibility. Existing user MCP servers are merged and preserved.
+
+If the symlink cannot be created automatically, the dashboard shows an activation hint with the local path to add through Kiro's "Add power from Local Path" flow.
+
 Status endpoints:
 
 ```txt
 GET  /api/kiro/power/status
 POST /api/kiro/power/refresh
 ```
+
+See [Kiro Power](docs/KIRO-POWER.md).
 
 ---
 

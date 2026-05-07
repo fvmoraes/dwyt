@@ -112,23 +112,23 @@ var versionCmd = &cobra.Command{
 
 var reinstallCmd = &cobra.Command{
 	Use:   "reinstall",
-	Short: "Remove data dir and reinstall everything",
+	Short: "Clean tool cache and reinstall while preserving Obsidian vaults",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
 		if !security.IsSafeHome(e.DwytHome) {
 			return fmt.Errorf("unsafe DWYT home path: %s (refusing to operate)", e.DwytHome)
 		}
-		fmt.Printf("  Apagando %s...\n", e.DwytHome)
+		fmt.Printf("  Limpando ferramentas/cache em %s...\n", e.DwytHome)
 		security.CleanHome(e.DwytHome)
 		log.Info("reinstall: cleaned dwyt home (vaults preserved)", log.Fields{"path": e.DwytHome})
-		fmt.Printf("  \u2713 Removido. Execute 'dwyt' para reinstalar via UI.\n")
+		fmt.Printf("  \u2713 Limpo com vaults Obsidian preservados. Execute 'dwyt' para reinstalar via UI.\n")
 		return nil
 	},
 }
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove all DWYT tools, data and config",
+	Short: "Remove DWYT tools and config while preserving Obsidian vaults",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
 		home, _ := os.UserHomeDir()

@@ -32,10 +32,20 @@ func TestNewProjectObsidianAllowsProjectOutsideDwytHome(t *testing.T) {
 		"knowledge",
 		"logs",
 		filepath.Join("logs", "sessions"),
+		filepath.Join("logs", "commands"),
+		"decisions",
+		"tasks",
+		"debug",
+		"context",
 		"templates",
 		"instructions",
 		"maps",
 		filepath.Join("instructions", "obsidian-law.md"),
+		filepath.Join("instructions", "codebase-law.md"),
+		filepath.Join("decisions", "index.md"),
+		filepath.Join("tasks", "index.md"),
+		filepath.Join("debug", "index.md"),
+		filepath.Join("context", "index.md"),
 		filepath.Join("templates", "session-context-template.md"),
 		filepath.Join("maps", "project-map.md"),
 	} {
@@ -75,15 +85,15 @@ func TestSaveContextSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveContextSnapshot failed: %v", err)
 	}
-	if !strings.Contains(path, filepath.Join("logs", "sessions")) {
-		t.Fatalf("expected session log path, got %s", path)
+	if !strings.Contains(path, string(os.PathSeparator)+"context"+string(os.PathSeparator)) {
+		t.Fatalf("expected context handoff path, got %s", path)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, want := range []string{"type: session", "Added conversation context saving", "Use a dedicated context endpoint"} {
+	for _, want := range []string{"type: context", "[[instructions/codebase-law]]", "Added conversation context saving", "Use a dedicated context endpoint"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("saved context missing %q:\n%s", want, text)
 		}
