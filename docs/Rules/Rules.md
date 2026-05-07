@@ -353,10 +353,10 @@ Atualizar a geração dos arquivos:
 Usar marcadores únicos e estáveis:
 
 ```md
-<!-- dwyt:instructions:start -->
+<!-- DWYT:START -->
 # DWYT
 ...
-<!-- dwyt:instructions:end -->
+<!-- DWYT:END -->
 ```
 
 ### 8.3 Conteúdo do bloco DWYT

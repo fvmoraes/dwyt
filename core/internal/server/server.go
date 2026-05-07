@@ -315,7 +315,7 @@ func (ds *DashboardServer) clientsString() string {
 }
 
 func defaultClientsString() string {
-	return "claude,codex,copilot,kiro,cursor,opencode"
+	return "claude,codex,copilot,kiro,cursor,opencode,windsurf,continue"
 }
 
 var headroomWrapMap = map[string]string{
@@ -415,43 +415,4 @@ func (ds *DashboardServer) headroomWrapClients() []string {
 		}
 	}
 	return result
-}
-
-func countCodebaseGraph(dwytHome, projectPath string) (nodes, edges int) {
-	hash := db.HashPath(projectPath)
-	cacheDir := filepath.Join(dwytHome, "codebase", hash)
-	if _, err := os.Stat(cacheDir); err != nil {
-		return 0, 0
-	}
-
-	filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".json") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		var doc map[string]interface{}
-		if json.Unmarshal(data, &doc) == nil {
-			if n, ok := doc["nodes"]; ok {
-				switch v := n.(type) {
-				case float64:
-					nodes += int(v)
-				case []interface{}:
-					nodes += len(v)
-				}
-			}
-			if e, ok := doc["edges"]; ok {
-				switch v := e.(type) {
-				case float64:
-					edges += int(v)
-				case []interface{}:
-					edges += len(v)
-				}
-			}
-		}
-		return nil
-	})
-	return nodes, edges
 }

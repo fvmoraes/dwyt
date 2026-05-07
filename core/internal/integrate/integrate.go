@@ -21,11 +21,11 @@ func Project(projectPath, clients, dwytBin string) {
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
 	clientList := normalizeClients(clients)
 
-	// O DWYT não toca no .gitignore do projeto. Decidir o que ignorar é
-	// responsabilidade do time (configs MCP têm paths absolutos por máquina,
-	// mas a equipe pode escolher versionar, reescrever ou ignorar).
+	// DWYT does not touch the project's .gitignore. Whether to commit MCP
+	// configs is the team's call — paths are absolute per machine, so most
+	// teams either ignore them or rewrite them at clone time.
 
-	// ── Use absolute paths in generated configs ────────────────────────
+	// ── Generated configs use absolute, runtime-resolved paths ─────────
 	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
 	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
 	rtkBin := filepath.Join(dwytBin, "rtk")
@@ -35,6 +35,8 @@ func Project(projectPath, clients, dwytBin string) {
 		rtkBin += ".exe"
 	}
 
+	// .mcp.json at the project root is the de-facto standard; Codex,
+	// Claude Code, and several others read it directly.
 	writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin)
 	writeOrMergeVSCodeMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, rtkBin)
@@ -43,7 +45,7 @@ func Project(projectPath, clients, dwytBin string) {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeOrUpdateInstructionFile(cp, claudeMDTemplate())
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
-		// Claude also reads .claude/mcp.json
+		// Claude Code also reads .claude/mcp.json
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
@@ -68,17 +70,29 @@ func Project(projectPath, clients, dwytBin string) {
 		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
 	}
 
+	if containsClient(clientList, "windsurf") {
+		// Windsurf reads project-scoped MCP configs from .windsurf/.
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".windsurf", "mcp.json"), cbmcpBin, obsidianMCPBin)
+	}
+
+	if containsClient(clientList, "continue") {
+		// Continue (vscode/jetbrains) reads .continue/mcp.json at the project root.
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".continue", "mcp.json"), cbmcpBin, obsidianMCPBin)
+	}
+
+	// AGENTS.md is the convention shared by Codex, OpenCode, and several
+	// other agent tools — always emit it, regardless of selected clients.
 	writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
 
 	// ── Per-project workspace state ─────────────────────────────────────
 	workspace.Touch(projectPath)
 
-	fmt.Printf("  ✓ Projeto integrado: %s\n", projectPath)
+	fmt.Printf("  ✓ Project integrated: %s\n", projectPath)
 }
 
 func normalizeClients(clients string) []string {
 	if strings.TrimSpace(clients) == "" {
-		return []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode"}
+		return []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode", "windsurf", "continue"}
 	}
 	seen := map[string]bool{}
 	var result []string
@@ -108,72 +122,6 @@ func writeIfMissing(path, content string) {
 	}
 	os.MkdirAll(filepath.Dir(path), 0755)
 	os.WriteFile(path, []byte(content), 0644)
-}
-
-const instructionMarkerStart = "<!-- dwyt:instructions:start -->"
-const instructionMarkerEnd = "<!-- dwyt:instructions:end -->"
-
-func writeOrUpdateInstructionFile(path, content string) {
-	managedBlock, fullBlock := dwytInstructionBlocks(content)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(fullBlock), 0644)
-		return
-	}
-
-	current := string(data)
-	if !strings.Contains(current, instructionMarkerStart) && strings.TrimSpace(current) == strings.TrimSpace(content) {
-		current = ""
-	}
-	next := upsertManagedBlock(current, instructionMarkerStart, instructionMarkerEnd, managedBlock, fullBlock)
-	if next == current {
-		return
-	}
-	os.WriteFile(path, []byte(next), 0644)
-}
-
-func dwytInstructionBlocks(content string) (managed string, full string) {
-	body := strings.TrimSpace(content)
-	frontmatter := ""
-	if strings.HasPrefix(body, "---\n") {
-		if endRel := strings.Index(body[4:], "\n---"); endRel >= 0 {
-			endIdx := 4 + endRel + len("\n---")
-			if endIdx < len(body) && body[endIdx] == '\n' {
-				endIdx++
-			}
-			frontmatter = strings.TrimRight(body[:endIdx], "\n") + "\n"
-			body = strings.TrimSpace(body[endIdx:])
-		}
-	}
-	if !strings.Contains(body, "#dwyt") {
-		body = "#dwyt\n\n" + body
-	}
-	managed = instructionMarkerStart + "\n" + body + "\n" + instructionMarkerEnd + "\n"
-	return managed, frontmatter + managed
-}
-
-func upsertManagedBlock(content, start, end, managedBlock, fullBlock string) string {
-	startIdx := strings.Index(content, start)
-	if startIdx >= 0 {
-		endRel := strings.Index(content[startIdx:], end)
-		if endRel >= 0 {
-			endIdx := startIdx + endRel + len(end)
-			if endIdx < len(content) && content[endIdx] == '\n' {
-				endIdx++
-			}
-			return content[:startIdx] + strings.TrimRight(managedBlock, "\n") + "\n" + content[endIdx:]
-		}
-	}
-
-	if strings.TrimSpace(content) == "" {
-		return fullBlock
-	}
-	separator := "\n\n"
-	if strings.HasSuffix(content, "\n") {
-		separator = "\n"
-	}
-	return content + separator + managedBlock
 }
 
 func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
@@ -226,12 +174,14 @@ func writeOrMergeOpenCodeJSON(path, cbmcpBin, obsidianMCPBin, _ string) {
 	}
 	removeLegacyMCPKeys(mcp)
 	mcp["codebase"] = map[string]interface{}{
-		"type":    "local",
-		"command": []interface{}{cbmcpBin},
+		"type":        "local",
+		"command":     []interface{}{cbmcpBin},
+		"environment": mcpEnvForCommand(cbmcpBin),
 	}
 	mcp["obsidian"] = map[string]interface{}{
-		"type":    "local",
-		"command": []interface{}{obsidianMCPBin},
+		"type":        "local",
+		"command":     []interface{}{obsidianMCPBin},
+		"environment": mcpEnvForCommand(obsidianMCPBin),
 	}
 	config["mcp"] = mcp
 
@@ -260,9 +210,31 @@ func stdioMCPConfig(command string, includeType bool) map[string]interface{} {
 		cfg["type"] = "stdio"
 	}
 	if strings.Contains(filepath.Base(command), "dwyt-obsidian-mcp") {
-		cfg["env"] = map[string]interface{}{"DWYT_API_URL": "http://localhost:2737/api"}
+		cfg["env"] = mcpEnvForCommand(command)
+	}
+	if strings.Contains(filepath.Base(command), "codebase-memory-mcp") {
+		cfg["env"] = mcpEnvForCommand(command)
 	}
 	return cfg
+}
+
+func mcpEnvForCommand(command string) map[string]interface{} {
+	env := map[string]interface{}{}
+	base := filepath.Base(command)
+	if strings.Contains(base, "codebase-memory-mcp") {
+		env["CBM_CACHE_DIR"] = filepath.Join(projectDwytHome(), "codebase")
+	}
+	if strings.Contains(base, "dwyt-obsidian-mcp") {
+		env["DWYT_API_URL"] = "http://localhost:2737/api"
+	}
+	return env
+}
+
+func projectDwytHome() string {
+	if h := os.Getenv("DWYT_HOME"); h != "" {
+		return h
+	}
+	return filepath.Join(os.Getenv("HOME"), ".dwyt")
 }
 
 func removeLegacyMCPKeys(m map[string]interface{}) {
@@ -297,15 +269,21 @@ func mcpJSONTemplate(cbmcpBin, obsidianMCPBin string) string {
   "mcpServers": {
     "codebase": {
       "type": "stdio",
-      "command": %q
+      "command": %q,
+      "env": {
+        "CBM_CACHE_DIR": %q
+      }
     },
     "obsidian": {
       "type": "stdio",
-      "command": %q
+      "command": %q,
+      "env": {
+        "DWYT_API_URL": "http://localhost:2737/api"
+      }
     }
   }
 }
-`, cbmcpBin, obsidianMCPBin)
+`, cbmcpBin, filepath.Join(projectDwytHome(), "codebase"), obsidianMCPBin)
 }
 
 func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
@@ -315,11 +293,17 @@ func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
   "mcp": {
     "codebase": {
       "type": "local",
-      "command": [%q]
+      "command": [%q],
+      "environment": {
+        "CBM_CACHE_DIR": %q
+      }
     },
     "obsidian": {
       "type": "local",
-      "command": [%q]
+      "command": [%q],
+      "environment": {
+        "DWYT_API_URL": "http://localhost:2737/api"
+      }
     }
   },
   "permission": {
@@ -329,100 +313,7 @@ func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
     "skill": "allow"
   }
 }
-`, cbmcpBin, obsidianMCPBin)
-}
-
-func agentsMDTemplate(rtkBin string) string {
-	_ = rtkBin
-	return dwytInstructions("codex")
-}
-
-func claudeMDTemplate() string {
-	return dwytInstructions("claude")
-}
-
-func cursorRuleTemplate() string {
-	return `---
-description: DWYT project guidance
-alwaysApply: true
----
-
-` + dwytInstructions("cursor")
-}
-
-func kiroSteeringTemplate() string {
-	return dwytInstructions("kiro")
-}
-
-func copilotMDTemplate() string {
-	return dwytInstructions("copilot")
-}
-
-func dwytInstructions(client string) string {
-	return fmt.Sprintf(`# DWYT — Don't Waste Your Tokens
-
-Este projeto usa RTK, Codebase MCP, Obsidian MCP e Headroom para reduzir desperdicio de tokens sem sobrescrever configuracoes manuais do usuario.
-
-## Ordem de Prioridade
-
-1. RTK — para comandos shell e automacoes de terminal.
-   - Prefixe comandos com rtk: rtk git status, rtk go test ./..., rtk npm run build.
-   - Em comandos encadeados, prefixe cada segmento.
-
-2. Codebase MCP — fonte primaria para estrutura real do codigo.
-   - Antes de diagnosticar, refatorar ou editar codigo estrutural, valide se o projeto esta indexado.
-   - Use search_graph para localizar simbolos, rotas, handlers, componentes, modulos e relacoes.
-   - Use trace_path para chamadas, fluxos, dependencias e impacto.
-   - Use get_code_snippet antes de aplicar mudancas.
-   - Evite grep/glob/find como primeira estrategia quando o grafo estiver disponivel.
-
-3. Obsidian MCP — memoria persistente oficial do projeto.
-   - Antes de trabalho relevante, busque notas e leia/reconstrua o resumo:
-     GET http://localhost:2737/api/obsidian/search?q=<query>
-     POST http://localhost:2737/api/obsidian/summarize
-   - Durante o trabalho, salve decisoes e tarefas:
-     POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"[[decisions]] ..."}
-     POST http://localhost:2737/api/obsidian/save {"type":"task","content":"[[tasks]] ..."}
-   - Ao final, salve contexto completo:
-     POST http://localhost:2737/api/obsidian/context
-
-4. Headroom — apenas proxy/cache compativel.
-   - Use somente quando OPENAI_BASE_URL ou ANTHROPIC_BASE_URL apontarem para o proxy local compativel.
-   - Nunca roteie Codex via Headroom quando Codex estiver autenticado por ChatGPT/OAuth.
-   - Se Headroom estiver inativo ou indisponivel, use os endpoints padrao.
-
-## Lei do Codebase
-
-Quando precisar entender, validar, diagnosticar ou alterar a estrutura real do codigo, consulte o Codebase MCP. O grafo indexado e a fonte primaria para arquivos, simbolos, dependencias, chamadas, caminhos e impacto. Nao crie codigo duplicado, remova arquivos ou mova componentes sem verificar relacoes e impacto no grafo.
-
-## Lei do Obsidian
-
-O vault Obsidian em ~/.dwyt/projects/<id>/obsidian/ e a memoria oficial do projeto. Mantenha notas com links internos como [[index]], [[maps/project-map]], [[instructions/obsidian-law]] e [[instructions/codebase-law]]. Nunca apague vaults, projetos, notas ou historico como tentativa de correcao automatica.
-
-Payload minimo para salvar contexto:
-
-{
-  "client": "%s",
-  "user_request": "...",
-  "summary": "...",
-  "files": ["..."],
-  "decisions": ["..."],
-  "actions": ["..."],
-  "commands": ["..."],
-  "errors": ["..."],
-  "outcome": "...",
-  "next_steps": ["..."],
-  "context": "..."
-}
-
-## Configuracoes do Usuario
-
-Arquivos de instrucao devem ser tratados em modo append-only seguro: crie o bloco DWYT se ausente, atualize somente o bloco entre os marcadores dwyt:instructions e preserve todo conteudo fora dele.
-
-## Validacao
-
-Antes de concluir mudancas, rode a validacao relevante: testes Go, build/lint do frontend quando disponivel, e verificacoes manuais dos estados installed, inactive e launch on demand.
-`, client)
+`, cbmcpBin, filepath.Join(projectDwytHome(), "codebase"), obsidianMCPBin)
 }
 
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"

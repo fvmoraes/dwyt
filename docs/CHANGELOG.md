@@ -31,7 +31,7 @@ All notable changes to DWYT are documented here.
 
 ### Bug Fixes
 
-- Fixed project Obsidian vault creation for repositories outside `~/.dwyt`; vaults now resolve under `~/.dwyt/projects/<sha12>/obsidian/`.
+- Fixed project Obsidian vault creation for repositories outside `~/.dwyt`; vaults now resolve under `~/.dwyt/projects/<sha12>/`.
 - Added canonical `status` values while keeping legacy `state`, `running`, and `healthy` fields for compatibility.
 - Aligned service status probes so Codebase and Headroom can report `online` when their health ports are already running outside ProcessManager.
 - Migrated legacy MCP registry keys (`dwyt`, `dwyt-codebase`, `dwyt-obsidian`, `obsidian-mcp`) to canonical `codebase` and `obsidian`.
@@ -68,7 +68,7 @@ All notable changes to DWYT are documented here.
 ### ✨ Features
 
 - **Install Obsidian** — new `POST /api/obsidian/install` downloads and installs the Obsidian desktop app for Linux (AppImage), with detection for macOS/Windows. Status polled via `GET /api/obsidian/install-status`.
-- **Open Vault Directory** — new `POST /api/obsidian/open-dir` opens the project vault directory (`~/.dwyt/projects/<id>/obsidian/`) in the system file manager (`xdg-open`/`open`/`explorer`).
+- **Open Vault Directory** — new `POST /api/obsidian/open-dir` opens the project vault directory (`~/.dwyt/projects/<id>/`) in the system file manager (`xdg-open`/`open`/`explorer`).
 - **Separated buttons** — Obsidian card now has three distinct buttons: "Open Vault" (Obsidian app), "Open Dir" (file manager), and "Install Obsidian" (download).
 - **MCP status granularity** — UI shows 🟢 online, 🟡 starting (port_open_no_health), 🔴 offline.
 

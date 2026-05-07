@@ -61,30 +61,38 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for _, tc := range []struct {
+		path string
+		key  string
+	}{
+		{".mcp.json", "mcpServers"},
+		{filepath.Join(".claude", "mcp.json"), "mcpServers"},
+		{filepath.Join(".cursor", "mcp.json"), "mcpServers"},
+		{filepath.Join(".kiro", "settings", "mcp.json"), "mcpServers"},
+		{filepath.Join(".kiro", "mcp.json"), "mcpServers"},
+		{filepath.Join(".windsurf", "mcp.json"), "mcpServers"},
+		{filepath.Join(".continue", "mcp.json"), "mcpServers"},
+	} {
+		assertRegistryMCPServers(t, filepath.Join(projectPath, tc.path), tc.key)
+	}
+
 	var vscode map[string]interface{}
 	readJSONFile(t, filepath.Join(projectPath, ".vscode", "mcp.json"), &vscode)
-	if _, ok := vscode["servers"].(map[string]interface{}); !ok {
-		t.Fatalf("expected VS Code servers config: %#v", vscode)
-	}
+	assertRegistryServerMap(t, filepath.Join(projectPath, ".vscode", "mcp.json"), vscode, "servers")
 
-	var cursor map[string]interface{}
-	readJSONFile(t, filepath.Join(projectPath, ".cursor", "mcp.json"), &cursor)
-	if _, ok := cursor["mcpServers"].(map[string]interface{}); !ok {
-		t.Fatalf("expected Cursor mcpServers config: %#v", cursor)
-	}
-
-	var kiro map[string]interface{}
-	readJSONFile(t, filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), &kiro)
-	if _, ok := kiro["mcpServers"].(map[string]interface{}); !ok {
-		t.Fatalf("expected Kiro mcpServers config: %#v", kiro)
-	}
+	var opencode map[string]interface{}
+	readJSONFile(t, filepath.Join(projectPath, "opencode.json"), &opencode)
+	assertRegistryServerMap(t, filepath.Join(projectPath, "opencode.json"), opencode, "mcp")
 
 	codex, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(codex), "[mcp_servers.codebase]") ||
-		!strings.Contains(string(codex), "[mcp_servers.obsidian]") {
+		!strings.Contains(string(codex), "[mcp_servers.codebase.env]") ||
+		!strings.Contains(string(codex), "CBM_CACHE_DIR") ||
+		!strings.Contains(string(codex), "[mcp_servers.obsidian]") ||
+		!strings.Contains(string(codex), "[mcp_servers.obsidian.env]") {
 		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
 	}
 }
@@ -149,5 +157,40 @@ func readJSONFile(t *testing.T, path string, out interface{}) {
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		t.Fatalf("%s: %v", path, err)
+	}
+}
+
+func assertRegistryMCPServers(t *testing.T, path, key string) {
+	t.Helper()
+	var config map[string]interface{}
+	readJSONFile(t, path, &config)
+	assertRegistryServerMap(t, path, config, key)
+}
+
+func assertRegistryServerMap(t *testing.T, path string, config map[string]interface{}, key string) {
+	t.Helper()
+	servers, ok := config[key].(map[string]interface{})
+	if !ok {
+		t.Fatalf("%s: expected %s config: %#v", path, key, config)
+	}
+	for _, name := range []string{"codebase", "obsidian"} {
+		server, ok := servers[name].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s: expected %s server in %#v", path, name, servers)
+		}
+		env, _ := server["env"].(map[string]interface{})
+		if env == nil {
+			env, _ = server["environment"].(map[string]interface{})
+		}
+		switch name {
+		case "codebase":
+			if env["CBM_CACHE_DIR"] == "" {
+				t.Fatalf("%s: expected codebase CBM_CACHE_DIR env in %#v", path, server)
+			}
+		case "obsidian":
+			if env["DWYT_API_URL"] != "http://localhost:2737/api" {
+				t.Fatalf("%s: expected obsidian DWYT_API_URL env in %#v", path, server)
+			}
+		}
 	}
 }

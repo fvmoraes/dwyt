@@ -346,7 +346,7 @@ inclusion: always
 # Obsidian - Project Memory
 
 Project path: %s
-Vault root: ~/.dwyt/projects/<id>/obsidian/
+Vault root: ~/.dwyt/projects/<id>/
 
 ## API
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
