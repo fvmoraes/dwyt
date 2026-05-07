@@ -3,18 +3,7 @@
 .vscode/
 .dwyt/
 
-# dwyt
-.claude/
-.vscode/
-.codex/
-.kiro/
-.windsurf/
-.continue/
-.github/copilot-instructions.md
-.codebase-memory/
-.cursor/mcp.json
-.cursor/rules/dwyt.mdc
-.cursorrules
-AGENTS.md
-.mcp.json
-opencode.json
+# dwyt start
+*mcp.json
+*opencode.json
+# dwyt end
