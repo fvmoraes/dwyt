@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,39 @@ func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
 	readJSON(t, filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), &kiro)
 	if _, ok := kiro["mcpServers"].(map[string]interface{}); !ok {
 		t.Fatalf("expected Kiro MCP config: %#v", kiro)
+	}
+
+	agents, err := os.ReadFile(filepath.Join(projectPath, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(agents), instructionMarkerStart) != 1 {
+		t.Fatalf("expected one DWYT instruction block, got:\n%s", string(agents))
+	}
+}
+
+func TestProjectUpdatesInstructionBlockWithoutOverwritingUserContent(t *testing.T) {
+	projectPath := t.TempDir()
+	dwytBin := filepath.Join(t.TempDir(), "bin")
+	agentsPath := filepath.Join(projectPath, "AGENTS.md")
+	original := "# Team Rules\n\nKeep this paragraph.\n"
+	if err := os.WriteFile(agentsPath, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	Project(projectPath, "codex", dwytBin)
+	Project(projectPath, "codex", dwytBin)
+
+	data, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, original) {
+		t.Fatalf("user content was not preserved:\n%s", content)
+	}
+	if strings.Count(content, instructionMarkerStart) != 1 || strings.Count(content, "#dwyt") != 1 {
+		t.Fatalf("expected exactly one DWYT block:\n%s", content)
 	}
 }
 

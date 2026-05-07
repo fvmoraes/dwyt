@@ -102,7 +102,7 @@ func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
 	}
 
 	out := map[string]*ToolDetail{
-		"codebase-memory-mcp": ds.detailCBMCP(),
+		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(),
 		"obsidian":            ds.detailObsidian(),
@@ -187,8 +187,11 @@ func (ds *DashboardServer) loadedRepos() []string {
 	return nil
 }
 
-func (ds *DashboardServer) detailCBMCP() *ToolDetail {
+func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
+	if projectPath != "" {
+		d.Repos = []string{projectPath}
+	}
 	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
@@ -201,6 +204,16 @@ func (ds *DashboardServer) detailCBMCP() *ToolDetail {
 	} else {
 		d.UptimeSecs = 0
 		d.UptimeLabel = "installed"
+	}
+	if ds.Store != nil && projectPath != "" {
+		if pj, err := ds.Store.GetProjectByPath(projectPath); err == nil && pj.IndexedAt != nil {
+			d.IndexedNodes = int64(pj.Nodes)
+			d.IndexedEdges = int64(pj.Edges)
+			d.TokensSaved, d.TokensUsed = estimateCodebaseTokenSavings(pj.Nodes, pj.Edges)
+			if d.TokensSaved > 0 {
+				d.SavingsBasis = "estimated from code graph nodes and edges avoided by MCP lookup"
+			}
+		}
 	}
 	return d
 }
@@ -306,6 +319,13 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	if files, ok := stats["total_files"].(int); ok {
 		d.MemoryCount = files
 	}
+	if totalBytes, ok := stats["total_bytes"].(int64); ok {
+		d.MemoryBytes = totalBytes
+		d.TokensSaved, d.TokensUsed = estimateObsidianTokenSavings(d.MemoryCount, totalBytes)
+		if d.TokensSaved > 0 {
+			d.SavingsBasis = "estimated from vault markdown bytes avoided by Obsidian MCP reuse"
+		}
+	}
 	if lu, ok := stats["last_updated"].(string); ok {
 		d.LastUpdated = lu
 		if t, err := time.Parse(time.RFC3339, lu); err == nil {
@@ -318,4 +338,28 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 		d.UptimeLabel = "online"
 	}
 	return d
+}
+
+func estimateCodebaseTokenSavings(nodes, edges int) (saved, used int64) {
+	if nodes <= 0 && edges <= 0 {
+		return 0, 0
+	}
+	manualTokens := int64(nodes)*72 + int64(edges)*12
+	mcpTokens := int64(1200 + nodes/10)
+	if manualTokens <= mcpTokens {
+		return 0, mcpTokens
+	}
+	return manualTokens - mcpTokens, mcpTokens
+}
+
+func estimateObsidianTokenSavings(files int, totalBytes int64) (saved, used int64) {
+	if files <= 0 || totalBytes < 512 {
+		return 0, 0
+	}
+	manualTokens := totalBytes / 4
+	mcpTokens := int64(300 + files*60)
+	if manualTokens <= mcpTokens {
+		return 0, mcpTokens
+	}
+	return manualTokens - mcpTokens, mcpTokens
 }

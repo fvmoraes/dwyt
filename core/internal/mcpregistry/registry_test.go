@@ -89,6 +89,48 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 	}
 }
 
+func TestSyncKiroPreservesExistingServers(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	t.Setenv("HOME", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
+
+	projectPath := t.TempDir()
+	kiroPath := filepath.Join(projectPath, ".kiro", "settings", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(kiroPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"mcpServers":{"user-tool":{"command":"/tmp/user","args":["--keep"]}},"custom":true}`
+	if err := os.WriteFile(kiroPath, []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SyncKiro(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	var kiro map[string]interface{}
+	readJSONFile(t, kiroPath, &kiro)
+	servers := kiro["mcpServers"].(map[string]interface{})
+	if _, ok := servers["user-tool"]; !ok {
+		t.Fatalf("expected existing Kiro MCP server to be preserved: %#v", servers)
+	}
+	if _, ok := servers["codebase"]; !ok {
+		t.Fatalf("expected DWYT codebase server: %#v", servers)
+	}
+	if kiro["custom"] != true {
+		t.Fatalf("expected custom top-level config to be preserved: %#v", kiro)
+	}
+}
+
 func touchExecutable(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

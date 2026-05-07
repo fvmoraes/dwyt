@@ -186,10 +186,6 @@ func (r *Registry) SyncClaudeDesktop() error {
 
 // SyncVSCode writes or updates .vscode/mcp.json in the project directory.
 func (r *Registry) SyncVSCode(projectPath string) error {
-	vscodeDir := filepath.Join(projectPath, ".vscode")
-	os.MkdirAll(vscodeDir, 0755)
-	mcpPath := filepath.Join(vscodeDir, "mcp.json")
-
 	servers := make(map[string]interface{})
 	for name, entry := range r.MCPServers {
 		if !entry.Enabled || !r.IsBinaryInstalled(name) {
@@ -197,19 +193,11 @@ func (r *Registry) SyncVSCode(projectPath string) error {
 		}
 		servers[name] = mcpServerConfig(entry, true)
 	}
-
-	config := map[string]interface{}{
-		"inputs":  []interface{}{},
-		"servers": servers,
-	}
-
-	data, _ := json.MarshalIndent(config, "", "  ")
-	return os.WriteFile(mcpPath, data, 0644)
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), "servers", servers, true)
 }
 
 // SyncCursor writes project-scoped MCP config for Cursor.
 func (r *Registry) SyncCursor(projectPath string) error {
-	mcpPath := filepath.Join(projectPath, ".cursor", "mcp.json")
 	servers := make(map[string]interface{})
 	for name, entry := range r.MCPServers {
 		if !entry.Enabled || !r.IsBinaryInstalled(name) {
@@ -217,7 +205,7 @@ func (r *Registry) SyncCursor(projectPath string) error {
 		}
 		servers[name] = mcpServerConfig(entry, false)
 	}
-	return writeJSONFile(mcpPath, map[string]interface{}{"mcpServers": servers})
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), "mcpServers", servers, false)
 }
 
 // SyncKiro writes both current and legacy Kiro workspace MCP config paths.
@@ -229,11 +217,10 @@ func (r *Registry) SyncKiro(projectPath string) error {
 		}
 		servers[name] = mcpServerConfig(entry, false)
 	}
-	config := map[string]interface{}{"mcpServers": servers}
-	if err := writeJSONFile(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), config); err != nil {
+	if err := writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), "mcpServers", servers, false); err != nil {
 		return err
 	}
-	return writeJSONFile(filepath.Join(projectPath, ".kiro", "mcp.json"), config)
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), "mcpServers", servers, false)
 }
 
 // SyncCodexGlobal writes MCP servers to Codex's shared config file.
@@ -319,6 +306,35 @@ func writeJSONFile(path string, value interface{}) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+func writeMergedMCPJSON(path, serverKey string, managedServers map[string]interface{}, ensureInputs bool) error {
+	config := make(map[string]interface{})
+	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		json.Unmarshal(data, &config)
+	}
+	servers, _ := config[serverKey].(map[string]interface{})
+	if servers == nil {
+		servers = make(map[string]interface{})
+	}
+	removeLegacyServerKeys(servers)
+	for name, entry := range managedServers {
+		servers[name] = entry
+	}
+	config[serverKey] = servers
+	if ensureInputs {
+		if _, ok := config["inputs"]; !ok {
+			config["inputs"] = []interface{}{}
+		}
+		delete(config, "mcpServers")
+	}
+	return writeJSONFile(path, config)
+}
+
+func removeLegacyServerKeys(servers map[string]interface{}) {
+	for _, key := range []string{"dwyt", "dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
+		delete(servers, key)
+	}
 }
 
 func removeManagedBlock(content, start, end string) string {

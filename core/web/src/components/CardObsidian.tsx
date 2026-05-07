@@ -21,6 +21,7 @@ interface Props {
   saveContent: string
   searchResult: string
   t: Record<string, string>
+  fmtN: (n: number | undefined) => string
   setSaveType: (v: string) => void
   setSaveContent: (v: string) => void
   setSearchQuery: (v: string) => void
@@ -36,6 +37,7 @@ export default function CardObsidian({
   det, state, badgeText, repoName, indexPath, obsidianCount,
   savingBrain, openingBrain, openingDir, summarizing, configuringMCP,
   mcpRegistry, searchQuery, saveType, saveContent, searchResult, t,
+  fmtN,
   setSaveType, setSaveContent, setSearchQuery,
   onSave, onSearch, onSummarize, onOpenVault, onOpenDir, onConfigure,
 }: Props) {
@@ -54,6 +56,7 @@ export default function CardObsidian({
       <CardHeader label={t.obsidianActive} color="#f08d49" state={state} badgeText={badgeText} />
       <Hr />
       <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
+      <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
       <Row label="MCP" value={mcpValue} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />

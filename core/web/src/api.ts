@@ -234,6 +234,7 @@ export interface KiroPowerStatus {
   installed: boolean
   power_dir: string
   kiro_link: string
+  activation_status: string
   mcps: Record<string, boolean>
   updated_at: string
   errors?: string[]

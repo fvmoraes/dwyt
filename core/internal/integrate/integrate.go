@@ -41,7 +41,7 @@ func Project(projectPath, clients, dwytBin string) {
 
 	if containsClient(clientList, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
-		writeIfMissing(cp, claudeMD)
+		writeOrUpdateInstructionFile(cp, claudeMD)
 		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
 		// Claude also reads .claude/mcp.json
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin)
@@ -50,14 +50,14 @@ func Project(projectPath, clients, dwytBin string) {
 	if containsClient(clientList, "cursor") {
 		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeIfMissing(cp, cursorRule)
+		writeOrUpdateInstructionFile(cp, cursorRule)
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
 	if containsClient(clientList, "kiro") {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeIfMissing(cp, kiroSteering)
+		writeOrUpdateInstructionFile(cp, kiroSteering)
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), cbmcpBin, obsidianMCPBin)
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
@@ -65,10 +65,10 @@ func Project(projectPath, clients, dwytBin string) {
 	if containsClient(clientList, "copilot") {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeIfMissing(cp, copilotMD)
+		writeOrUpdateInstructionFile(cp, copilotMD)
 	}
 
-	writeIfMissing(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
+	writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
 
 	// ── Per-project workspace state ─────────────────────────────────────
 	workspace.Touch(projectPath)
@@ -108,6 +108,72 @@ func writeIfMissing(path, content string) {
 	}
 	os.MkdirAll(filepath.Dir(path), 0755)
 	os.WriteFile(path, []byte(content), 0644)
+}
+
+const instructionMarkerStart = "<!-- dwyt:instructions:start -->"
+const instructionMarkerEnd = "<!-- dwyt:instructions:end -->"
+
+func writeOrUpdateInstructionFile(path, content string) {
+	managedBlock, fullBlock := dwytInstructionBlocks(content)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		os.MkdirAll(filepath.Dir(path), 0755)
+		os.WriteFile(path, []byte(fullBlock), 0644)
+		return
+	}
+
+	current := string(data)
+	if !strings.Contains(current, instructionMarkerStart) && strings.TrimSpace(current) == strings.TrimSpace(content) {
+		current = ""
+	}
+	next := upsertManagedBlock(current, instructionMarkerStart, instructionMarkerEnd, managedBlock, fullBlock)
+	if next == current {
+		return
+	}
+	os.WriteFile(path, []byte(next), 0644)
+}
+
+func dwytInstructionBlocks(content string) (managed string, full string) {
+	body := strings.TrimSpace(content)
+	frontmatter := ""
+	if strings.HasPrefix(body, "---\n") {
+		if endRel := strings.Index(body[4:], "\n---"); endRel >= 0 {
+			endIdx := 4 + endRel + len("\n---")
+			if endIdx < len(body) && body[endIdx] == '\n' {
+				endIdx++
+			}
+			frontmatter = strings.TrimRight(body[:endIdx], "\n") + "\n"
+			body = strings.TrimSpace(body[endIdx:])
+		}
+	}
+	if !strings.Contains(body, "#dwyt") {
+		body = "#dwyt\n\n" + body
+	}
+	managed = instructionMarkerStart + "\n" + body + "\n" + instructionMarkerEnd + "\n"
+	return managed, frontmatter + managed
+}
+
+func upsertManagedBlock(content, start, end, managedBlock, fullBlock string) string {
+	startIdx := strings.Index(content, start)
+	if startIdx >= 0 {
+		endRel := strings.Index(content[startIdx:], end)
+		if endRel >= 0 {
+			endIdx := startIdx + endRel + len(end)
+			if endIdx < len(content) && content[endIdx] == '\n' {
+				endIdx++
+			}
+			return content[:startIdx] + strings.TrimRight(managedBlock, "\n") + "\n" + content[endIdx:]
+		}
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return fullBlock
+	}
+	separator := "\n\n"
+	if strings.HasSuffix(content, "\n") {
+		separator = "\n"
+	}
+	return content + separator + managedBlock
 }
 
 func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
@@ -290,7 +356,7 @@ func agentsMDTemplate(rtkBin string) string {
 		"### 4. Codebase — Mapa do Código (SOB DEMANDA)\n" +
 		"- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.\n" +
 		"- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.\n" +
-		"- Use `search_graph`, `trace_call_path`, `get_code_snippet` ao invés de grep/glob.\n"
+		"- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.\n"
 }
 
 const claudeMD = `# DWYT — Don't Waste Your Tokens
@@ -309,7 +375,7 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 3. **RTK** — always prefix shell commands with rtk. Reduces output 60-90%.
 
 4. **Codebase MCP** — ONLY when you need structural code understanding.
-   Prefer Obsidian context first. Use search_graph, trace_call_path, get_code_snippet.
+   Prefer Obsidian context first. Use search_graph, trace_path, get_code_snippet.
 `
 
 const cursorRule = `---

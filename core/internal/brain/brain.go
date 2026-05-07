@@ -480,12 +480,14 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 
 	typeCount := map[string]int{}
 	totalFiles := 0
+	var totalBytes int64
 
 	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
 		totalFiles++
+		totalBytes += info.Size()
 		entryType := detectType(pb.brainDir, path)
 		typeCount[entryType]++
 		return nil
@@ -496,6 +498,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 		"project_name":  pb.ProjectName,
 		"project_path":  pb.ProjectPath,
 		"total_files":   totalFiles,
+		"total_bytes":   totalBytes,
 		"files_by_type": typeCount,
 		"has_summary":   pb.Summary != "",
 		"summary":       pb.Summary,

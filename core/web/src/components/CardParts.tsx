@@ -17,11 +17,11 @@ export function CardHeader({ label, color, state, badgeText }: {
   )
 }
 
-export function Row({ label, value, valueColor = 'var(--text)' }: { label: string; value: string; valueColor?: string }) {
+export function Row({ label, value, valueColor = 'var(--text)', title }: { label: string; value: string; valueColor?: string; title?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
       <span style={{ color: 'var(--muted)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace', fontSize: 10, color: valueColor }}>{value || '\u2014'}</span>
+      <span title={title} style={{ fontFamily: 'monospace', fontSize: 10, color: valueColor }}>{value || '\u2014'}</span>
     </div>
   )
 }

@@ -242,16 +242,20 @@ export default function Dashboard() {
   const totalSaved = Object.values(details).reduce((a, d) => a + (d?.tokens_saved || 0), 0)
   const rtkSaved = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
+  const obsidianSaved = details['obsidian']?.tokens_saved || 0
+  const codebaseSaved = details['codebase-memory-mcp']?.tokens_saved || 0
   const obsidianCount = typeof obsidianStats?.total_files === 'number' ? obsidianStats.total_files as number : 0
 
   function calcWithout() {
     let w = 0
-    const r = details['rtk'], h = details['headroom']
-    if (r?.tokens_saved && r?.pct_saved && r.pct_saved > 0) w += r.tokens_saved / (r.pct_saved / 100)
-    else if (r?.tokens_saved) w += r.tokens_saved * 2
-    if (h?.tokens_saved && h?.compression_pct && h.compression_pct > 0) w += h.tokens_saved / (h.compression_pct / 100)
-    else if (h?.tokens_saved) w += h.tokens_saved * 2
-    return Math.round(w)
+    for (const d of Object.values(details)) {
+      if (!d?.tokens_saved) continue
+      if (d.pct_saved && d.pct_saved > 0) w += d.tokens_saved / (d.pct_saved / 100)
+      else if (d.compression_pct && d.compression_pct > 0) w += d.tokens_saved / (d.compression_pct / 100)
+      else if (d.tokens_used) w += d.tokens_saved + d.tokens_used
+      else w += d.tokens_saved * 2
+    }
+    return Math.round(Math.max(w, totalSaved))
   }
 
   const withoutDwyt = calcWithout()
@@ -374,8 +378,8 @@ export default function Dashboard() {
               {[
                 { label: t.terminalOptimized, saved: rtkSaved, color: '#845ef7' },
                 { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
-                { label: t.obsidianActive, saved: 0, color: '#f08d49' },
-                { label: t.codeMap, saved: 0, color: '#339af0' },
+                { label: t.obsidianActive, saved: obsidianSaved, color: '#f08d49' },
+                { label: t.codeMap, saved: codebaseSaved, color: '#339af0' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ fontSize: 9, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
@@ -418,7 +422,7 @@ export default function Dashboard() {
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <span title={kiroPower.power_dir} style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <span style={{ color: 'var(--blue)', fontWeight: 700, textTransform: 'uppercase' }}>{t.kiroPower}: </span>
-                {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
+                {kiroPower.installed ? t.kiroPowerInstalled : t.kiroPowerNotInstalled} · {kiroPower.activation_status || 'unknown'} · {t.kiroPowerMCPs}: codebase {kiroPower.mcps?.codebase ? 'on' : 'missing'} · obsidian {kiroPower.mcps?.obsidian ? 'on' : 'missing'}
                 {kiroPower.errors && kiroPower.errors.length > 0 ? ` · ${kiroPower.errors.join(', ')}` : ''}
               </span>
               <Button
@@ -444,6 +448,7 @@ export default function Dashboard() {
           configuringMCP={configuringMCP} mcpRegistry={mcpRegistry} indexError={indexError}
           t={t} cbmcp={cbmcp}
           getDetail={getDetail} toolState={toolState} badge={s => badge(s, t)}
+          fmtN={fmtN}
           setIndexPath={setIndexPath} onIndex={handleIndex}
           onOpenGraph={handleOpenGraph}
           onConfigure={() => handleConfigureMCP('codebase')}
@@ -476,7 +481,7 @@ export default function Dashboard() {
           summarizing={summarizing} configuringMCP={configuringMCP}
           mcpRegistry={mcpRegistry} searchQuery={searchQuery}
           saveType={saveType} saveContent={saveContent} searchResult={searchResult}
-          t={t}
+          t={t} fmtN={fmtN}
           setSaveType={setSaveType} setSaveContent={setSaveContent} setSearchQuery={setSearchQuery}
           onSave={async () => {
             if (!saveContent) return
@@ -484,7 +489,7 @@ export default function Dashboard() {
             try { await api.saveBrain(saveType, saveContent); setSaveContent(''); pollAll() } catch { /* */ }
             setSavingBrain(false)
           }}
-          onSearch={handleSearch}
+          onSearch={async () => { await handleSearch(); pollAll() }}
           onSummarize={async () => {
             setSummarizing(true)
             try {

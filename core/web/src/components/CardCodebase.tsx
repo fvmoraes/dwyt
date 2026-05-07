@@ -16,6 +16,7 @@ interface Props {
   getDetail: (n: string) => ToolDetail | undefined
   toolState: (tool: ToolInfo | undefined, det: ToolDetail | undefined) => ToolState
   badge: (s: ToolState) => BadgeText
+  fmtN: (n: number | undefined) => string
   setIndexPath: (v: string) => void
   onIndex: () => void
   onOpenGraph: () => Promise<void>
@@ -23,7 +24,7 @@ interface Props {
 }
 
 export default function CardCodebase(props: Props) {
-  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, cbmcp, getDetail, toolState, badge, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
+  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, cbmcp, getDetail, toolState, badge, fmtN, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
   const det = getDetail('codebase-memory-mcp')
   const state = toolState(cbmcp, det) as 'not_installed' | 'inactive' | 'active'
   const b = badge(state)
@@ -41,7 +42,7 @@ export default function CardCodebase(props: Props) {
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <CardHeader label={t.codeMap} color="#339af0" state={state} badgeText={b} />
       <Hr />
-      <Row label={t.tokensSavedLabel} value={'\u2014'} />
+      <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
       <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
       <Row label="MCP" value={mcpValue} />

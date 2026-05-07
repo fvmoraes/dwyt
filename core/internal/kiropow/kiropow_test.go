@@ -17,10 +17,17 @@ func TestEnsurePower_FirstRun(t *testing.T) {
 	if !status.Installed {
 		t.Fatal("expected installed power")
 	}
+	if status.ActivationStatus != "linked" {
+		t.Fatalf("expected linked activation status, got %s", status.ActivationStatus)
+	}
 	for _, rel := range []string{"POWER.md", "mcp.json", "steering/dwyt-context.md"} {
 		if _, err := os.Stat(filepath.Join(status.PowerDir, rel)); err != nil {
 			t.Fatalf("missing %s: %v", rel, err)
 		}
+	}
+	powerMD, _ := os.ReadFile(filepath.Join(status.PowerDir, "POWER.md"))
+	if !strings.HasPrefix(string(powerMD), "---\nname: \"dwyt-power\"") {
+		t.Fatalf("expected Kiro Power frontmatter, got:\n%s", string(powerMD))
 	}
 }
 
@@ -187,6 +194,22 @@ func TestGenerateMCPJSON_OnlyExistingBinaries(t *testing.T) {
 	}
 	if strings.Contains(data, "dwyt-obsidian-mcp") {
 		t.Fatal("did not expect obsidian MCP")
+	}
+}
+
+func TestSteeringUsesValidKiroInclusionModes(t *testing.T) {
+	for name, content := range map[string]string{
+		"context":  steeringContext(),
+		"obsidian": steeringObsidian("/tmp/project"),
+		"rtk":      steeringRTK(),
+		"headroom": steeringHeadroom(),
+	} {
+		if !strings.Contains(content, "inclusion: always") {
+			t.Fatalf("%s steering should use inclusion: always, got:\n%s", name, content)
+		}
+	}
+	if !strings.Contains(steeringCodebase(), "inclusion: manual") {
+		t.Fatalf("codebase steering should stay manual")
 	}
 }
 

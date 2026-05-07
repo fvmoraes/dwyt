@@ -13,21 +13,23 @@ import (
 )
 
 type PowerStatus struct {
-	Installed bool            `json:"installed"`
-	PowerDir  string          `json:"power_dir"`
-	KiroLink  string          `json:"kiro_link"`
-	MCPs      map[string]bool `json:"mcps"`
-	UpdatedAt string          `json:"updated_at"`
-	Errors    []string        `json:"errors,omitempty"`
+	Installed        bool            `json:"installed"`
+	PowerDir         string          `json:"power_dir"`
+	KiroLink         string          `json:"kiro_link"`
+	ActivationStatus string          `json:"activation_status"`
+	MCPs             map[string]bool `json:"mcps"`
+	UpdatedAt        string          `json:"updated_at"`
+	Errors           []string        `json:"errors,omitempty"`
 }
 
 func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
 	powerDir := filepath.Join(dwytHome, "powers", "dwyt-power")
 	status := &PowerStatus{
-		PowerDir:  powerDir,
-		KiroLink:  kiroLinkPath(),
-		MCPs:      ValidateMCPBinaries(dwytBin),
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		PowerDir:         powerDir,
+		KiroLink:         kiroLinkPath(),
+		ActivationStatus: "created",
+		MCPs:             ValidateMCPBinaries(dwytBin),
+		UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := os.MkdirAll(filepath.Join(powerDir, "steering"), 0755); err != nil {
@@ -47,27 +49,32 @@ func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
 	}
 	if err := RegisterWithKiro(powerDir); err != nil {
 		status.Errors = append(status.Errors, err.Error())
-		return status, err
+		status.ActivationStatus = "manual_activation_required"
+		return status, nil
 	}
 
 	status.Installed = true
+	status.ActivationStatus = "linked"
 	return status, nil
 }
 
 func Status(dwytHome, dwytBin string) *PowerStatus {
 	powerDir := filepath.Join(dwytHome, "powers", "dwyt-power")
 	st := &PowerStatus{
-		Installed: fileExists(filepath.Join(powerDir, "POWER.md")) && fileExists(filepath.Join(powerDir, "mcp.json")),
-		PowerDir:  powerDir,
-		KiroLink:  kiroLinkPath(),
-		MCPs:      ValidateMCPBinaries(dwytBin),
-		UpdatedAt: "",
+		Installed:        fileExists(filepath.Join(powerDir, "POWER.md")) && fileExists(filepath.Join(powerDir, "mcp.json")),
+		PowerDir:         powerDir,
+		KiroLink:         kiroLinkPath(),
+		ActivationStatus: "missing",
+		MCPs:             ValidateMCPBinaries(dwytBin),
+		UpdatedAt:        "",
 	}
 	if info, err := os.Stat(filepath.Join(powerDir, "POWER.md")); err == nil {
 		st.UpdatedAt = info.ModTime().UTC().Format(time.RFC3339)
+		st.ActivationStatus = "created"
 	}
 	if st.Installed && NeedsUpdate(powerDir, dwytBin) {
 		st.Errors = append(st.Errors, "needs_update")
+		st.ActivationStatus = "needs_update"
 	}
 	if target, err := os.Readlink(st.KiroLink); err != nil || target != powerDir {
 		st.Installed = false
@@ -76,6 +83,11 @@ func Status(dwytHome, dwytBin string) *PowerStatus {
 		} else {
 			st.Errors = append(st.Errors, "kiro symlink points to "+target)
 		}
+		if st.ActivationStatus != "missing" {
+			st.ActivationStatus = "manual_activation_required"
+		}
+	} else if st.Installed {
+		st.ActivationStatus = "linked"
 	}
 	return st
 }
@@ -114,13 +126,17 @@ func ValidateMCPBinaries(dwytBin string) map[string]bool {
 }
 
 func GeneratePowerMD(dwytBin, projectPath string, mcps map[string]bool) string {
-	return fmt.Sprintf(`# DWYT Power
+	return fmt.Sprintf(`---
+name: "dwyt-power"
+displayName: "DWYT Power"
+description: "Use DWYT project memory, code graph, RTK, and Headroom to reduce token usage while working in this repository."
+keywords: ["dwyt", "codebase", "obsidian", "mcp", "memory", "project memory", "token savings", "repo analysis", "arquitetura", "refatoracao", "debugging", "documentacao", "contexto do projeto"]
+author: "DWYT"
+---
+
+# DWYT Power
 
 DWYT (Don't Waste Your Tokens) is a local orchestrator that reduces AI token consumption by managing Obsidian memory, the Codebase graph, RTK terminal compression, and the Headroom API proxy.
-
-## Keywords
-
-dwyt, codebase, obsidian, rtk, headroom, mcp, memory, tokens, compression, vault, knowledge, graph, proxy, context, economia de tokens, memoria
 
 ## Tools
 
@@ -128,11 +144,12 @@ dwyt, codebase, obsidian, rtk, headroom, mcp, memory, tokens, compression, vault
 Persistent markdown vault per project. Search before reading files.
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
 - Save:   POST http://localhost:2737/api/obsidian/save
+- Context: POST http://localhost:2737/api/obsidian/context
 - Types:  decision, task, note, error, command, session
 
 ### Codebase - Code Knowledge Graph (ON DEMAND)
 Structural exploration of the codebase. Use only for architecture questions.
-- MCP tools: search_graph, trace_call_path, get_code_snippet
+- MCP tools: search_graph, trace_path, get_code_snippet
 - Start: POST http://localhost:2737/api/services/codebase/start
 
 ### RTK - Terminal Compression (ALWAYS)
@@ -142,6 +159,7 @@ Prefix all shell commands with rtk to reduce output before it enters context.
 ### Headroom - API Proxy (AUTOMATIC)
 Compresses API calls. Auto-detected via env vars.
 - Active when: OPENAI_BASE_URL or ANTHROPIC_BASE_URL point to 127.0.0.1:8787
+- Exception: Codex authenticated through ChatGPT/OAuth must not be routed through Headroom.
 
 ## Priority Order
 1. Obsidian FIRST - check vault before any file read
@@ -158,6 +176,10 @@ DWYT bin: %s
 
 - codebase: %t
 - obsidian: %t
+
+## Completion
+
+At the end of relevant tasks, save a concise context record to Obsidian with the user request, summary, files changed, decisions, actions, commands, errors, outcome, and next steps.
 `, projectPath, dwytBin, mcps["codebase"], mcps["obsidian"])
 }
 
@@ -167,12 +189,14 @@ func GenerateMCPJSON(dwytBin string, mcps map[string]bool) (string, error) {
 		servers["codebase"] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("codebase-memory-mcp")),
 			"args":    []string{"--ui=true", "--port=9749"},
+			"env":     map[string]string{"CBM_CACHE_DIR": filepath.Join(dwytBin, "..", "codebase")},
 		}
 	}
 	if mcps["obsidian"] {
 		servers["obsidian"] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("dwyt-obsidian-mcp")),
 			"args":    []string{},
+			"env":     map[string]string{"DWYT_API_URL": "http://localhost:2737/api"},
 		}
 	}
 	data, err := json.MarshalIndent(map[string]interface{}{"mcpServers": servers}, "", "  ")
@@ -268,7 +292,7 @@ func kiroLinkPath() string {
 
 func steeringContext() string {
 	return `---
-inclusion: auto
+inclusion: always
 ---
 
 # DWYT Context Rules
@@ -293,7 +317,7 @@ POST http://localhost:2737/api/obsidian/context
 
 func steeringObsidian(projectPath string) string {
 	return fmt.Sprintf(`---
-inclusion: auto
+inclusion: always
 ---
 
 # Obsidian - Project Memory
@@ -326,7 +350,7 @@ Use only when you need to understand code structure. Prefer Obsidian context fir
 
 ## MCP Tools
 - search_graph
-- trace_call_path
+- trace_path
 - get_code_snippet
 
 ## API
@@ -338,7 +362,7 @@ Use only when you need to understand code structure. Prefer Obsidian context fir
 
 func steeringRTK() string {
 	return `---
-inclusion: auto
+inclusion: always
 ---
 
 # RTK - Terminal Compression
@@ -357,7 +381,7 @@ GET http://localhost:2737/api/rtk/gain
 
 func steeringHeadroom() string {
 	return `---
-inclusion: auto
+inclusion: always
 ---
 
 # Headroom - API Proxy
@@ -366,6 +390,8 @@ Headroom compresses AI API calls automatically.
 
 ## Detection
 If OPENAI_BASE_URL or ANTHROPIC_BASE_URL point to 127.0.0.1:8787, Headroom is active.
+
+Do not route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
 
 ## Status
 GET http://localhost:2737/api/services/headroom/status

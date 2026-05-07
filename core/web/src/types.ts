@@ -10,6 +10,7 @@ export interface ToolInfo {
 
 export interface ToolDetail {
   tokens_saved: number
+  tokens_used?: number
   uptime_secs: number
   uptime_label: string
   repos: string[] | null
@@ -18,8 +19,12 @@ export interface ToolDetail {
   proxy_port?: number
   total_commands?: number
   pct_saved?: number
+  indexed_nodes?: number
+  indexed_edges?: number
   memory_count?: number
+  memory_bytes?: number
   last_updated?: string
+  savings_basis?: string
 }
 
 export type Details = Record<string, ToolDetail>

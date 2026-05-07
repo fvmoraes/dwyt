@@ -32,7 +32,7 @@ Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],
 ### 4. Codebase — Mapa do Código (SOB DEMANDA)
 - **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.
 - Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.
-- Use `search_graph`, `trace_call_path`, `get_code_snippet` ao invés de grep/glob.
+- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.
 
 
 <!-- headroom:rtk-instructions -->
