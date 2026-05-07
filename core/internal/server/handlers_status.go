@@ -269,13 +269,11 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 		d.UptimeSecs = 0
 		d.UptimeLabel = "installed"
 	}
-	if ds.Store != nil && projectPath != "" {
-		if pj, err := ds.Store.GetProjectByPath(projectPath); err == nil && pj.IndexedAt != nil {
-			d.IndexedNodes = int64(pj.Nodes)
-			d.IndexedEdges = int64(pj.Edges)
-			saved, used := estimateCodebaseTokenSavings(pj.Nodes, pj.Edges)
-			applyTokenEstimate(d, saved, used, "local_estimate:codebase_graph_metadata", "estimated from code graph nodes and edges avoided by MCP lookup")
-		}
+	if nodes, edges := ds.codebaseGraphStats(projectPath); nodes > 0 || edges > 0 {
+		d.IndexedNodes = int64(nodes)
+		d.IndexedEdges = int64(edges)
+		saved, used := estimateCodebaseTokenSavings(nodes, edges)
+		applyTokenEstimate(d, saved, used, "local_estimate:codebase_graph_metadata", "estimated from code graph nodes and edges avoided by MCP lookup")
 	}
 	return d
 }

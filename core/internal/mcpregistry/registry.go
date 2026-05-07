@@ -136,10 +136,14 @@ func (r *Registry) SyncClaudeDesktop() error {
 		if args == nil {
 			args = []string{}
 		}
-		claudeConfig[name] = map[string]interface{}{
+		config := map[string]interface{}{
 			"command": entry.Command,
 			"args":    args,
 		}
+		if env := mcpServerEnv(name, entry); len(env) > 0 {
+			config["env"] = env
+		}
+		claudeConfig[name] = config
 	}
 
 	if len(claudeConfig) == 0 {
@@ -276,6 +280,13 @@ func (r *Registry) codexTOMLBlock() string {
 		b.WriteString("]\n")
 		b.WriteString("startup_timeout_sec = 20\n")
 		b.WriteString("tool_timeout_sec = 120\n\n")
+		if env := mcpServerEnv(name, entry); len(env) > 0 {
+			b.WriteString(fmt.Sprintf("[mcp_servers.%s.env]\n", name))
+			for key, value := range env {
+				b.WriteString(fmt.Sprintf("%s = %q\n", key, value))
+			}
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString("# dwyt:mcp:end\n")
 	if !wrote {
@@ -292,11 +303,32 @@ func mcpServerConfig(entry MCPServerEntry, includeType bool) map[string]interfac
 	cfg := map[string]interface{}{
 		"command": entry.Command,
 		"args":    args,
+		"type":    "stdio",
 	}
-	if includeType {
-		cfg["type"] = "stdio"
+	_ = includeType
+	if env := mcpServerEnv("", entry); len(env) > 0 {
+		cfg["env"] = env
 	}
 	return cfg
+}
+
+func mcpServerEnv(name string, entry MCPServerEntry) map[string]interface{} {
+	env := map[string]interface{}{}
+	if isCodebaseEntry(name, entry) {
+		env["CBM_CACHE_DIR"] = filepath.Join(dwytHome(), "codebase")
+	}
+	if isObsidianEntry(name, entry) {
+		env["DWYT_API_URL"] = "http://localhost:2737/api"
+	}
+	return env
+}
+
+func isCodebaseEntry(name string, entry MCPServerEntry) bool {
+	return name == "codebase" || strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp")
+}
+
+func isObsidianEntry(name string, entry MCPServerEntry) bool {
+	return name == "obsidian" || strings.Contains(filepath.Base(entry.Command), "dwyt-obsidian-mcp")
 }
 
 func writeJSONFile(path string, value interface{}) error {
@@ -399,28 +431,6 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 
 	log.Info("mcp configs synced", log.Fields{"project": projectPath})
 	return nil
-}
-
-func (r *Registry) syncConfiguredTargets(projectPath string) []string {
-	errors := []string{}
-	if err := r.SyncClaudeDesktop(); err != nil {
-		errors = append(errors, "claude: "+err.Error())
-	}
-	if err := r.SyncCodexGlobal(); err != nil {
-		errors = append(errors, "codex: "+err.Error())
-	}
-	if projectPath != "" {
-		if err := r.SyncVSCode(projectPath); err != nil {
-			errors = append(errors, "vscode: "+err.Error())
-		}
-		if err := r.SyncCursor(projectPath); err != nil {
-			errors = append(errors, "cursor: "+err.Error())
-		}
-		if err := r.SyncKiro(projectPath); err != nil {
-			errors = append(errors, "kiro: "+err.Error())
-		}
-	}
-	return errors
 }
 
 // SyncAll syncs MCP config for all agents using the given project path.

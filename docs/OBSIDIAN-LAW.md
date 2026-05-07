@@ -69,7 +69,7 @@ Legacy `decisions.md` and `tasks.md` may exist as compatibility pointers, but ne
 
 ## Persistence Rule
 
-Project vaults live under `~/.dwyt/projects/<id>/obsidian/`. Install, repair, reinstall, clean, reset, and uninstall flows must preserve `~/.dwyt/projects/` and must never delete vaults, notes, project memories, or history automatically.
+Project vaults live under `~/.dwyt/projects/<id>/`. Install, repair, reinstall, clean, reset, and uninstall flows must preserve `~/.dwyt/projects/` and must never delete vaults, notes, project memories, or history automatically.
 
 ## Context Payload
 

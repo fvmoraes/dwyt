@@ -7,7 +7,7 @@ DWYT (Don't Waste Your Tokens) is a self-contained, single-binary orchestrator t
 ```
 User runs: dwyt .
   → Detects project directory
-  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>/obsidian/)
+  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>/)
   → Starts Headroom proxy in background (port 8787)
   → Codebase sits idle (on-demand indexing)
   → RTK is active as CLI tool
@@ -143,7 +143,7 @@ dwyt daemon
 ### Structure
 
 ```
-~/.dwyt/projects/<sha256[:12]>/obsidian/
+~/.dwyt/projects/<sha256[:12]>/
 ├── index.md                  # project index with structure overview
 ├── context.md                # full summary, rebuilt from all files
 ├── instructions/

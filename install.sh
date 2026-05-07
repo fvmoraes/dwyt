@@ -15,6 +15,7 @@ INSTALL_DIR=""; DEST=""
 RELEASE_ARCHIVE=""; RELEASE_BINARY=""
 DOWNLOADER=""; LOCAL_BIN=""; SHELL_RC=""
 SCRIPT_DIR=""  # set by bootstrap_lib when running from a real file
+BOOTSTRAP_LIB_DIR=""  # set by load_lib_from_remote; cleaned up via EXIT trap
 
 # Lib files are loaded in order. Each lives in install-lib/ next to this
 # script when running from a clone, or is fetched from GitHub raw when this
@@ -53,17 +54,20 @@ load_lib_from() {
 }
 
 load_lib_from_remote() {
-  local lib_dir f
-  lib_dir="$(mktemp -d)"
-  trap 'rm -rf "$lib_dir"' EXIT
+  local f
+  # BOOTSTRAP_LIB_DIR is script-scoped (not local) so the EXIT trap, which
+  # fires after this function returns, can still see it under `set -u`.
+  # A `local lib_dir` would be out of scope at trap time → "lib_dir: unbound".
+  BOOTSTRAP_LIB_DIR="$(mktemp -d)"
+  trap 'rm -rf "${BOOTSTRAP_LIB_DIR:-}"' EXIT
   for f in "${LIB_FILES[@]}"; do
-    if ! bootstrap_fetch "${LIB_RAW_URL}/${f}.sh" "${lib_dir}/${f}.sh"; then
+    if ! bootstrap_fetch "${LIB_RAW_URL}/${f}.sh" "${BOOTSTRAP_LIB_DIR}/${f}.sh"; then
       echo "  ✗  failed to download install-lib/${f}.sh from ${LIB_RAW_URL}" >&2
       echo "  ✗  install requires curl or wget" >&2
       exit 1
     fi
   done
-  load_lib_from "$lib_dir"
+  load_lib_from "$BOOTSTRAP_LIB_DIR"
 }
 
 # Minimal fetch used only by the bootstrap, before output.sh and platform.sh
@@ -99,6 +103,12 @@ USAGE
 }
 
 main() {
+  # When piped via `curl|bash` the inherited cwd may be a transient
+  # directory that vanishes mid-install (e.g. a tmpdir cleaned up by the
+  # parent). Anchor early to $HOME so every child process — `python -m
+  # pip`, `go build`, etc. — runs from a directory that exists.
+  cd "${HOME:-/}" 2>/dev/null || true
+
   bootstrap_lib
   parse_args "$@"
   print_banner

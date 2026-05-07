@@ -48,6 +48,9 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 	if activeProject == "" {
 		activeProject = cfg.ProjectPath
 	}
+	if activeProject != "" {
+		ds.codebaseGraphStats(activeProject)
+	}
 
 	var projectsList []map[string]interface{}
 	if ds.Store != nil {

@@ -40,7 +40,7 @@ func Detect() *Env {
 	e := &Env{Arch: runtime.GOARCH}
 
 	// os.UserHomeDir() works on all platforms:
-	//   Linux/macOS → /home/user  or  /Users/user
+	//   Linux/macOS -> $HOME
 	//   Windows     → C:\Users\user
 	e.HomeDir, _ = os.UserHomeDir()
 	if e.HomeDir == "" {
@@ -66,7 +66,7 @@ func Detect() *Env {
 		e.DwytHome = filepath.Join(e.HomeDir, ".dwyt")
 	}
 
-	e.DwytBin  = filepath.Join(e.DwytHome, "bin")
+	e.DwytBin = filepath.Join(e.DwytHome, "bin")
 	e.DwytData = filepath.Join(e.DwytHome, "data")
 
 	// OS detection
@@ -85,16 +85,16 @@ func Detect() *Env {
 
 	// Shell detection
 	if runtime.GOOS == "windows" {
-		e.Shell   = ShellPowerShell
+		e.Shell = ShellPowerShell
 		// PowerShell profile — created if missing
 		e.ShellRC = filepath.Join(e.HomeDir, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
 		e.LoginRC = ""
 	} else if strings.Contains(os.Getenv("SHELL"), "zsh") || os.Getenv("ZSH_VERSION") != "" {
-		e.Shell   = ShellZsh
+		e.Shell = ShellZsh
 		e.ShellRC = filepath.Join(e.HomeDir, ".zshrc")
 		e.LoginRC = filepath.Join(e.HomeDir, ".zprofile")
 	} else {
-		e.Shell   = ShellBash
+		e.Shell = ShellBash
 		e.ShellRC = filepath.Join(e.HomeDir, ".bashrc")
 		e.LoginRC = filepath.Join(e.HomeDir, ".profile")
 		if fileExists(filepath.Join(e.HomeDir, ".bash_profile")) {

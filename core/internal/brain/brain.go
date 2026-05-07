@@ -84,16 +84,17 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		return nil, err
 	}
 
-	// Migrate old "brain" folder to "obsidian" if it exists
-	oldDir := filepath.Join(baseDir, "brain")
-	newDir := filepath.Join(baseDir, "obsidian")
-	if _, err := os.Stat(oldDir); err == nil {
-		if _, err2 := os.Stat(newDir); os.IsNotExist(err2) {
-			os.Rename(oldDir, newDir)
-		}
+	// Vault layout: ~/.dwyt/projects/<id>/ IS the Obsidian vault. The
+	// directory basename (the project SHA) is what shows up in Obsidian's
+	// vault picker, so every project gets a unique label instead of all
+	// reading "obsidian". migrateLegacyVaultLayout moves content from any
+	// previous "brain" or "obsidian" subfolder up to baseDir so existing
+	// installs keep their notes.
+	if err := migrateLegacyVaultLayout(baseDir); err != nil {
+		return nil, err
 	}
 
-	brainDir := newDir
+	brainDir := baseDir
 	os.MkdirAll(brainDir, 0755)
 
 	dirs := []string{
@@ -385,14 +386,15 @@ func MigrateOldMemoryDirs(dwytHome string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		memoryDir := filepath.Join(projectsDir, entry.Name(), "memory")
+		baseDir := filepath.Join(projectsDir, entry.Name())
+		memoryDir := filepath.Join(baseDir, "memory")
 		if info, err := os.Stat(memoryDir); err == nil && info.IsDir() {
 			memoryFile := filepath.Join(memoryDir, "memory.json")
 			if data, err := os.ReadFile(memoryFile); err == nil && len(data) > 2 {
-				brainDir := filepath.Join(projectsDir, entry.Name(), "obsidian")
-				os.MkdirAll(filepath.Join(brainDir, "knowledge"), 0755)
-				os.MkdirAll(filepath.Join(brainDir, "logs"), 0755)
-				ensureSeedFiles(brainDir)
+				_ = migrateLegacyVaultLayout(baseDir)
+				os.MkdirAll(filepath.Join(baseDir, "knowledge"), 0755)
+				os.MkdirAll(filepath.Join(baseDir, "logs"), 0755)
+				ensureSeedFiles(baseDir)
 				var pm struct {
 					Entries []struct {
 						Type    string `json:"type"`
@@ -401,11 +403,60 @@ func MigrateOldMemoryDirs(dwytHome string) error {
 				}
 				if err := json.Unmarshal(data, &pm); err == nil {
 					for _, e := range pm.Entries {
-						appendToMarkdown(brainDir, e.Type, e.Content)
+						appendToMarkdown(baseDir, e.Type, e.Content)
 					}
 				}
 			}
 			os.RemoveAll(memoryDir)
+		}
+	}
+	return nil
+}
+
+// migrateLegacyVaultLayout flattens older project layouts where the vault
+// content lived in a "brain" or "obsidian" subdirectory. After this
+// runs, baseDir itself is the Obsidian vault and its basename (the
+// project SHA) is the vault name shown in Obsidian.
+//
+// The function is idempotent: if no legacy directory is present it is a
+// no-op. If a legacy directory exists alongside files already at baseDir,
+// only files that don't collide are moved up; the legacy folder is then
+// removed (or kept if it's still non-empty after the move).
+func migrateLegacyVaultLayout(baseDir string) error {
+	for _, legacy := range []string{"obsidian", "brain"} {
+		oldDir := filepath.Join(baseDir, legacy)
+		info, err := os.Stat(oldDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if err := flattenInto(oldDir, baseDir); err != nil {
+			return fmt.Errorf("migrate legacy vault %q: %w", legacy, err)
+		}
+		// Best-effort cleanup. If anything remained (collision), leave
+		// it in place rather than risk losing user content.
+		_ = os.Remove(oldDir)
+	}
+	return nil
+}
+
+func flattenInto(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		if _, err := os.Stat(to); err == nil {
+			// Don't overwrite. Skip the file so the user can resolve
+			// it manually; it stays inside the legacy directory.
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			return fmt.Errorf("move %s -> %s: %w", from, to, err)
 		}
 	}
 	return nil

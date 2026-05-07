@@ -8,6 +8,8 @@
 .vscode/
 .codex/
 .kiro/
+.windsurf/
+.continue/
 .github/copilot-instructions.md
 .codebase-memory/
 .cursor/mcp.json
