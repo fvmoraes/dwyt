@@ -55,6 +55,14 @@ if [[ "$GOOS" == "windows" ]]; then
   RELEASE_BINARY="dwyt.exe"
 fi
 
+install_binary() {
+  local src="$1"
+  local tmp_dest="${DEST}.tmp.$$"
+  cp "$src" "$tmp_dest"
+  chmod +x "$tmp_dest"
+  mv -f "$tmp_dest" "$DEST"
+}
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}"
@@ -85,18 +93,31 @@ header "Locating binary..."
 info "Platform : $OS $ARCH ($GOOS/$GOARCH)"
 info "Archive  : $RELEASE_ARCHIVE"
 info "Dest     : $DEST"
+if [[ -f "$DEST" ]]; then
+  info "Existing installation will be overwritten"
+fi
 
-# Script directory — works whether piped or run directly
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/stdin}")" 2>/dev/null && pwd || echo "")"
-LOCAL_BIN="${SCRIPT_DIR}/${RELEASE_BINARY}"
+# Script directory is trusted only when this script is run from a real file.
+# Piped installs must always fetch the latest release from GitHub.
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+LOCAL_BIN=""
+if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
+  case "$SCRIPT_PATH" in
+    /dev/stdin|/dev/fd/*|/proc/self/fd/*) ;;
+    *)
+      SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd || echo "")"
+      LOCAL_BIN="${SCRIPT_DIR}/${RELEASE_BINARY}"
+      ;;
+  esac
+fi
 
 mkdir -p "$INSTALL_DIR"
 
 if [[ -f "$LOCAL_BIN" ]]; then
   # ── Case 1: binary is next to the install script (local clone / release zip)
   info "Found local binary at $LOCAL_BIN"
-  cp "$LOCAL_BIN" "$DEST"
-  chmod +x "$DEST"
+  install_binary "$LOCAL_BIN"
   success "Copied from local file"
 
 else
@@ -153,9 +174,9 @@ else
     
     if [[ $DL_OK -eq 1 ]]; then
       if [[ "$GOOS" == "windows" ]]; then
-        unzip -qo "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+        unzip -qo "$TMP_FILE" 2>/dev/null && install_binary "$RELEASE_BINARY" 2>/dev/null && DL_OK=1 || DL_OK=0
       else
-        tar -xzf "$TMP_FILE" 2>/dev/null && cp "$RELEASE_BINARY" "$DEST" 2>/dev/null && DL_OK=1 || DL_OK=0
+        tar -xzf "$TMP_FILE" 2>/dev/null && install_binary "$RELEASE_BINARY" 2>/dev/null && DL_OK=1 || DL_OK=0
       fi
     fi
     rm -rf "$TMP_DIR"
@@ -165,16 +186,22 @@ else
     # ── Case 3: Releases not available — try raw main branch (dev)
     info "Releases not found, trying main branch..."
     DOWNLOAD_URL="${GITHUB_RAW}/dwyt-${GOOS}-${GOARCH}"
+    TMP_DIR="$(mktemp -d)"
+    TMP_FILE="${TMP_DIR}/${RELEASE_BINARY}"
 
     if [[ "$DOWNLOADER" == "curl" ]]; then
-      if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$DEST" 2>/dev/null; then
+      if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
         DL_OK=1
       fi
     else
-      if wget -q --show-progress "$DOWNLOAD_URL" -O "$DEST" 2>/dev/null; then
+      if wget -q --show-progress "$DOWNLOAD_URL" -O "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
         DL_OK=1
       fi
     fi
+    if [[ $DL_OK -eq 1 ]]; then
+      install_binary "$TMP_FILE" || DL_OK=0
+    fi
+    rm -rf "$TMP_DIR"
   fi
 
   if [[ $DL_OK -eq 0 ]]; then
@@ -196,7 +223,6 @@ else
     exit 1
   fi
 
-  chmod +x "$DEST"
   success "Downloaded successfully"
 fi
 

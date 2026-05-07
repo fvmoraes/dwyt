@@ -1,6 +1,6 @@
 # Plano revisado - DWYT token savings, instrucoes das IAs e Kiro Power
 
-Objetivo: implementar melhorias no DWYT para medir economia estimada de tokens em Codebase e Obsidian, reforcar o uso correto das ferramentas integradas nas instrucoes das IAs, preservar arquivos existentes em modo append-only seguro e atualizar a integracao do Kiro Power conforme a documentacao atual.
+Objetivo: implementar melhorias no DWYT para medir economia estimada de tokens em Codebase e Obsidian, reforcar o uso correto das ferramentas integradas nas instrucoes das IAs, preservar arquivos existentes em modo append-only seguro, atualizar a integracao do Kiro Power conforme a documentacao atual e manter instalacao/status/atualizacao coerentes entre CLI e UI.
 
 ## Premissas
 
@@ -9,6 +9,9 @@ Objetivo: implementar melhorias no DWYT para medir economia estimada de tokens e
 - Blocos controlados pelo DWYT devem ser identificaveis, idempotentes e atualizaveis sem duplicacao.
 - A UI deve continuar funcionando com os dados atuais de RTK e Headroom.
 - A excecao do Codex autenticado via ChatGPT/OAuth deve continuar impedindo configuracao indevida do Headroom.
+- O instalador via `curl ... | bash` deve sempre baixar a versao publicada mais recente e sobrescrever a versao anterior instalada.
+- Estados exibidos por CLI e UI devem usar a mesma semantica: ferramentas sob demanda instaladas nao devem aparecer como falha.
+- A Lei do Obsidian e obrigatoria para agentes, documentacao, templates gerados e vaults novos.
 
 ## 1. Tokens Saved - Codebase
 
@@ -46,7 +49,38 @@ Validacao:
 - resumo global inclui a economia do Obsidian;
 - vault vazio ou recem-criado nao gera numeros artificiais altos.
 
-## 3. Dados reais vs estimativas locais
+## 3. Lei do Obsidian - obrigatorio
+
+O Obsidian e a memoria oficial do projeto. Toda interacao de agente deve seguir esta ordem:
+
+1. Antes de agir, consultar o Obsidian para contexto:
+   - buscar notas existentes via Obsidian MCP/API;
+   - reconstruir ou ler o resumo atual do vault.
+2. Durante a acao, salvar decisoes e status:
+   - `type: "decision"` para ADRs e escolhas tecnicas;
+   - `type: "task"` para tarefas, progresso e status.
+3. Ao final de toda tarefa, salvar contexto completo com todos os campos:
+   - `summary`;
+   - `user_request`;
+   - `files`;
+   - `decisions`;
+   - `actions`;
+   - `commands`;
+   - `errors`;
+   - `outcome`;
+   - `next_steps`;
+   - `context`.
+
+O vault do Obsidian deve ser rico, interligado e organizado, usando notas, folders, links internos, templates, instrucoes e mapas de navegacao. Todo contexto relevante deve ser salvo nele pelos agentes de IA.
+
+Validacao:
+
+- `docs/OBSIDIAN-LAW.md` documenta a regra completa;
+- `AGENTS.md`, `CLAUDE.md`, Cursor, Kiro, Copilot e Kiro Power reforcam a obrigatoriedade;
+- novos vaults nascem com `instructions/`, `templates/`, `maps/`, links internos e templates basicos;
+- nenhuma tarefa e encerrada sem `obsidian_save_context`.
+
+## 4. Dados reais vs estimativas locais
 
 Manter dados reais quando ja existem:
 
@@ -56,7 +90,7 @@ Manter dados reais quando ja existem:
 
 As estimativas devem ser documentadas no codigo por nomes claros de helpers, nao por comentarios longos.
 
-## 4. Arquivos de instrucao das IAs em modo append-only seguro
+## 5. Arquivos de instrucao das IAs em modo append-only seguro
 
 Atualizar a geracao de arquivos como:
 
@@ -84,11 +118,12 @@ Marcadores:
 <!-- dwyt:instructions:end -->
 ```
 
-## 5. Conteudo padrao das instrucoes DWYT
+## 6. Conteudo padrao das instrucoes DWYT
 
 O bloco deve instruir as IAs a usar:
 
 - Obsidian como primeira fonte de contexto persistente;
+- Lei do Obsidian com consulta antes, salvamento durante e contexto completo ao final;
 - Codebase MCP para descoberta estrutural antes de varrer o repositorio manualmente;
 - RTK para comandos shell;
 - Headroom quando compativel;
@@ -104,9 +139,11 @@ O payload de contexto deve incluir:
 - acoes;
 - comandos;
 - erros;
+- resultado;
 - proximos passos.
+- contexto para agentes futuros.
 
-## 6. Kiro Power e configuracao MCP
+## 7. Kiro Power e configuracao MCP
 
 Atualizar a integracao com Kiro conforme documentacao atual:
 
@@ -142,7 +179,7 @@ Keywords minimas:
 - `documentacao`
 - `contexto do projeto`
 
-## 7. Seguranca e nao regressao
+## 8. Seguranca e nao regressao
 
 Validar que:
 
@@ -155,7 +192,26 @@ Validar que:
 - testes Go passam;
 - build/lint do frontend e executado quando disponivel.
 
-## 8. Resultado esperado
+## 9. Instalacao, status e novas versoes
+
+Garantir que o fluxo publico de instalacao e atualizacao seja previsivel:
+
+- `curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash` sempre baixa a release mais recente;
+- a instalacao sobrescreve com seguranca o binario antigo em `~/.local/bin/dwyt`;
+- execucao via pipe nao reaproveita binario local do diretorio atual por acidente;
+- `dwyt status` carrega o vault do projeto quando disponivel, igual ao daemon da UI;
+- `installed (launch on demand)` e estados equivalentes aparecem como saudaveis ou inativos, nao como erro;
+- a UI consulta a release mais recente publicada;
+- quando existir versao nova, a UI mostra um aviso discreto com botao para abrir a instrucao de atualizacao;
+- a instrucao exibida e o comando oficial de instalacao via `curl`.
+
+Validacao:
+
+- `dwyt status` condiz com os cards da UI para Codebase, RTK, Headroom e Obsidian;
+- o aviso de nova versao nao aparece para builds `dev` nem quando a versao local ja e atual;
+- falha de rede na consulta de release nao quebra a dashboard.
+
+## 10. Resultado esperado
 
 Ao fim da execucao:
 
@@ -163,6 +219,8 @@ Ao fim da execucao:
 - Codebase e Obsidian alimentam `tokens_saved`;
 - o resumo global inclui Codebase e Obsidian;
 - arquivos das IAs sao atualizados em modo append-only seguro;
+- a Lei do Obsidian esta refletida nas docs, templates e vault seed;
 - o Kiro Power segue a estrutura atual esperada;
+- instalacao, status e atualizacao ficam consistentes entre CLI, UI e README;
 - a validacao automatica foi executada;
 - commit e push ficam a cargo do usuario.

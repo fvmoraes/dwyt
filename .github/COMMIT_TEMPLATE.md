@@ -3,6 +3,8 @@
 Every push to `main` that touches `core/**`, `install.sh`, or `.github/workflows/release.yml`
 triggers an **automatic release**. The commit message controls the version bump and the changelog.
 
+Before committing, follow the Obsidian Law: consult the vault, save relevant decisions/tasks, and save final context for the work. See `docs/OBSIDIAN-LAW.md`.
+
 ---
 
 ## Commit Format

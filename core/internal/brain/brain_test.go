@@ -24,7 +24,21 @@ func TestNewProjectObsidianAllowsProjectOutsideDwytHome(t *testing.T) {
 		t.Fatalf("vault dir escaped dwyt home: %s", vaultDir)
 	}
 
-	for _, rel := range []string{"index.md", "context.md", "decisions.md", "tasks.md", "knowledge", "logs"} {
+	for _, rel := range []string{
+		"index.md",
+		"context.md",
+		"decisions.md",
+		"tasks.md",
+		"knowledge",
+		"logs",
+		filepath.Join("logs", "sessions"),
+		"templates",
+		"instructions",
+		"maps",
+		filepath.Join("instructions", "obsidian-law.md"),
+		filepath.Join("templates", "session-context-template.md"),
+		filepath.Join("maps", "project-map.md"),
+	} {
 		if _, err := os.Stat(filepath.Join(vaultDir, rel)); err != nil {
 			t.Fatalf("expected seed path %s: %v", rel, err)
 		}

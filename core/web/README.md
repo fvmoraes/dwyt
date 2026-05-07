@@ -1,5 +1,9 @@
 # React + TypeScript + Vite
 
+## DWYT Project Memory
+
+This frontend belongs to DWYT, so the repository-level [Obsidian Law](../../docs/OBSIDIAN-LAW.md) applies here too: consult the Obsidian vault before work, save decisions/tasks during implementation, and save complete context at the end of every task. Keep UI decisions linked back into the project vault when they affect behavior or design.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

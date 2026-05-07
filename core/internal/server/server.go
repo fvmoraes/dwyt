@@ -108,6 +108,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		Port:            port,
 		DwytBin:         dwytBin,
 		DwytHome:        dwytHome,
+		ReleaseVersion:  releaseVersion,
 		StartCwd:        project,
 		DefaultProject:  project,
 		Store:           store,

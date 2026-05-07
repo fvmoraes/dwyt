@@ -27,6 +27,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/cwd", ds.apiCwd)
 		api.GET("/tool-details", ds.apiToolDetails)
 		api.GET("/context", ds.apiContext)
+		api.GET("/version/check", ds.apiVersionCheck)
 		api.POST("/codebase/open-ui", ds.apiCodebaseOpenUI)
 		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
 		api.POST("/project/switch", ds.apiProjectSwitch)

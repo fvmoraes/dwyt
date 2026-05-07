@@ -339,11 +339,17 @@ func agentsMDTemplate(rtkBin string) string {
 		"**Todas as integrações são transparentes: você não precisa configurar nada.**\n\n" +
 		"## Ordem de prioridade (siga sempre esta ordem):\n\n" +
 		"### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)\n" +
-		"The project vault is an Obsidian vault with markdown files.\n" +
-		"Search: GET http://localhost:2737/api/obsidian/search?q=<query>\n" +
-		"Save: POST http://localhost:2737/api/obsidian/save\n" +
-		"Save context at the end of every task: POST http://localhost:2737/api/obsidian/context\n" +
-		"Payload: {\"client\":\"codex\",\"user_request\":\"...\",\"summary\":\"...\",\"files\":[\"...\"],\"decisions\":[\"...\"],\"actions\":[\"...\"],\"outcome\":\"...\"}\n\n" +
+		"**LEI DO OBSIDIAN: o vault é a memória oficial do projeto. Toda interação deve consultar, enriquecer e salvar contexto nele.**\n" +
+		"- ANTES de agir: buscar notas existentes e resumo do vault.\n" +
+		"  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>\n" +
+		"  - Summarize: POST http://localhost:2737/api/obsidian/summarize\n" +
+		"- DURANTE a ação: salvar decisões e tarefas/status importantes.\n" +
+		"  - Decision: POST http://localhost:2737/api/obsidian/save {\"type\":\"decision\",\"content\":\"...\"}\n" +
+		"  - Task: POST http://localhost:2737/api/obsidian/save {\"type\":\"task\",\"content\":\"...\"}\n" +
+		"- AO FINAL de toda tarefa: salvar contexto completo.\n" +
+		"  - Context: POST http://localhost:2737/api/obsidian/context\n" +
+		"  - Payload: {\"client\":\"codex\",\"user_request\":\"...\",\"summary\":\"...\",\"files\":[\"...\"],\"decisions\":[\"...\"],\"actions\":[\"...\"],\"commands\":[\"...\"],\"errors\":[\"...\"],\"outcome\":\"...\",\"next_steps\":[\"...\"],\"context\":\"...\"}\n" +
+		"- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instruções.\n\n" +
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
@@ -364,10 +370,13 @@ const claudeMD = `# DWYT — Don't Waste Your Tokens
 ## Priority order (follow strictly):
 1. **Obsidian FIRST** — before any file read or context rebuild:
    - Search: GET http://localhost:2737/api/obsidian/search?q=your+query
+   - Summarize: POST http://localhost:2737/api/obsidian/summarize
    - Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   - Save conversation context at task end: POST http://localhost:2737/api/obsidian/context {"client":"claude","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
-   - Types: command, decision, action, error, note
+   - Save tasks/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+   - Save complete context at task end: POST http://localhost:2737/api/obsidian/context {"client":"claude","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
+   - Types: command, decision, task, error, note, session
    - Never mix vaults between projects — isolation is automatic.
+   - Keep the vault rich, linked, and organized with notes, folders, internal links, templates, and instructions.
 
 2. **Headroom** — auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
    If set, use them. If not, use default API endpoints. No manual config needed.
@@ -386,12 +395,16 @@ alwaysApply: true
 ## DWYT Priority Order:
 1. **Obsidian FIRST**: consult project vault before any file operation.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Save: POST http://localhost:2737/api/obsidian/save
-   Save conversation context at task end: POST http://localhost:2737/api/obsidian/context
+   Summarize: POST http://localhost:2737/api/obsidian/summarize
+   Save decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
+   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
+   Keep the vault rich with folders, links, templates, and instructions.
 2. **Headroom**: auto via OPENAI_BASE_URL / ANTHROPIC_BASE_URL env vars.
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
-Save important decisions to Obsidian after completion.
+Never finish a task without saving context to Obsidian.
 `
 
 const kiroSteering = `# DWYT Steering
@@ -399,27 +412,34 @@ const kiroSteering = `# DWYT Steering
 ## Priority:
 1. **Obsidian FIRST**: check project vault before reading files.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+   Summarize: POST http://localhost:2737/api/obsidian/summarize
    Save: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
-   Save context at task end: POST http://localhost:2737/api/obsidian/context {"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
+   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+   Save context at task end: POST http://localhost:2737/api/obsidian/context {"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
+   Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
 2. **Headroom**: auto-detected via env vars OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix all shell commands with rtk
 4. **Codebase MCP**: structural exploration only — use after Obsidian
 
-Save important decisions to Obsidian after completion.
+Never finish a task without saving context to Obsidian.
 `
 
 const copilotMD = `# DWYT — GitHub Copilot
 
 ## Priority:
-1. **Obsidian FIRST**: check project vault before heavy file reads.
+1. **Obsidian FIRST**: check project vault before acting.
    Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-   Save: POST http://localhost:2737/api/obsidian/save
-   Save conversation context at task end: POST http://localhost:2737/api/obsidian/context
+   Summarize: POST http://localhost:2737/api/obsidian/summarize
+   Save decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+   Save task/status: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+   Save complete context at task end: POST http://localhost:2737/api/obsidian/context
+   Required context fields: user_request, summary, files, decisions, actions, commands, errors, outcome, next_steps, context.
+   Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
 2. **Headroom**: compression auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL
 3. **RTK**: prefix shell commands with rtk
 4. **Codebase MCP**: structural exploration only when needed
 
-Save summaries after important changes via Obsidian API.
+Never finish a task without saving context to Obsidian API.
 `
 
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"

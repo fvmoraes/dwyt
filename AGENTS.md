@@ -13,11 +13,19 @@ Este projeto usa ferramentas automáticas para reduzir consumo de tokens.
 ## Ordem de prioridade (siga sempre esta ordem):
 
 ### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)
-The project vault is an Obsidian vault with markdown files.
-Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-Save: POST http://localhost:2737/api/obsidian/save
-Save context at task end: POST http://localhost:2737/api/obsidian/context
-Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
+**LEI DO OBSIDIAN — OBRIGATORIO:** o vault e a memoria oficial do projeto. Toda tarefa deve consultar, enriquecer e salvar contexto nele.
+
+- **ANTES de agir:** buscar notas existentes e resumir o vault.
+  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+  - Summarize: POST http://localhost:2737/api/obsidian/summarize
+- **DURANTE a acao:** salvar decisoes e tarefas/status importantes.
+  - Decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+  - Task: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+- **AO FINAL de toda tarefa:** salvar contexto completo.
+  - Context: POST http://localhost:2737/api/obsidian/context
+  - Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
+- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instrucoes.
+- Nunca encerre uma tarefa sem salvar contexto no Obsidian.
 
 ### 2. Headroom — Compressão de API (AUTOMÁTICO)
 - Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.

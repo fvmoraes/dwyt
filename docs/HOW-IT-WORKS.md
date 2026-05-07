@@ -147,9 +147,32 @@ dwyt daemon
 ├── context.md            # full summary (auto-rebuilt from all files)
 ├── decisions.md          # architecture decisions (append-only log)
 ├── tasks.md              # active tasks (append-only checklist)
+├── instructions/
+│   └── obsidian-law.md   # mandatory agent memory workflow
+├── maps/
+│   └── project-map.md    # navigation hub with internal links
+├── templates/
+│   ├── decision-template.md
+│   ├── task-template.md
+│   └── session-context-template.md
 ├── knowledge/            # knowledge base articles (timestamped files)
-└── logs/                 # sessions, errors, commands
+└── logs/
+    ├── sessions/         # full task/session context
+    ├── errors/           # error records
+    └── commands/         # command records
 ```
+
+### Obsidian Law
+
+The vault is the official memory of the project. Every AI agent must:
+
+1. Search and summarize Obsidian before acting.
+2. Save technical decisions as `decision` and task/status updates as `task` during work.
+3. Save complete context at the end of every task via `/api/obsidian/context`.
+
+Required context fields: `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
+
+The vault should remain rich and navigable through folders, internal links, templates, instructions, and project maps.
 
 ### File Format (Frontmatter YAML)
 
@@ -173,6 +196,7 @@ SQLite provides embedded persistence without external dependencies...
 | GET | `/api/obsidian/search?q=` | Full-text search across all .md files |
 | POST | `/api/obsidian/save` | Save entry `{"type":"decision","content":"..."}` |
 | POST | `/api/obsidian/summarize` | Rebuild context.md from all files |
+| POST | `/api/obsidian/context` | Save complete task/session context |
 | POST | `/api/obsidian/open` | Open vault in Obsidian (`obsidian://open?path=`) |
 | POST | `/api/obsidian/open-dir` | Open vault directory in file manager |
 | POST | `/api/obsidian/install` | Download and install Obsidian app (Linux: AppImage) |
@@ -462,6 +486,7 @@ Component mounts
 | GET | `/api/obsidian/search?q=` | Search vault files |
 | POST | `/api/obsidian/save` | Save entry |
 | POST | `/api/obsidian/summarize` | Rebuild context.md |
+| POST | `/api/obsidian/context` | Save complete task/session context |
 | POST | `/api/obsidian/open` | Open in Obsidian |
 
 ### MCP Registry
@@ -566,6 +591,9 @@ Component mounts
 │       │   ├── context.md
 │       │   ├── decisions.md
 │       │   ├── tasks.md
+│       │   ├── instructions/
+│       │   ├── maps/
+│       │   ├── templates/
 │       │   ├── knowledge/
 │       │   └── logs/
 │       ├── project.json          # project metadata + last_open
@@ -613,11 +641,13 @@ Shared instruction files such as `AGENTS.md`, `.cursor/rules/dwyt.mdc`,
 ### Instruction Priority (all files)
 
 ```
-1. Obsidian FIRST  → consult vault before any operation
+1. Obsidian FIRST  → consult and summarize vault before any operation
 2. Headroom        → auto-detected via env vars
 3. RTK             → prefix shell commands with 'rtk'
 4. Codebase MCP    → ONLY for structural code exploration
 ```
+
+All generated instruction files also require agents to save decisions/tasks during work and complete context at task end. See [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
 
 ---
 
@@ -731,8 +761,9 @@ User runs: dwyt .
        │   → ANTHROPIC_BASE_URL=http://127.0.0.1:8787
        │
        ├─ AI client reads AGENTS.md / CLAUDE.md
-       │   → Instructed to query Obsidian vault FIRST
+       │   → Instructed to query and summarize Obsidian vault FIRST
        │   → GET /api/obsidian/search?q=<task description>
+       │   → POST /api/obsidian/summarize
        │
        ├─ API calls pass through Headroom proxy
        │   → ~34% token compression
@@ -740,8 +771,12 @@ User runs: dwyt .
        ├─ Shell commands prefixed with rtk
        │   → 60-98% output compression
        │
-       └─ After important changes:
+       ├─ During important changes:
            → POST /api/obsidian/save {"type":"decision","content":"..."}
+       │   → POST /api/obsidian/save {"type":"task","content":"..."}
+       │
+       └─ At task end:
+           → POST /api/obsidian/context {"client":"...","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
 ```
 
 ---
@@ -791,6 +826,7 @@ DWYT documentation follows a structured approach to maintain clarity and histori
 docs/
 ├── CHANGELOG.md              # Chronological list of all changes (organized by date)
 ├── HOW-IT-WORKS.md          # This file - always kept up-to-date with latest architecture
+├── OBSIDIAN-LAW.md          # Mandatory memory workflow for agents
 └── DDMMYYYY/                # Date-specific folders for detailed change documentation
     ├── FIXES.md             # Technical details of fixes implemented on this date
     ├── SUMMARY.md           # Final status, test results, and executive summary

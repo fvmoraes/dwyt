@@ -12,7 +12,7 @@ DWYT orchestrates four tools that drastically reduce token usage in clients like
 curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 ```
 
-The script detects your platform, downloads the binary from GitHub Releases, configures PATH, and guides you through the next steps.
+The script detects your platform, downloads the latest binary from GitHub Releases, overwrites any previous `dwyt` binary in `~/.local/bin`, configures PATH, and guides you through the next steps.
 
 ---
 
@@ -67,6 +67,9 @@ obsidian/
 ├── context.md       # auto-rebuilt summary
 ├── decisions.md     # architecture decisions log
 ├── tasks.md         # active tasks
+├── instructions/    # mandatory agent rules, including Obsidian Law
+├── maps/            # navigation maps and internal links
+├── templates/       # reusable decision/task/session templates
 ├── knowledge/       # knowledge base articles
 └── logs/            # sessions, errors, commands
 ```
@@ -75,12 +78,14 @@ obsidian/
 
 **"Open in Obsidian"** button on the card opens the vault directory directly.
 
-**IAs are instructed** to query the vault before any operation — eliminating context rebuilds.
+**Obsidian Law**: IAs must query and summarize the vault before acting, save decisions and task/status during work, and save complete context at the end of every task. The vault should stay rich, interlinked, and organized with folders, internal links, templates, and instructions.
 
 | API | Purpose |
 |-----|---------|
 | `GET /api/obsidian/search?q=` | Search vault before starting a task |
 | `POST /api/obsidian/save` | Save a decision, error, task, or note |
+| `POST /api/obsidian/summarize` | Rebuild the vault summary |
+| `POST /api/obsidian/context` | Save complete task/session context |
 
 ### Headroom — automatic API compression
 
@@ -277,10 +282,12 @@ Setup creates or updates these files in the project directory. Local configs wit
 ```
 
 **All instruct IAs** in this priority order:
-1. **Obsidian FIRST** — query the vault before any operation
+1. **Obsidian FIRST** — query and summarize the vault before any operation
 2. **Headroom** — automatic compression via `headroom wrap`
 3. **RTK** — prefix shell commands with `rtk`
 4. **Codebase MCP** — structural exploration only when needed
+
+The generated instructions also enforce the [Obsidian Law](docs/OBSIDIAN-LAW.md): save decisions as `decision`, tasks/status as `task`, and final handoff context with `summary`, `user_request`, `files`, `decisions`, `actions`, `commands`, `errors`, `outcome`, `next_steps`, and `context`.
 
 ---
 

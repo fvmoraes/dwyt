@@ -4,6 +4,19 @@ All notable changes to DWYT are documented here.
 
 ---
 
+## Unreleased
+
+### Documentation
+
+- Added `docs/OBSIDIAN-LAW.md`, making Obsidian the mandatory official project memory for every agent interaction.
+- Updated README, architecture docs, testing docs, release docs, and generated agent instructions to require Obsidian search/summarize before work, decision/task saves during work, and complete context saves at task end.
+
+### Improvements
+
+- New Obsidian vaults are seeded with richer structure: `instructions/`, `maps/`, `templates/`, nested log folders, and internal links for navigation.
+
+---
+
 ## v4.1.0 — Plan Execution, Status Contract, Kiro Power (2026-05-06)
 
 ### Bug Fixes

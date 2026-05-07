@@ -67,6 +67,8 @@ export default function Dashboard() {
   const [showLogs, setShowLogs] = useState(searchParams.get('logs') === '1')
   const [indexPath, setIndexPath] = useState(searchParams.get('project') || '')
   const [projectCtx, setProjectCtx] = useState<ProjectContext>({})
+  const [versionCheck, setVersionCheck] = useState<api.VersionCheck | null>(null)
+  const [showUpdateInstructions, setShowUpdateInstructions] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarPjs, setSidebarPjs] = useState<Array<{ id: string; path: string; name: string; active: boolean; last_open: string }>>([])
   const [indexing, setIndexing] = useState(false)
@@ -123,6 +125,14 @@ export default function Dashboard() {
       if (!searchParams.get('project') && c.active_project) setIndexPath(c.active_project)
     }).catch(() => {})
   }, [searchParams])
+
+  useEffect(() => {
+    let active = true
+    api.getVersionCheck().then(v => {
+      if (active) setVersionCheck(v)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const evtSource = new EventSource('http://localhost:2737/api/events')
@@ -315,6 +325,33 @@ export default function Dashboard() {
           {projectCtx.project_state?.indexed_at && (
             <span style={{ fontSize: 10, color: '#339af0', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
+        </div>
+      )}
+
+      {versionCheck?.update_available && (
+        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid #3bc9db', background: '#142329', padding: '7px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: '#66d9e8', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+              {t.currentVersion}: {versionCheck.current || releaseVersion || 'dev'} · {t.latestVersion}: {versionCheck.latest}
+            </div>
+          </div>
+          <Button
+            variant="success"
+            size="xs"
+            label={showUpdateInstructions ? t.hideUpdateInstructions : t.downloadUpdate}
+            onClick={() => setShowUpdateInstructions(v => !v)}
+          />
+        </div>
+      )}
+
+      {versionCheck?.update_available && showUpdateInstructions && (
+        <div style={{ marginBottom: 8, borderRadius: 6, border: '1px solid var(--border)', background: '#1e1f23', padding: '8px 12px' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 5 }}>{t.updateCommandTitle}</div>
+          <div style={{ overflowX: 'auto', background: '#111318', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 9px' }}>
+            <code style={{ color: '#e8eaf0', fontSize: 11, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 5 }}>{t.updateCommandHelp}</div>
         </div>
       )}
 

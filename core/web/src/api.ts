@@ -90,6 +90,20 @@ export async function getContext() {
   return r.json()
 }
 
+export interface VersionCheck {
+  current: string
+  latest: string
+  update_available: boolean
+  install_command: string
+  release_url: string
+  error?: string
+}
+
+export async function getVersionCheck(): Promise<VersionCheck> {
+  const r = await fetch(`${API}/version/check`)
+  return r.json()
+}
+
 // Start codebase UI if needed and return its URL
 export async function openCodebaseUI(): Promise<{ url: string; started: boolean; ready?: boolean; error?: string; note?: string }> {
   const r = await fetch(`${API}/codebase/open-ui`, { method: 'POST' })

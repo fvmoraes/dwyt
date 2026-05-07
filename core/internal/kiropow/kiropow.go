@@ -141,11 +141,14 @@ DWYT (Don't Waste Your Tokens) is a local orchestrator that reduces AI token con
 ## Tools
 
 ### Obsidian - Project Memory (ALWAYS FIRST)
-Persistent markdown vault per project. Search before reading files.
+Persistent markdown vault per project. It is the official project memory.
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+- Summarize: POST http://localhost:2737/api/obsidian/summarize
 - Save:   POST http://localhost:2737/api/obsidian/save
 - Context: POST http://localhost:2737/api/obsidian/context
 - Types:  decision, task, note, error, command, session
+- Law: search/summarize before acting, save decisions/tasks during work, and save complete context at task end.
+- Vault quality: keep notes organized with folders, internal links, templates, and instructions.
 
 ### Codebase - Code Knowledge Graph (ON DEMAND)
 Structural exploration of the codebase. Use only for architecture questions.
@@ -162,7 +165,7 @@ Compresses API calls. Auto-detected via env vars.
 - Exception: Codex authenticated through ChatGPT/OAuth must not be routed through Headroom.
 
 ## Priority Order
-1. Obsidian FIRST - check vault before any file read
+1. Obsidian FIRST - search and summarize the vault before any action
 2. Headroom - auto via env vars
 3. RTK - prefix all shell commands
 4. Codebase - structural exploration only
@@ -179,7 +182,7 @@ DWYT bin: %s
 
 ## Completion
 
-At the end of relevant tasks, save a concise context record to Obsidian with the user request, summary, files changed, decisions, actions, commands, errors, outcome, and next steps.
+Never finish a task without saving complete context to Obsidian with the user request, summary, files changed/read, decisions, actions, commands, errors, outcome, next steps, and context for future agents.
 `, projectPath, dwytBin, mcps["codebase"], mcps["obsidian"])
 }
 
@@ -299,19 +302,23 @@ inclusion: always
 
 ## Priority Order
 
-1. Obsidian FIRST - before reading files, search the project vault:
+1. Obsidian FIRST - before acting, search and summarize the project vault:
    GET http://localhost:2737/api/obsidian/search?q=<your query>
+   POST http://localhost:2737/api/obsidian/summarize
 2. Headroom - auto-detected via OPENAI_BASE_URL / ANTHROPIC_BASE_URL.
 3. RTK - prefix all shell commands with rtk.
 4. Codebase MCP - only for structural code exploration.
 
-After important work, save decisions to Obsidian:
+During work, save decisions and task/status updates to Obsidian:
 POST http://localhost:2737/api/obsidian/save
 {"type":"decision","content":"..."}
+{"type":"task","content":"..."}
 
 At the end of every task, save the conversation context:
 POST http://localhost:2737/api/obsidian/context
-{"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"outcome":"..."}
+{"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
+
+Keep the vault rich and navigable with folders, internal links, templates, and instructions.
 `
 }
 
@@ -327,14 +334,18 @@ Vault root: ~/.dwyt/projects/<id>/obsidian/
 
 ## API
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+- Summarize: POST http://localhost:2737/api/obsidian/summarize
 - Save:   POST http://localhost:2737/api/obsidian/save
 - Context: POST http://localhost:2737/api/obsidian/context
 - Status: GET http://localhost:2737/api/obsidian/status
 
 ## Rules
-- Always search Obsidian before reading project files.
-- Always save important decisions after completing work.
-- Always save conversation context at the end of each task.
+- Always search and summarize Obsidian before acting.
+- Save important decisions as type `+"`decision`"+` during work.
+- Save task/status updates as type `+"`task`"+` during work.
+- Always save complete conversation context at the end of each task.
+- Include user request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
+- Keep the vault rich, interlinked, and organized with folders, links, templates, and instructions.
 - Never delete vault files.
 `, projectPath)
 }

@@ -50,6 +50,7 @@ type DashboardServer struct {
 	Port             int
 	DwytBin          string
 	DwytHome         string
+	ReleaseVersion   string
 	StartCwd         string
 	DefaultProject   string
 	Store            *db.Store

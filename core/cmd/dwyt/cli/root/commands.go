@@ -50,19 +50,19 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Quick status of all tools",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := status.PollAll(DwytBin)
+		cwd, _ := os.Getwd()
+		var pm *brain.ProjectObsidian
+		if projectMemory, err := brain.NewProjectObsidian(DwytHome, cwd); err == nil {
+			pm = projectMemory
+		}
+
+		s := status.PollAll(DwytBin, pm != nil)
 		fmt.Printf("\n  DWYT Status:\n")
 		for _, t := range s.Tools {
-			icon := "\U0001F534"
-			if t.Healthy {
-				icon = "\U0001F7E2"
-			} else if t.Running {
-				icon = "\U0001F7E1"
-			}
-			fmt.Printf("  %s %-22s %s\n", icon, t.Name, t.Details)
+			fmt.Printf("  %s %-22s %s\n", toolStatusIcon(t), t.Name, t.Details)
 		}
-		cwd, _ := os.Getwd()
-		if pm, err := brain.NewProjectObsidian(DwytHome, cwd); err == nil {
+
+		if pm != nil {
 			stats := pm.Stats()
 			if files, ok := stats["total_files"].(int); ok && files > 0 {
 				fmt.Printf("\n  \U0001F9E0 Obsidian: %d files for %s\n", files, stats["project_name"])
@@ -76,6 +76,29 @@ var statusCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func toolStatusIcon(t status.ToolStatus) string {
+	if t.Healthy {
+		return "\U0001F7E2"
+	}
+
+	state := t.Status
+	if state == "" {
+		state = t.State
+	}
+
+	switch state {
+	case status.StateOnline, status.StateInstalled:
+		return "\U0001F7E2"
+	case status.StateStarting, status.StateOffline, status.StateInactive, status.StatePortOpenNoHealth:
+		return "\U0001F7E1"
+	}
+
+	if t.Running {
+		return "\U0001F7E1"
+	}
+	return "\U0001F534"
 }
 
 var versionCmd = &cobra.Command{

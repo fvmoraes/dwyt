@@ -96,7 +96,17 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	brainDir := newDir
 	os.MkdirAll(brainDir, 0755)
 
-	dirs := []string{"knowledge", "logs", ".obsidian"}
+	dirs := []string{
+		"knowledge",
+		"logs",
+		filepath.Join("logs", "sessions"),
+		filepath.Join("logs", "errors"),
+		filepath.Join("logs", "commands"),
+		"templates",
+		"instructions",
+		"maps",
+		".obsidian",
+	}
 	for _, d := range dirs {
 		os.MkdirAll(filepath.Join(brainDir, d), 0755)
 	}
@@ -142,11 +152,20 @@ tags: [project, index]
 Welcome to the Project Brain. This vault contains the knowledge base for your project.
 
 ## Structure
-- **context.md** — Full project summary
-- **decisions.md** — Architecture and design decisions
-- **tasks.md** — Active tasks and progress
+- [[context]] — Full project summary
+- [[decisions]] — Architecture and design decisions
+- [[tasks]] — Active tasks and progress
+- [[instructions/obsidian-law|Obsidian Law]] — Mandatory agent memory rules
+- [[maps/project-map|Project Map]] — Navigation hub for future agents
 - **knowledge/** — Knowledge base articles
-- **logs/** — Session logs and command history
+- **logs/sessions/** — Complete task/session contexts
+- **logs/errors/** — Error records
+- **logs/commands/** — Command records
+- **templates/** — Reusable note templates
+
+## Agent Rule
+
+Before acting, search and summarize this vault. During work, save decisions and task status. At the end of every task, save complete context.
 `,
 		"decisions.md": `---
 type: decisions
@@ -168,10 +187,107 @@ tags: [tasks, progress]
 
 ## Active
 `,
+		filepath.Join("instructions", "obsidian-law.md"): `---
+type: instruction
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, obsidian, agents, memory]
+---
+
+# Obsidian Law
+
+The Obsidian vault is the official project memory.
+
+## Mandatory workflow
+
+1. Before acting, search existing notes and rebuild/read the vault summary.
+2. During work, save important decisions as ` + "`decision`" + ` entries and task/status updates as ` + "`task`" + ` entries.
+3. At the end of every task, save complete context with request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
+
+## Vault quality
+
+Keep the vault rich, linked, and organized. Prefer internal links, folders, templates, clear headings, and enough context for a future agent to continue without reconstructing history.
+`,
+		filepath.Join("maps", "project-map.md"): `---
+type: map
+updated_at: ` + time.Now().Format(time.RFC3339) + `
+tags: [dwyt, map, navigation]
+---
+
+# Project Map
+
+- [[index|Project Index]]
+- [[context|Current Summary]]
+- [[decisions|Decision Log]]
+- [[tasks|Task Log]]
+- [[instructions/obsidian-law|Obsidian Law]]
+- [[templates/decision-template|Decision Template]]
+- [[templates/task-template|Task Template]]
+- [[templates/session-context-template|Session Context Template]]
+`,
+		filepath.Join("templates", "decision-template.md"): `---
+type: template
+tags: [template, decision]
+---
+
+# Decision - {{title}}
+
+## Context
+
+## Decision
+
+## Consequences
+
+## Links
+`,
+		filepath.Join("templates", "task-template.md"): `---
+type: template
+tags: [template, task]
+---
+
+# Task - {{title}}
+
+## Status
+
+## Goal
+
+## Actions
+
+## Blockers
+
+## Next Steps
+`,
+		filepath.Join("templates", "session-context-template.md"): `---
+type: template
+tags: [template, session, context]
+---
+
+# Session Context - {{date}}
+
+## User Request
+
+## Summary
+
+## Files
+
+## Decisions
+
+## Actions
+
+## Commands
+
+## Errors
+
+## Outcome
+
+## Next Steps
+
+## Context For Future Agents
+`,
 	}
 	for name, content := range seeds {
 		path := filepath.Join(brainDir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
+			os.MkdirAll(filepath.Dir(path), 0755)
 			os.WriteFile(path, []byte(content), 0644)
 		}
 	}
