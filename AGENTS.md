@@ -85,3 +85,43 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 - For debugging, use raw command without rtk prefix
 - `rtk proxy <cmd>` runs command without filtering but tracks usage
 <!-- /headroom:rtk-instructions -->
+
+<!-- dwyt:instructions:start -->
+#dwyt
+
+# DWYT — Don't Waste Your Tokens
+
+Este projeto usa ferramentas automáticas para reduzir consumo de tokens.
+**Todas as integrações são transparentes: você não precisa configurar nada.**
+
+## Ordem de prioridade (siga sempre esta ordem):
+
+### 1. Obsidian — VAULT DO PROJETO (PRIMEIRA FONTE DE CONTEXTO)
+**LEI DO OBSIDIAN: o vault é a memória oficial do projeto. Toda interação deve consultar, enriquecer e salvar contexto nele.**
+- ANTES de agir: buscar notas existentes e resumo do vault.
+  - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
+  - Summarize: POST http://localhost:2737/api/obsidian/summarize
+- DURANTE a ação: salvar decisões e tarefas/status importantes.
+  - Decision: POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"..."}
+  - Task: POST http://localhost:2737/api/obsidian/save {"type":"task","content":"..."}
+- AO FINAL de toda tarefa: salvar contexto completo.
+  - Context: POST http://localhost:2737/api/obsidian/context
+  - Payload: {"client":"codex","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
+- Mantenha o vault rico, interligado e organizado com notas, folders, links internos, templates e instruções.
+
+### 2. Headroom — Compressão de API (AUTOMÁTICO)
+- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.
+- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.
+- No Codex, o DWYT só configura Headroom quando o login é por API key; login ChatGPT/OAuth usa os endpoints padrão.
+- Se não estiver ativo, use os endpoints padrão das APIs.
+
+### 3. RTK — Compressão de Terminal
+- **SEMPRE** prefixe comandos shell com `rtk`. Ex: `rtk git status`
+- Isto reduz o output em 60-90% antes de entrar no contexto.
+- Em comandos encadeados, prefixe cada segmento: `rtk git add . && rtk git commit -m "msg"`
+
+### 4. Codebase — Mapa do Código (SOB DEMANDA)
+- **APENAS** use o MCP codebase-memory-mcp quando precisar entender estrutura real.
+- Prefira consultar o Obsidian/contexto do projeto antes de indexar ou navegar no código.
+- Use `search_graph`, `trace_path`, `get_code_snippet` ao invés de grep/glob.
+<!-- dwyt:instructions:end -->

@@ -2,6 +2,8 @@
 description: DWYT project guidance
 alwaysApply: true
 ---
+<!-- dwyt:instructions:start -->
+#dwyt
 
 ## DWYT Priority Order:
 1. **Obsidian FIRST**: consult project vault before any file operation.
@@ -16,3 +18,4 @@ alwaysApply: true
 3. **RTK**: prefix shell commands with rtk.
 4. **Codebase MCP**: use ONLY for structural code exploration.
 Never finish a task without saving context to Obsidian.
+<!-- dwyt:instructions:end -->

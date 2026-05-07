@@ -224,3 +224,68 @@ Ao fim da execucao:
 - instalacao, status e atualizacao ficam consistentes entre CLI, UI e README;
 - a validacao automatica foi executada;
 - commit e push ficam a cargo do usuario.
+
+## LEI DO CODEBASE — Mapa do Código é obrigatório
+
+Ao trabalhar em qualquer projeto gerenciado pelo Dwyt, o agent **DEVE obrigatoriamente usar o MCP Codebase** sempre que precisar entender, validar ou alterar a estrutura real do código.
+
+### Regra principal
+
+- Antes de propor alterações, refatorações, correções ou diagnósticos técnicos, use o MCP Codebase para consultar o estado atual do projeto.
+- Nunca assuma a estrutura do repositório apenas por memória, contexto anterior ou nomes de arquivos aparentes.
+- O código atual indexado pelo Codebase é a fonte primária de verdade sobre arquivos, relações, dependências, símbolos, chamadas e caminhos.
+
+### Ferramentas obrigatórias
+
+Sempre prefira as ferramentas do MCP Codebase:
+
+- `search_graph` para localizar arquivos, símbolos, módulos, serviços, handlers, componentes e relações.
+- `trace_path` para entender fluxos, dependências, chamadas e impacto entre partes do sistema.
+- `get_code_snippet` para ler trechos reais antes de sugerir ou aplicar mudanças.
+
+### Proibições e restrições
+
+- Evite `grep`, `glob`, `find`, leitura manual massiva de arquivos ou suposições sobre estrutura quando o MCP Codebase estiver disponível.
+- Não altere arquivos críticos sem antes consultar o grafo do Codebase.
+- Não crie código duplicado sem verificar se já existe implementação equivalente no projeto.
+- Não remova, renomeie ou mova arquivos sem rastrear impacto via Codebase.
+
+### Uso conjunto com Obsidian
+
+Sempre que possível, use o MCP Codebase em conjunto com o MCP Obsidian:
+
+- Codebase: entender a estrutura real e atual do código.
+- Obsidian: recuperar decisões, histórico, planos, bugs conhecidos e contexto do projeto.
+
+Ao final de uma tarefa relevante, atualize o Obsidian com informações úteis, como:
+
+- decisões técnicas tomadas;
+- arquivos alterados;
+- problemas encontrados;
+- próximos passos;
+- links ou referências internas ao contexto do projeto;
+- resumo do impacto da alteração.
+
+### Fluxo obrigatório recomendado
+
+1. Indexar ou validar o índice atual do projeto no Codebase.
+2. Consultar `search_graph` para localizar a área afetada.
+3. Usar `trace_path` para entender dependências e impacto.
+4. Usar `get_code_snippet` antes de sugerir ou editar código.
+5. Executar a alteração com cautela.
+6. Validar se não houve regressão.
+7. Registrar no Obsidian o que for relevante para memória futura do projeto.
+
+### Princípio
+
+> No Dwyt, nenhum agent deve trabalhar “no escuro”.
+> Antes de mexer no código, consulte o mapa.
+> Antes de esquecer o contexto, salve no Obsidian.
+
+Duas lei principais, Obsidian e codebase, 
+
+Sempre usar prioritariamente nessa ordem
+
+RTK, Codebase, Obsdian e Headroom
+
+Mostrar Tokens saved pelo codebase da mesma maneira que pelo o obsdian
