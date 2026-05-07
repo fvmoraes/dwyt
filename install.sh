@@ -2,285 +2,113 @@
 # DWYT — Don't Waste Your Tokens
 # Installer: https://github.com/fvmoraes/dwyt
 #
-# Usage:
-#   # From GitHub Releases:
 #   curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
-#
-#   # From a local clone:
-#   bash install.sh
+#   bash install.sh                # local clone
+#   bash install.sh --skip-deps    # binary only
 
 set -euo pipefail
 
-# ── Colors ────────────────────────────────────────────────────────────────────
-BOLD="\033[1m"; CYAN="\033[36m"; GREEN="\033[32m"
-YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
+# Globals shared with sourced lib files.
+SKIP_DEPS=0
+GOOS=""; GOARCH=""
+INSTALL_DIR=""; DEST=""
+RELEASE_ARCHIVE=""; RELEASE_BINARY=""
+DOWNLOADER=""; LOCAL_BIN=""; SHELL_RC=""
+SCRIPT_DIR=""  # set by bootstrap_lib when running from a real file
 
-info()    { echo -e "  ${CYAN}→${RESET}  $*"; }
-success() { echo -e "  ${GREEN}✓${RESET}  $*"; }
-warn()    { echo -e "  ${YELLOW}!${RESET}  $*"; }
-die()     { echo -e "\n  ${RED}✗  $*${RESET}\n" >&2; exit 1; }
-header()  { echo -e "\n${BOLD}${CYAN}$*${RESET}\n"; }
+# Lib files are loaded in order. Each lives in install-lib/ next to this
+# script when running from a clone, or is fetched from GitHub raw when this
+# script is piped via curl|bash.
+LIB_FILES=(output platform download locate configure finish)
+LIB_RAW_URL="https://raw.githubusercontent.com/fvmoraes/dwyt/main/install-lib"
 
-# ── Platform detection ────────────────────────────────────────────────────────
-OS="$(uname -s)"; ARCH="$(uname -m)"
-
-case "$OS" in
-  Linux)
-    case "$ARCH" in
-      x86_64)  GOOS="linux";  GOARCH="amd64" ;;
-      aarch64|arm64) GOOS="linux"; GOARCH="arm64" ;;
-      *) die "Unsupported architecture: $ARCH" ;;
-    esac ;;
-  Darwin)
-    case "$ARCH" in
-      x86_64) GOOS="darwin"; GOARCH="amd64" ;;
-      arm64)  GOOS="darwin"; GOARCH="arm64" ;;
-      *) die "Unsupported macOS architecture: $ARCH" ;;
-    esac ;;
-  MINGW*|MSYS*|CYGWIN*)
-    GOOS="windows"; GOARCH="amd64" ;;
-  *)
-    die "Unsupported OS: $OS" ;;
-esac
-
-INSTALL_DIR="${HOME}/.local/bin"
-DEST="${INSTALL_DIR}/dwyt"
-GITHUB_RELEASES="https://github.com/fvmoraes/dwyt/releases/latest/download"
-GITHUB_RAW="https://raw.githubusercontent.com/fvmoraes/dwyt/main"
-
-RELEASE_ARCHIVE="dwyt_${GOOS}_${GOARCH}.tar.gz"
-RELEASE_BINARY="dwyt"
-if [[ "$GOOS" == "windows" ]]; then
-  RELEASE_ARCHIVE="dwyt_${GOOS}_${GOARCH}.zip"
-  RELEASE_BINARY="dwyt.exe"
-fi
-
-install_binary() {
-  local src="$1"
-  local tmp_dest="${DEST}.tmp.$$"
-  cp "$src" "$tmp_dest"
-  chmod +x "$tmp_dest"
-  mv -f "$tmp_dest" "$DEST"
+bootstrap_lib() {
+  local script_path="${BASH_SOURCE[0]:-}"
+  if is_real_file "$script_path"; then
+    SCRIPT_DIR="$(cd "$(dirname "$script_path")" && pwd)"
+    local lib_dir="${SCRIPT_DIR}/install-lib"
+    if [[ -d "$lib_dir" ]]; then
+      load_lib_from "$lib_dir"
+      return
+    fi
+  fi
+  load_lib_from_remote
 }
 
-# ── Banner ────────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${BOLD}${CYAN}"
-cat << 'EOF'
-  ██████╗ ██╗    ██╗██╗   ██╗████████╗
-  ██╔══██╗██║    ██║╚██╗ ██╔╝╚══██╔══╝
-  ██║  ██║██║ █╗ ██║ ╚████╔╝    ██║
-  ██║  ██║██║███╗██║  ╚██╔╝     ██║
-  ██████╔╝╚███╔███╔╝   ██║      ██║
-  ╚═════╝  ╚══╝╚══╝    ╚═╝      ╚═╝
-EOF
-echo -e "${RESET}  ${BOLD}Don't Waste Your Tokens${RESET}\n"
-
-# ── Check downloader ──────────────────────────────────────────────────────────
-header "Checking dependencies..."
-
-if command -v curl &>/dev/null; then
-  DOWNLOADER="curl"; info "curl found"
-elif command -v wget &>/dev/null; then
-  DOWNLOADER="wget"; info "wget found"
-else
-  die "curl or wget is required"
-fi
-
-# ── Locate binary ─────────────────────────────────────────────────────────────
-header "Locating binary..."
-
-info "Platform : $OS $ARCH ($GOOS/$GOARCH)"
-info "Archive  : $RELEASE_ARCHIVE"
-info "Dest     : $DEST"
-if [[ -f "$DEST" ]]; then
-  info "Existing installation will be overwritten"
-fi
-
-# Script directory is trusted only when this script is run from a real file.
-# Piped installs must always fetch the latest release from GitHub.
-SCRIPT_PATH="${BASH_SOURCE[0]:-}"
-SCRIPT_DIR=""
-LOCAL_BIN=""
-if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
-  case "$SCRIPT_PATH" in
-    /dev/stdin|/dev/fd/*|/proc/self/fd/*) ;;
-    *)
-      SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd || echo "")"
-      LOCAL_BIN="${SCRIPT_DIR}/${RELEASE_BINARY}"
-      ;;
+is_real_file() {
+  local p="$1"
+  [[ -n "$p" && -f "$p" ]] || return 1
+  case "$p" in
+    /dev/stdin|/dev/fd/*|/proc/self/fd/*) return 1 ;;
   esac
-fi
+  return 0
+}
 
-mkdir -p "$INSTALL_DIR"
+load_lib_from() {
+  local lib_dir="$1" f
+  for f in "${LIB_FILES[@]}"; do
+    # shellcheck source=/dev/null
+    source "${lib_dir}/${f}.sh"
+  done
+}
 
-if [[ -f "$LOCAL_BIN" ]]; then
-  # ── Case 1: binary is next to the install script (local clone / release zip)
-  info "Found local binary at $LOCAL_BIN"
-  install_binary "$LOCAL_BIN"
-  success "Copied from local file"
-
-else
-  # ── Case 2: download from GitHub Releases
-  info "Downloading from GitHub Releases..."
-  DOWNLOAD_URL="${GITHUB_RELEASES}/${RELEASE_ARCHIVE}"
-  TMP_DIR="$(mktemp -d)"
-  TMP_FILE="${TMP_DIR}/${RELEASE_ARCHIVE}"
-
-  DL_OK=0
-  if [[ "$DOWNLOADER" == "curl" ]]; then
-    if curl -fsSL -L --progress-bar "$DOWNLOAD_URL" -o "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
-      DL_OK=1
+load_lib_from_remote() {
+  local lib_dir f
+  lib_dir="$(mktemp -d)"
+  trap 'rm -rf "$lib_dir"' EXIT
+  for f in "${LIB_FILES[@]}"; do
+    if ! bootstrap_fetch "${LIB_RAW_URL}/${f}.sh" "${lib_dir}/${f}.sh"; then
+      echo "  ✗  failed to download install-lib/${f}.sh from ${LIB_RAW_URL}" >&2
+      echo "  ✗  install requires curl or wget" >&2
+      exit 1
     fi
+  done
+  load_lib_from "$lib_dir"
+}
+
+# Minimal fetch used only by the bootstrap, before output.sh and platform.sh
+# are loaded. The lib-level fetch in download.sh assumes DOWNLOADER is set
+# by check_downloader; here we have neither, so probe inline.
+bootstrap_fetch() {
+  local url="$1" dest="$2"
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$url" -o "$dest" 2>/dev/null && [[ -s "$dest" ]]
+  elif command -v wget &>/dev/null; then
+    wget -q "$url" -O "$dest" 2>/dev/null && [[ -s "$dest" ]]
   else
-    if wget -q --show-progress "$DOWNLOAD_URL" -O "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
-      DL_OK=1
-    fi
+    return 1
   fi
+}
 
-  if [[ $DL_OK -eq 1 ]]; then
-    cd "$TMP_DIR"
-    
-    # Download and verify checksum
-    CHECKSUM_URL="${GITHUB_RELEASES}/checksums.txt"
-    CHECKSUM_FILE="${TMP_DIR}/checksums.txt"
-    
-    if [[ "$DOWNLOADER" == "curl" ]]; then
-      curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_FILE" 2>/dev/null || true
-    else
-      wget -q "$CHECKSUM_URL" -O "$CHECKSUM_FILE" 2>/dev/null || true
-    fi
-    
-    # Verify checksum if available
-    if [[ -f "$CHECKSUM_FILE" ]]; then
-      EXPECTED=$(grep "$RELEASE_ARCHIVE" "$CHECKSUM_FILE" | awk '{print $1}')
-      if [[ -n "$EXPECTED" ]]; then
-        if command -v sha256sum &>/dev/null; then
-          ACTUAL=$(sha256sum "$TMP_FILE" | awk '{print $1}')
-        elif command -v shasum &>/dev/null; then
-          ACTUAL=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
-        else
-          ACTUAL=""
-        fi
-        
-        if [[ -n "$ACTUAL" && "$EXPECTED" != "$ACTUAL" ]]; then
-          warn "Checksum mismatch! Expected: $EXPECTED, Got: $ACTUAL"
-          DL_OK=0
-        else
-          info "Checksum verified"
-        fi
-      fi
-    fi
-    
-    if [[ $DL_OK -eq 1 ]]; then
-      if [[ "$GOOS" == "windows" ]]; then
-        unzip -qo "$TMP_FILE" 2>/dev/null && install_binary "$RELEASE_BINARY" 2>/dev/null && DL_OK=1 || DL_OK=0
-      else
-        tar -xzf "$TMP_FILE" 2>/dev/null && install_binary "$RELEASE_BINARY" 2>/dev/null && DL_OK=1 || DL_OK=0
-      fi
-    fi
-    rm -rf "$TMP_DIR"
-  fi
+parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --skip-deps) SKIP_DEPS=1 ;;
+      --help|-h)
+        cat <<'USAGE'
+DWYT installer
 
-  if [[ $DL_OK -eq 0 ]]; then
-    # ── Case 3: Releases not available — try raw main branch (dev)
-    info "Releases not found, trying main branch..."
-    DOWNLOAD_URL="${GITHUB_RAW}/dwyt-${GOOS}-${GOARCH}"
-    TMP_DIR="$(mktemp -d)"
-    TMP_FILE="${TMP_DIR}/${RELEASE_BINARY}"
+Usage: install.sh [--skip-deps]
 
-    if [[ "$DOWNLOADER" == "curl" ]]; then
-      if curl -fsSL --progress-bar "$DOWNLOAD_URL" -o "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
-        DL_OK=1
-      fi
-    else
-      if wget -q --show-progress "$DOWNLOAD_URL" -O "$TMP_FILE" 2>/dev/null && [[ -s "$TMP_FILE" ]]; then
-        DL_OK=1
-      fi
-    fi
-    if [[ $DL_OK -eq 1 ]]; then
-      install_binary "$TMP_FILE" || DL_OK=0
-    fi
-    rm -rf "$TMP_DIR"
-  fi
+  --skip-deps   Install only the dwyt binary; skip cbmcp/rtk/headroom/obsidian.
+                Run `dwyt install` later to bootstrap the deps.
+USAGE
+        exit 0 ;;
+    esac
+  done
+}
 
-  if [[ $DL_OK -eq 0 ]]; then
-    # ── Case 4: nothing worked — guide user
-    echo ""
-    warn "Could not download DWYT binary."
-    echo ""
-    echo -e "  ${BOLD}Manual install:${RESET}"
-    echo ""
-    echo -e "  1. Download the binary for your platform from:"
-    echo -e "     ${CYAN}https://github.com/fvmoraes/dwyt/releases${RESET}"
-    echo ""
-    echo -e "  2. Or build from source:"
-    echo -e "     ${BOLD}git clone https://github.com/fvmoraes/dwyt && cd dwyt/core && go build -o ~/.local/bin/dwyt .${RESET}"
-    echo ""
-    echo -e "  3. Then run:"
-    echo -e "     ${BOLD}dwyt .${RESET}"
-    echo ""
-    exit 1
-  fi
+main() {
+  bootstrap_lib
+  parse_args "$@"
+  print_banner
+  detect_platform
+  check_downloader
+  locate_binary
+  configure_path
+  install_dependencies
+  print_done
+  prompt_run_now
+}
 
-  success "Downloaded successfully"
-fi
-
-# ── Configure PATH ────────────────────────────────────────────────────────────
-header "Configuring PATH..."
-
-# Detect shell RC
-if [[ -n "${ZSH_VERSION:-}" ]] || echo "${SHELL:-}" | grep -q zsh; then
-  SHELL_RC="${HOME}/.zshrc"
-elif [[ -f "${HOME}/.bashrc" ]]; then
-  SHELL_RC="${HOME}/.bashrc"
-elif [[ -f "${HOME}/.bash_profile" ]]; then
-  SHELL_RC="${HOME}/.bash_profile"
-else
-  SHELL_RC="${HOME}/.profile"
-fi
-
-if echo "$PATH" | grep -q "${INSTALL_DIR}"; then
-  success "~/.local/bin already in PATH"
-else
-  MARKER="# dwyt:path"
-  if ! grep -q "$MARKER" "$SHELL_RC" 2>/dev/null; then
-    { echo ""; echo "$MARKER"; echo "export PATH=\"${INSTALL_DIR}:\$PATH\""; } >> "$SHELL_RC"
-    success "PATH updated in $SHELL_RC"
-  else
-    info "PATH already configured in $SHELL_RC"
-  fi
-  export PATH="${INSTALL_DIR}:${PATH}"
-fi
-
-# ── Done ──────────────────────────────────────────────────────────────────────
-header "Installation complete!"
-
-echo -e "  ${GREEN}✓${RESET}  DWYT installed at ${BOLD}${DEST}${RESET}"
-echo ""
-echo -e "  ${BOLD}How to use:${RESET}"
-echo ""
-echo -e "    ${CYAN}# Open DWYT in the current directory${RESET}"
-echo -e "    ${BOLD}dwyt .${RESET}"
-echo ""
-echo -e "    ${CYAN}# Or in any project${RESET}"
-echo -e "    ${BOLD}cd ~/my-project && dwyt .${RESET}"
-echo ""
-echo -e "    ${CYAN}# Stop all services${RESET}"
-echo -e "    ${BOLD}dwyt stop${RESET}"
-echo ""
-
-# Ask to run now (only in interactive terminal)
-if [[ -t 0 ]]; then
-  printf "  %bRun DWYT now? [Y/n]%b " "$YELLOW" "$RESET"
-  read -r REPLY
-  REPLY="${REPLY:-Y}"
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    echo ""
-    exec "$DEST" .
-  fi
-else
-  echo -e "  Restart your terminal or run:"
-  echo -e "    ${BOLD}source ${SHELL_RC} && dwyt .${RESET}"
-  echo ""
-fi
+main "$@"

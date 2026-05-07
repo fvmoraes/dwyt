@@ -840,27 +840,6 @@ func (pb *ProjectObsidian) GetBrainDir() string {
 	return pb.brainDir
 }
 
-func ObsidianInstalled() bool {
-	if _, err := exec.LookPath("obsidian"); err == nil {
-		return true
-	}
-	home, _ := os.UserHomeDir()
-	locations := []string{
-		filepath.Join(home, ".local", "bin", "obsidian"),
-		"/usr/bin/obsidian",
-		"/usr/local/bin/obsidian",
-		"/opt/obsidian/obsidian",
-		filepath.Join(home, "AppData", "Local", "obsidian", "obsidian.exe"),
-		"/Applications/Obsidian.app/Contents/MacOS/Obsidian",
-	}
-	for _, loc := range locations {
-		if _, err := os.Stat(loc); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
 func AutoSaveSession(pb *ProjectObsidian, tag string) error {
 	content := fmt.Sprintf("Session %s at %s\n\nProject: %s\nPath: %s",
 		tag, time.Now().Format(time.RFC3339), pb.ProjectName, pb.ProjectPath)
