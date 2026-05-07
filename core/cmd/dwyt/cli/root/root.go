@@ -17,6 +17,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/spf13/cobra"
@@ -85,6 +86,10 @@ func runDefault(projectPath string) error {
 	fmt.Printf("  Project: %s\n", projectPath)
 
 	env.Init(e.DwytHome, e.DwytBin, e.DwytData, e.ShellRC, e.LoginRC)
+
+	if err := integrate.EnsureGitignoreBlock(projectPath); err != nil {
+		log.Warn("gitignore block update failed", log.Fields{"error": err.Error()})
+	}
 
 	if !brain.ObsidianInstalled() {
 		fmt.Println("  \u2192  obsidian               not found (install for visual navigation)")
