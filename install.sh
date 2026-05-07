@@ -57,13 +57,27 @@ load_lib_from_remote() {
   lib_dir="$(mktemp -d)"
   trap 'rm -rf "$lib_dir"' EXIT
   for f in "${LIB_FILES[@]}"; do
-    if ! curl -fsSL "${LIB_RAW_URL}/${f}.sh" -o "${lib_dir}/${f}.sh" 2>/dev/null \
-       || [[ ! -s "${lib_dir}/${f}.sh" ]]; then
+    if ! bootstrap_fetch "${LIB_RAW_URL}/${f}.sh" "${lib_dir}/${f}.sh"; then
       echo "  ✗  failed to download install-lib/${f}.sh from ${LIB_RAW_URL}" >&2
+      echo "  ✗  install requires curl or wget" >&2
       exit 1
     fi
   done
   load_lib_from "$lib_dir"
+}
+
+# Minimal fetch used only by the bootstrap, before output.sh and platform.sh
+# are loaded. The lib-level fetch in download.sh assumes DOWNLOADER is set
+# by check_downloader; here we have neither, so probe inline.
+bootstrap_fetch() {
+  local url="$1" dest="$2"
+  if command -v curl &>/dev/null; then
+    curl -fsSL "$url" -o "$dest" 2>/dev/null && [[ -s "$dest" ]]
+  elif command -v wget &>/dev/null; then
+    wget -q "$url" -O "$dest" 2>/dev/null && [[ -s "$dest" ]]
+  else
+    return 1
+  fi
 }
 
 parse_args() {
