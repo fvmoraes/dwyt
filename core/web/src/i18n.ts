@@ -51,6 +51,7 @@ export const T = {
     refreshing: 'Refreshing...',
     // Project bar
     protecting: 'DWYT is protecting this project',
+    releaseLabel: 'Release',
     indexedLabel: '🗺️ Indexed',
     // Setup
     setupTitle: 'DWYT Setup', install: 'Install →', installing: 'Installing...',
@@ -118,6 +119,7 @@ export const T = {
     refreshing: 'Atualizando...',
     // Project bar
     protecting: 'DWYT está protegendo este projeto',
+    releaseLabel: 'Release',
     indexedLabel: '🗺️ Indexado',
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',
     dashboard: 'Dashboard →', loading: 'Carregando...', starting: 'Iniciando...',

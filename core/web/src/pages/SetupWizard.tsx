@@ -86,15 +86,20 @@ export default function SetupWizard() {
     if (!s || s === 'pending')  return '⏳'
     if (s === 'installing')     return '🔄'
     if (s === 'ok')             return '✅'
+    if (s.startsWith('skipped')) return '—'
     if (s.startsWith('error'))  return '❌'
     return '⏳'
+  }
+
+  function isDoneStatus(s: string): boolean {
+    return s === 'ok' || s.startsWith('error') || s.startsWith('skipped')
   }
 
   // ── Progress calculation ───────────────────────────────────────────────────
   function calcProgress(progress: Record<string, string>): number {
     const entries = Object.values(progress)
     if (entries.length === 0) return 0
-    const done = entries.filter(s => s === 'ok' || s.startsWith('error')).length
+    const done = entries.filter(isDoneStatus).length
     return Math.round((done / entries.length) * 100)
   }
 
@@ -115,7 +120,7 @@ export default function SetupWizard() {
   if (installing) {
     const pct = calcProgress(installProgress)
     const total = Object.keys(installProgress).length
-    const done  = Object.values(installProgress).filter(s => s === 'ok' || s.startsWith('error')).length
+    const done  = Object.values(installProgress).filter(isDoneStatus).length
 
     return (
       <div style={{ minHeight: '100vh', padding: '24px 20px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -167,6 +172,7 @@ export default function SetupWizard() {
           ) : Object.entries(installProgress).map(([tool, s]) => {
             const isActive = s === 'installing'
             const isOk     = s === 'ok'
+            const isSkipped = s.startsWith('skipped')
             const isErr    = s.startsWith('error')
             return (
               <div key={tool} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -179,7 +185,7 @@ export default function SetupWizard() {
                 }}>{toolLabel(tool)}</span>
                 <span style={{
                   fontSize: 10,
-                  color: isOk ? 'var(--green)' : isErr ? 'var(--red)' : isActive ? 'var(--cyan)' : 'var(--muted)',
+                  color: isOk ? 'var(--green)' : isErr ? 'var(--red)' : isActive ? 'var(--cyan)' : isSkipped ? 'var(--muted)' : 'var(--muted)',
                 }}>{s}</span>
               </div>
             )

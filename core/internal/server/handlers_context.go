@@ -103,9 +103,20 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 		}
 	}
 
+	stateSnapshot := map[string]interface{}{}
+	releaseVersion := "dev"
+	if ds.RuntimeState != nil {
+		stateSnapshot = ds.RuntimeState.Snapshot()
+		if v, ok := stateSnapshot["version"].(string); ok && v != "" {
+			releaseVersion = v
+		}
+	}
+
 	c.JSON(200, gin.H{
 		"cwd":              cwd,
 		"active_project":   activeProject,
+		"version":          releaseVersion,
+		"state":            stateSnapshot,
 		"suggested_screen": suggestedScreen,
 		"tools_installed":  toolsInstalled,
 		"any_installed":    anyInstalled,

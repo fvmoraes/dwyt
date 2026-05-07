@@ -281,6 +281,7 @@ func agentsMDTemplate(rtkBin string) string {
 		"### 2. Headroom — Compressão de API (AUTOMÁTICO)\n" +
 		"- Se `OPENAI_BASE_URL` ou `ANTHROPIC_BASE_URL` estiverem setadas, use-as.\n" +
 		"- O Headroom comprime chamadas automaticamente — você não precisa fazer nada.\n" +
+		"- No Codex, o DWYT só configura Headroom quando o login é por API key; login ChatGPT/OAuth usa os endpoints padrão.\n" +
 		"- Se não estiver ativo, use os endpoints padrão das APIs.\n\n" +
 		"### 3. RTK — Compressão de Terminal\n" +
 		"- **SEMPRE** prefixe comandos shell com " + backtick + "rtk" + backtick + ". Ex: `rtk git status`\n" +

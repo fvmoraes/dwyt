@@ -30,20 +30,20 @@ type RuntimeState struct {
 	CurrentProject     string                  `json:"current_project"`
 	CurrentProjectName string                  `json:"current_project_name"`
 	Processes          map[string]ProcessInfo  `json:"processes"`
-	ToolErrors         map[string]string        `json:"tool_errors"` // last error per tool
-	Projects           map[string]ProjectEntry  `json:"projects"`
-	Clients            []string                 `json:"clients"`
+	ToolErrors         map[string]string       `json:"tool_errors"` // last error per tool
+	Projects           map[string]ProjectEntry `json:"projects"`
+	Clients            []string                `json:"clients"`
 	Path               string                  `json:"-"` // state.json path
 }
 
 // ProjectEntry tracks per-project metadata in runtime state.
 type ProjectEntry struct {
-	Path       string    `json:"path"`
-	Name       string    `json:"name"`
-	LastOpen   time.Time `json:"last_open"`
-	IndexedAt  time.Time `json:"indexed_at,omitempty"`
-	Nodes      int       `json:"nodes,omitempty"`
-	Edges      int       `json:"edges,omitempty"`
+	Path          string    `json:"path"`
+	Name          string    `json:"name"`
+	LastOpen      time.Time `json:"last_open"`
+	IndexedAt     time.Time `json:"indexed_at,omitempty"`
+	Nodes         int       `json:"nodes,omitempty"`
+	Edges         int       `json:"edges,omitempty"`
 	ObsidianFiles int       `json:"obsidian_files,omitempty"`
 }
 
@@ -55,7 +55,7 @@ func Init(dwytHome string) *RuntimeState {
 	os.MkdirAll(filepath.Dir(p), 0755)
 
 	s := &RuntimeState{
-		Version:    "3.1.0",
+		Version:    "dev",
 		Processes:  make(map[string]ProcessInfo),
 		ToolErrors: make(map[string]string),
 		Projects:   make(map[string]ProjectEntry),
@@ -74,6 +74,9 @@ func Init(dwytHome string) *RuntimeState {
 	if s.Projects == nil {
 		s.Projects = make(map[string]ProjectEntry)
 	}
+	if s.Version == "" {
+		s.Version = "dev"
+	}
 
 	globalState = s
 	return s
@@ -82,6 +85,17 @@ func Init(dwytHome string) *RuntimeState {
 // Get returns the global runtime state.
 func Get() *RuntimeState {
 	return globalState
+}
+
+// SetVersion records the running DWYT release version.
+func (s *RuntimeState) SetVersion(version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if version == "" {
+		version = "dev"
+	}
+	s.Version = version
+	s.maybeSave()
 }
 
 // ── Process tracking ──────────────────────────────────────────────────────
@@ -232,12 +246,12 @@ func (s *RuntimeState) Snapshot() map[string]interface{} {
 	processes := make([]map[string]interface{}, 0, len(s.Processes))
 	for _, p := range s.Processes {
 		processes = append(processes, map[string]interface{}{
-			"name":       p.Name,
-			"pid":        p.PID,
-			"port":       p.Port,
-			"started_at": p.StartedAt.Format(time.RFC3339),
-			"healthy":    p.Healthy,
-			"last_error": p.LastError,
+			"name":        p.Name,
+			"pid":         p.PID,
+			"port":        p.Port,
+			"started_at":  p.StartedAt.Format(time.RFC3339),
+			"healthy":     p.Healthy,
+			"last_error":  p.LastError,
 			"uptime_secs": p.Uptime,
 		})
 	}

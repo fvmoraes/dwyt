@@ -25,7 +25,7 @@ var daemonCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Info("daemon process starting")
-		srv := server.New(2737, DwytBin, DwytHome)
+		srv := server.New(2737, DwytBin, DwytHome, version)
 		return srv.Start()
 	},
 }

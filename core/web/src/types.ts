@@ -56,6 +56,8 @@ export interface ProjectState {
 
 export interface ProjectContext {
   active_project?: string
+  version?: string
+  state?: { version?: string }
   project_state?: ProjectState
   projects?: ProjectEntry[]
 }

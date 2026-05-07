@@ -260,6 +260,8 @@ export default function Dashboard() {
   const hasData = totalSaved > 0
   const repoName = projectCtx.project_state?.name || projectCtx.active_project?.split('/').pop() || '\u2014'
   const isIndexed = !!projectCtx.project_state?.indexed_at
+  const rawRelease = projectCtx.version || projectCtx.state?.version || ''
+  const releaseVersion = rawRelease && rawRelease !== 'dev' && !rawRelease.startsWith('v') ? `v${rawRelease}` : rawRelease
 
   return (
     <div style={{ minHeight: '100vh', padding: '10px 14px', paddingLeft: sidebarOpen ? 284 : 14, transition: 'padding-left 0.2s ease' }}>
@@ -301,8 +303,13 @@ export default function Dashboard() {
               {'\uD83E\uDDE0'} {obsidianCount} {t.memories}
             </span>
           )}
+          {releaseVersion && (
+            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 9, color: '#8ce99a', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
+              {t.releaseLabel} {releaseVersion}
+            </span>
+          )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 10, color: '#339af0', marginLeft: 'auto' }}>{t.indexedLabel}</span>
+            <span style={{ fontSize: 10, color: '#339af0', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
         </div>
       )}

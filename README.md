@@ -89,12 +89,12 @@ A proxy that compresses AI API calls in transit (~34% reduction). Uses Headroom'
 ```bash
 # DWYT runs these automatically when Headroom starts:
 headroom wrap claude      # Claude Code
-headroom wrap codex       # Codex
+headroom wrap codex       # Codex (API-key login only)
 headroom wrap cursor      # Cursor
 headroom wrap copilot     # GitHub Copilot CLI
 ```
 
-When Headroom starts (via the Start button or automatically with `dwyt .`), DWYT runs `headroom wrap` for every enabled AI client. When stopped, `headroom unwrap` cleans up.
+When Headroom starts (via the Start button or automatically with `dwyt .`), DWYT runs `headroom wrap` for eligible enabled AI clients. Codex is skipped when it is logged in through ChatGPT/OAuth, because Headroom only applies to Codex API-key auth. When stopped, `headroom unwrap` cleans up.
 
 Environment variables are also auto-exported by `env.sh`:
 
@@ -208,7 +208,7 @@ On first run, the UI opens the Setup Wizard. **Obsidian is mandatory** and pre-s
 └─────────────────────────────────────────────────────────┘
 ```
 
-Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK. Generates instruction files for each AI client. Runs `headroom wrap` for supported clients. Starts services. Opens the Dashboard.
+Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK. Generates instruction files for each AI client. Runs `headroom wrap` for supported clients; Codex Headroom setup only runs for API-key login. Starts services. Opens the Dashboard.
 
 ---
 
@@ -344,14 +344,14 @@ export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
-On start, DWYT runs `headroom wrap` for each enabled AI client, configuring their proxy settings natively. On stop, `headroom unwrap` cleans up. **Automatic fallback**: if Headroom goes down, clients fall back to direct API endpoints.
+On start, DWYT runs `headroom wrap` for each eligible enabled AI client, configuring their proxy settings natively. Codex with ChatGPT/OAuth login is skipped; Codex Headroom setup only runs for API-key login. On stop, `headroom unwrap` cleans up. **Automatic fallback**: if Headroom goes down, clients fall back to direct API endpoints.
 
 ### Headroom wrap mapping
 
 | DWYT client | Headroom command |
 |-------------|-----------------|
 | Claude Code | `headroom wrap claude` |
-| Codex | `headroom wrap codex` |
+| Codex (API-key login) | `headroom wrap codex` |
 | Cursor | `headroom wrap cursor` |
 | GitHub Copilot | `headroom wrap copilot` |
 | Kiro / OpenCode | env vars only (no native wrap) |

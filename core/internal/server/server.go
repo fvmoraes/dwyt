@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
@@ -27,7 +28,7 @@ import (
 //go:embed dashboard/dist
 var reactFS embed.FS
 
-func New(port int, dwytBin, dwytHome string) *DashboardServer {
+func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	cwd, _ := os.Getwd()
 	project := os.Getenv("DWYT_PROJECT")
 	if project == "" {
@@ -45,6 +46,7 @@ func New(port int, dwytBin, dwytHome string) *DashboardServer {
 	brain.MigrateOldMemoryDirs(dwytHome)
 
 	rs := state.Init(dwytHome)
+	rs.SetVersion(releaseVersion)
 	rs.SetCurrentProject(project, filepath.Base(project))
 	var setupCfg Config
 	hasSetupCfg := false
@@ -322,6 +324,38 @@ var headroomWrapMap = map[string]string{
 	"copilot": "copilot",
 }
 
+func shouldInstallHeadroom(cfg Config) bool {
+	return len(headroomEligibleClients(cfg)) > 0
+}
+
+func headroomEligibleClients(cfg Config) []string {
+	clientList := cfg.Ias
+	if len(clientList) == 0 {
+		clientList = cfg.Clients
+	}
+	if len(clientList) == 0 {
+		clientList = strings.Split(defaultClientsString(), ",")
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+	for _, c := range clientList {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		if _, ok := headroomWrapMap[c]; !ok {
+			continue
+		}
+		if c == "codex" && codexauth.UsesChatGPTLogin() {
+			continue
+		}
+		seen[c] = true
+		result = append(result, c)
+	}
+	return result
+}
+
 func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
 	headroomBin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err != nil {
@@ -330,6 +364,10 @@ func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
 	clients := ds.clientsString()
 	for _, c := range strings.Split(clients, ",") {
 		c = strings.TrimSpace(c)
+		if c == "codex" && codexauth.UsesChatGPTLogin() {
+			log.Info("headroom wrap skipped for Codex ChatGPT login", log.Fields{"client": c})
+			continue
+		}
 		if hrName, ok := headroomWrapMap[c]; ok {
 			cmd := exec.Command(headroomBin, "wrap", hrName)
 			cmd.Dir = projectPath
@@ -368,6 +406,9 @@ func (ds *DashboardServer) headroomWrapClients() []string {
 	var result []string
 	for _, c := range clients {
 		c = strings.TrimSpace(c)
+		if c == "codex" && codexauth.UsesChatGPTLogin() {
+			continue
+		}
 		if _, ok := headroomWrapMap[c]; ok {
 			result = append(result, c)
 		}

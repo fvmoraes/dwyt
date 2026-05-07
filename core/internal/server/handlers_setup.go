@@ -73,6 +73,7 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 	}
 	config.Tools = ensureRequiredTools(migrateToolList(config.Tools))
 	config.Ias = migrateToolList(config.Ias)
+	headroomSkipped := contains(config.Tools, "headroom") && !shouldInstallHeadroom(config)
 
 	ds.installMu.Lock()
 	if ds.installing {
@@ -83,7 +84,11 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 	ds.installing = true
 	ds.installStatus = make(map[string]string)
 	for _, t := range config.Tools {
-		ds.installStatus[t] = "pending"
+		if t == "headroom" && headroomSkipped {
+			ds.installStatus[t] = "skipped: Codex ChatGPT login"
+		} else {
+			ds.installStatus[t] = "pending"
+		}
 	}
 	if contains(config.Tools, "obsidian") {
 		ds.installStatus["obsidian-mcp"] = "pending"
@@ -107,6 +112,10 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 		}
 
 		for _, t := range config.Tools {
+			if t == "headroom" && headroomSkipped {
+				setStatus(t, "skipped: Codex ChatGPT login")
+				continue
+			}
 			setStatus(t, "installing")
 			var err error
 			switch t {
