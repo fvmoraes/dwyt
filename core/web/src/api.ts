@@ -122,6 +122,16 @@ export async function getProjects(): Promise<{ projects: Array<{id: string; path
   return r.json()
 }
 
+// Soft-remove a project from the active list (files under ~/.dwyt are kept)
+export async function removeProject(path: string): Promise<{ status: string; path: string; active_project?: string; error?: string }> {
+  const r = await fetch(`${API}/project/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  return r.json()
+}
+
 // ── Codebase index status ─────────────────────────────────────────────────
 export async function getIndexStatus(): Promise<{ indexing: boolean; progress: string; error?: string }> {
   const r = await fetch(`${API}/codebase/index/status`)

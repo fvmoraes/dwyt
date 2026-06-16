@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import * as api from '../api'
+import { useLang } from '../LangContext'
 
 interface Project {
   id: string
@@ -23,7 +24,10 @@ interface Props {
 export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: Props) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { t } = useLang()
   const [switching, setSwitching] = useState<string | null>(null)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
 
   const loadProjects = useCallback(async () => {
     try {
@@ -50,6 +54,25 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
       }
     } catch { /* ignore */ }
     setSwitching(null)
+  }
+
+  async function removeProject(path: string) {
+    if (!window.confirm(t.removeProjectConfirm)) return
+    setMenuFor(null)
+    setRemoving(path)
+    try {
+      const r = await api.removeProject(path)
+      await loadProjects()
+      // If the active project was removed, follow the server's fallback.
+      if (searchParams.get('project') === path) {
+        if (r.active_project) {
+          navigate('/dashboard?project=' + encodeURIComponent(r.active_project))
+        } else {
+          navigate('/dashboard')
+        }
+      }
+    } catch { /* ignore */ }
+    setRemoving(null)
   }
 
   return (
@@ -94,22 +117,64 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
         {projects.map(p => {
           const isActive = p.active || searchParams.get('project') === p.path
           const isSwitching = switching === p.path
+          const isRemoving = removing === p.path
+          const menuOpen = menuFor === p.id
           return (
           <div key={p.id}
-            onClick={() => !isSwitching && switchTo(p.path)}
             style={{
-              padding: '6px 8px', borderRadius: 5, marginBottom: 3, cursor: isSwitching ? 'wait' : 'pointer',
+              padding: '6px 8px', borderRadius: 5, marginBottom: 3,
               background: isActive ? 'rgba(51,154,240,0.13)' : 'transparent',
               border: isActive ? '1px solid rgba(51,154,240,0.25)' : '1px solid transparent',
-              opacity: isSwitching ? 0.6 : 1,
+              opacity: isSwitching || isRemoving ? 0.6 : 1,
+              position: 'relative',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 12 }}>{isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
-              <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#339af0' : 'var(--text)' }}>
-                {p.name}
-              </span>
+              <div
+                onClick={() => !isSwitching && !isRemoving && switchTo(p.path)}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, cursor: isSwitching || isRemoving ? 'wait' : 'pointer' }}
+              >
+                <span style={{ fontSize: 12 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
+                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#339af0' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {p.name}
+                </span>
+              </div>
+              <button
+                title={t.projectMenu}
+                onClick={(e) => { e.stopPropagation(); setMenuFor(menuOpen ? null : p.id) }}
+                style={{
+                  flexShrink: 0, width: 20, height: 20, padding: 0,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'var(--muted)', fontSize: 13, lineHeight: '20px', borderRadius: 4,
+                }}
+              >☰</button>
             </div>
+
+            {menuOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute', right: 6, top: 28, zIndex: 1002,
+                  background: 'var(--card)', border: '1px solid var(--border)',
+                  borderRadius: 6, padding: 3, minWidth: 150,
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+                }}
+              >
+                <button
+                  onClick={() => removeProject(p.path)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                    padding: '6px 8px', background: 'transparent', border: 'none',
+                    cursor: 'pointer', color: '#f03e3e', fontSize: 11, textAlign: 'left', borderRadius: 4,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,62,62,0.12)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  🗑️ {t.removeProject}
+                </button>
+              </div>
+            )}
+
             <div style={{ fontSize: 8, color: 'var(--muted)', marginTop: 1, paddingLeft: 17, wordBreak: 'break-all' }}>
               {p.path}
             </div>

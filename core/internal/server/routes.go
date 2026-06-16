@@ -31,6 +31,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.POST("/codebase/open-ui", ds.apiCodebaseOpenUI)
 		api.GET("/headroom/stats-url", ds.apiHeadroomStatsURL)
 		api.POST("/project/switch", ds.apiProjectSwitch)
+		api.POST("/project/remove", ds.apiProjectRemove)
 		api.GET("/projects", ds.apiProjectsList)
 		api.GET("/projects/current", ds.apiProjectsCurrent)
 		api.GET("/obsidian/status", ds.apiObsidianStatus)

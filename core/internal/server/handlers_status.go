@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -118,7 +120,7 @@ func (ds *DashboardServer) toolDetails(projectPath string) map[string]*ToolDetai
 	return map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
-		"headroom":            ds.detailHeadroom(),
+		"headroom":            ds.detailHeadroom(projectPath),
 		"obsidian":            ds.detailObsidian(),
 	}
 }
@@ -307,7 +309,7 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	return d
 }
 
-func (ds *DashboardServer) detailHeadroom() *ToolDetail {
+func (ds *DashboardServer) detailHeadroom(projectPath string) *ToolDetail {
 	d := &ToolDetail{ProxyPort: ds.HeadroomPort}
 	bin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
@@ -323,12 +325,14 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 		d.UptimeLabel = "installed"
 	}
 
+	gotStats := false
 	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", ds.HeadroomPort)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, err := client.Get(statsURL); err == nil {
 		defer resp.Body.Close()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
+			gotStats = true
 			if ps, ok := stats["persistent_savings"].(map[string]interface{}); ok {
 				if lt, ok := ps["lifetime"].(map[string]interface{}); ok {
 					if v, ok := lt["tokens_saved"].(float64); ok {
@@ -365,8 +369,63 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 			}
 		}
 	}
+
+	// Headroom is a single shared proxy, so its /stats lifetime counter is
+	// global across every project. Attribute the growth since the last poll
+	// to the currently active project, then report only the selected
+	// project's own accumulated savings — never the global total.
+	if ds.Store != nil {
+		if gotStats {
+			ds.recordHeadroomDelta(d.TokensSaved)
+		}
+		d.TokensSaved = ds.headroomSavingsForPath(projectPath)
+	}
+
 	d.Repos = nil
 	return d
+}
+
+// recordHeadroomDelta credits the increase in the global lifetime counter to
+// the active project. It is guarded so a proxy restart (counter reset) or an
+// offline proxy (zero reading) never double-counts or misattributes tokens.
+func (ds *DashboardServer) recordHeadroomDelta(lifetime int64) {
+	ds.headroomCursorMu.Lock()
+	defer ds.headroomCursorMu.Unlock()
+
+	prevStr, err := ds.Store.GetConfig("headroom_lifetime_cursor")
+	if err != nil {
+		// First observation: set the baseline without attributing history.
+		ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
+		return
+	}
+	prev, _ := strconv.ParseInt(prevStr, 10, 64)
+	if lifetime <= prev {
+		// No growth, or the proxy reset its counter — rebase, attribute nothing.
+		if lifetime < prev {
+			ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
+		}
+		return
+	}
+
+	delta := lifetime - prev
+	ds.projectMu.RLock()
+	active := ds.DefaultProject
+	ds.projectMu.RUnlock()
+	if active != "" {
+		ds.Store.AddHeadroomSavings(db.HashPath(active), delta)
+	}
+	ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
+}
+
+func (ds *DashboardServer) headroomSavingsForPath(projectPath string) int64 {
+	if projectPath == "" {
+		return 0
+	}
+	v, err := ds.Store.GetHeadroomSavings(db.HashPath(projectPath))
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
