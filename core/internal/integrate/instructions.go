@@ -160,6 +160,10 @@ func copilotMDTemplate() string {
 	return dwytInstructions()
 }
 
+func windsurfRuleTemplate() string {
+	return dwytInstructions()
+}
+
 func dwytInstructions() string {
 	return `# DWYT - Don't Waste Your Tokens
 

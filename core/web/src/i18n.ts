@@ -79,6 +79,12 @@ export const T = {
     kiroDesc: '.kiro/steering/dwyt.md',
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
+    windsurfDesc: '.windsurf/rules/dwyt.md',
+    // Project menu
+    projectMenu: 'Project options',
+    removeProject: 'Remove project',
+    removeProjectConfirm: 'Remove this project from the list? Files in ~/.dwyt are kept and restored if you add it again.',
+    removing: 'Removing...',
     // RTK CLI info
     rtkCli: 'CLI Tool', rtkCliDesc: 'Prefix commands with rtk',
     variable: 'variable',
@@ -152,6 +158,12 @@ export const T = {
     kiroDesc: '.kiro/steering/dwyt.md',
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
+    windsurfDesc: '.windsurf/rules/dwyt.md',
+    // Menu do projeto
+    projectMenu: 'Opções do projeto',
+    removeProject: 'Remover projeto',
+    removeProjectConfirm: 'Remover este projeto da lista? Os arquivos em ~/.dwyt são mantidos e restaurados se você adicioná-lo novamente.',
+    removing: 'Removendo...',
     rtkCli: 'Ferramenta CLI', rtkCliDesc: 'Prefixe comandos com rtk',
     variable: 'variável',
   },

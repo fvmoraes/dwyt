@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -44,7 +45,7 @@ func New(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS projects (
 			id         TEXT PRIMARY KEY,
 			path       TEXT NOT NULL UNIQUE,
@@ -53,14 +54,28 @@ func (s *Store) migrate() error {
 			last_open  TEXT NOT NULL,
 			indexed_at TEXT,
 			nodes      INTEGER DEFAULT 0,
-			edges      INTEGER DEFAULT 0
+			edges      INTEGER DEFAULT 0,
+			removed    INTEGER DEFAULT 0
 		);
 		CREATE TABLE IF NOT EXISTS config (
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
-	`)
-	return err
+		CREATE TABLE IF NOT EXISTS headroom_savings (
+			project_id TEXT PRIMARY KEY,
+			tokens     INTEGER DEFAULT 0
+		);
+	`); err != nil {
+		return err
+	}
+
+	// Older databases predate the `removed` column. SQLite has no
+	// ADD COLUMN IF NOT EXISTS, so add it and ignore the duplicate error.
+	if _, err := s.db.Exec(`ALTER TABLE projects ADD COLUMN removed INTEGER DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 func HashPath(path string) string {
@@ -81,7 +96,7 @@ func (s *Store) UpsertProject(path string) (*Project, error) {
 	_, err := s.db.Exec(`
 		INSERT INTO projects (id, path, name, created_at, last_open)
 		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(path) DO UPDATE SET last_open = ?, name = ?
+		ON CONFLICT(path) DO UPDATE SET last_open = ?, name = ?, removed = 0
 	`, id, path, name, now, now, now, name)
 	if err != nil {
 		return nil, err
@@ -120,13 +135,46 @@ func (s *Store) TouchProject(path string) error {
 	name := filepath.Base(path)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// If project exists, update last_open and name; otherwise insert
+	// If project exists, update last_open and name; otherwise insert.
+	// Re-touching a soft-removed project restores it (removed = 0).
 	_, err := s.db.Exec(`
 		INSERT INTO projects (id, path, name, created_at, last_open)
 		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(path) DO UPDATE SET last_open = ?, name = ?
+		ON CONFLICT(path) DO UPDATE SET last_open = ?, name = ?, removed = 0
 	`, id, path, name, now, now, now, name)
 	return err
+}
+
+// RemoveProject performs a logical (soft) delete: the project disappears
+// from the active list but its row and all ~/.dwyt data stay intact, so a
+// later re-add restores the full history automatically.
+func (s *Store) RemoveProject(path string) error {
+	_, err := s.db.Exec(`UPDATE projects SET removed = 1 WHERE path = ?`, path)
+	return err
+}
+
+// AddHeadroomSavings attributes a token-savings delta to a project. Headroom
+// runs as a single shared proxy, so deltas are credited to whichever project
+// is active when they are observed.
+func (s *Store) AddHeadroomSavings(projectID string, delta int64) error {
+	if delta <= 0 {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO headroom_savings (project_id, tokens) VALUES (?, ?)
+		ON CONFLICT(project_id) DO UPDATE SET tokens = tokens + ?
+	`, projectID, delta, delta)
+	return err
+}
+
+// GetHeadroomSavings returns the tokens attributed to a single project.
+func (s *Store) GetHeadroomSavings(projectID string) (int64, error) {
+	var v int64
+	err := s.db.QueryRow(`SELECT tokens FROM headroom_savings WHERE project_id = ?`, projectID).Scan(&v)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return v, err
 }
 
 func (s *Store) MarkIndexed(path string, nodes, edges int) error {
@@ -140,7 +188,7 @@ func (s *Store) MarkIndexed(path string, nodes, edges int) error {
 
 func (s *Store) ListProjects() ([]*Project, error) {
 	rows, err := s.db.Query(
-		`SELECT id, path, name, created_at, last_open, indexed_at, nodes, edges FROM projects ORDER BY last_open DESC`,
+		`SELECT id, path, name, created_at, last_open, indexed_at, nodes, edges FROM projects WHERE removed = 0 ORDER BY last_open DESC`,
 	)
 	if err != nil {
 		return nil, err

@@ -71,8 +71,12 @@ func Project(projectPath, clients, dwytBin string) {
 	}
 
 	if containsClient(clientList, "windsurf") {
-		// Windsurf reads project-scoped MCP configs from .windsurf/.
+		// Windsurf reads project-scoped MCP configs from .windsurf/ and
+		// markdown rules from .windsurf/rules/ — mirror the other clients.
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".windsurf", "mcp.json"), cbmcpBin, obsidianMCPBin)
+		cp := filepath.Join(projectPath, ".windsurf", "rules", "dwyt.md")
+		os.MkdirAll(filepath.Dir(cp), 0755)
+		writeOrUpdateInstructionFile(cp, windsurfRuleTemplate())
 	}
 
 	if containsClient(clientList, "continue") {
@@ -80,9 +84,12 @@ func Project(projectPath, clients, dwytBin string) {
 		writeOrMergeMCPJSON(filepath.Join(projectPath, ".continue", "mcp.json"), cbmcpBin, obsidianMCPBin)
 	}
 
-	// AGENTS.md is the convention shared by Codex, OpenCode, and several
-	// other agent tools — always emit it, regardless of selected clients.
-	writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
+	// AGENTS.md is the convention shared by Codex and OpenCode. Respect the
+	// client toggles: only create/update it when one of those clients is on.
+	// Disabling every AGENTS.md client means DWYT leaves the file untouched.
+	if containsClient(clientList, "codex") || containsClient(clientList, "opencode") {
+		writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
+	}
 
 	// ── Per-project workspace state ─────────────────────────────────────
 	workspace.Touch(projectPath)

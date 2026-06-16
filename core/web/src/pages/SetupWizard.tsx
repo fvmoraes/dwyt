@@ -25,10 +25,11 @@ export default function SetupWizard() {
     { id: 'kiro',     label: 'Kiro',           desc: t.kiroDesc     },
     { id: 'cursor',   label: 'Cursor',         desc: t.cursorDesc   },
     { id: 'opencode', label: 'OpenCode',        desc: t.opencodeDesc },
+    { id: 'windsurf', label: 'Windsurf',        desc: t.windsurfDesc },
   ]
 
   const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'obsidian'])
-  const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot'])
+  const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot', 'windsurf'])
   const [projectPath, setProjectPath] = useState('')
   const [saving,      setSaving]      = useState(false)
   const [installing,  setInstalling]  = useState(false)

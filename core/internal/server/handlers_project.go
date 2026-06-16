@@ -77,6 +77,45 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
 }
 
+// apiProjectRemove performs a logical removal: the project leaves the active
+// list shown in the dashboard, but its files under ~/.dwyt (Obsidian vault,
+// workspace state, index) are never touched. Re-adding the same project later
+// restores its full history automatically.
+func (ds *DashboardServer) apiProjectRemove(c *gin.Context) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := c.BindJSON(&body); err != nil || body.Path == "" {
+		c.JSON(400, gin.H{"error": "path is required"})
+		return
+	}
+	if ds.Store == nil {
+		c.JSON(500, gin.H{"error": "store not available"})
+		return
+	}
+	if err := ds.Store.RemoveProject(body.Path); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.Info("project removed (logical, files preserved)", log.Fields{"path": body.Path})
+
+	// If the active project was the one removed, fall back to the most recent
+	// remaining project so the dashboard never points at a hidden entry.
+	ds.projectMu.Lock()
+	if ds.DefaultProject == body.Path {
+		ds.DefaultProject = ""
+		if projects, err := ds.Store.ListProjects(); err == nil && len(projects) > 0 {
+			ds.DefaultProject = projects[0].Path
+			ds.StartCwd = projects[0].Path
+		}
+	}
+	next := ds.DefaultProject
+	ds.projectMu.Unlock()
+
+	c.JSON(200, gin.H{"status": "removed", "path": body.Path, "active_project": next})
+}
+
 func (ds *DashboardServer) apiProjectsCurrent(c *gin.Context) {
 	ds.projectMu.RLock()
 	project := ds.DefaultProject
