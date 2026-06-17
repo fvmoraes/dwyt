@@ -426,7 +426,7 @@ Client config injection (via `integrate.WriteHeadroomProxyConfig()`):
 
 ---
 
-## Codebase (Codebase)
+## Codebase MCP
 
 MCP server that provides a knowledge graph of the codebase.
 
@@ -644,7 +644,7 @@ Component mounts
 │   ├── dwyt                      # symlink to binary
 │   ├── rtk
 │   ├── headroom
-│   └── Codebase
+│   └── codebase-memory-mcp
 ├── codebase/                     # Codebase indexes (CBM_CACHE_DIR=~/.dwyt/codebase)
 ├── data/                         # (reserved)
 ├── headroom-venv/                # Python virtualenv
@@ -682,6 +682,10 @@ Component mounts
 > (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) selected during Setup.
 > All DWYT state lives exclusively in `~/.dwyt/`.
 > `~/.dwyt/projects/` is persistent project memory and is protected from automatic cleanup.
+
+> **Windows:** the same layout lives under `%APPDATA%\dwyt\` (for example
+> `C:\Users\<user>\AppData\Roaming\dwyt`). Shell environment is written to `env.ps1`
+> instead of `env.sh`, and running PIDs are tracked in `%APPDATA%\dwyt\run`.
 
 ---
 

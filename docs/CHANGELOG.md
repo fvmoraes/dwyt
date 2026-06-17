@@ -8,13 +8,31 @@ All notable changes to DWYT are documented here.
 
 ### Features
 
+- **Windows-first support** — added a native PowerShell installer (`install.ps1`) that downloads the architecture-specific archive, verifies its SHA-256 checksum, installs `dwyt.exe` under `%APPDATA%\dwyt\bin`, configures the user PATH, and runs the tool install. No Git Bash or WSL required.
+- Added an `internal/platform` abstraction layer (user home, DWYT/config dirs, executable discovery, path resolution) plus per-OS process helpers (`proc_unix.go` / `proc_windows.go`) to remove scattered platform conditionals.
+- Added native Go installers for the Codebase MCP and RTK release archives with SHA-256 verification (`download_archive.go`), removing the dependency on shell/curl/tar during tool install.
 - Added Codebase token-savings estimates from graph metadata and included Codebase/Obsidian savings in the global dashboard summary.
 - Added `without_dwyt_tokens`, `with_dwyt_tokens`, and `estimation_source` fields for tool details so estimated savings are auditable.
 - Added Kiro Power activation hints and updated the generated Power frontmatter/steering to match the current DWYT priority rules.
 
+### Bug Fixes
+
+- Fixed MCP status so on-demand stdio servers report `available` instead of `offline` when they are launched on demand by the AI client.
+- Fixed RTK metrics: token savings now resolve per project when a `.rtk` directory exists, with a clearly labeled global fallback (`scope=global`) when it does not.
+- Fixed Headroom metrics parsing to read `summary.compression.*`, so Tokens Saved and Compression are populated correctly.
+- Added a time-window filter (All / 1h / 6h / 24h / 2d / 7d) for savings metrics, backed by time-series `metric_events` deltas.
+
+### UX / UI
+
+- Buttons now show a loading state and auto-lock during async actions to prevent duplicate requests from multiple clicks.
+- Refined the visual identity to the Docling amber/gold theme: amber primary buttons (`#f5b301`, text `#1a1205`, hover `#ffd43b`), consistent toggles, tabs, cards, and status badges.
+
 ### Documentation
 
 - Added `docs/CODEBASE-LAW.md`, `docs/TOKENS-SAVED.md`, and `docs/KIRO-POWER.md`.
+- Added dedicated Windows documentation under `docs/windows/` (installation, updating, troubleshooting, Windows Terminal, and PowerShell integration).
+- Updated the README with native Windows (PowerShell) install instructions, Windows path examples (`%APPDATA%\dwyt`), the `env.ps1` Headroom variables, and platform notes.
+- Translated `docs/Rules/Rules.md` to English.
 - Updated `docs/OBSIDIAN-LAW.md`, README, architecture docs, and generated agent instructions to enforce the priority order RTK → Codebase MCP → Obsidian MCP → Headroom.
 - Documented that `~/.dwyt/projects/` vaults are persistent project memory and must be preserved by install, repair, reinstall, clean, reset, and uninstall flows.
 
@@ -24,6 +42,10 @@ All notable changes to DWYT are documented here.
 - Kiro workspace MCP config now treats `.kiro/settings/mcp.json` as the primary path and `.kiro/mcp.json` as legacy compatibility.
 - `dwyt reinstall` and `dwyt uninstall` messaging now reflects vault preservation instead of destructive cleanup.
 - `dwyt .` now restarts a stale dashboard daemon when the running daemon version is missing or differs from the current CLI binary, so the UI updates after installing a new DWYT release.
+
+### Known limitations
+
+- RTK publishes no upstream Windows binary. On Windows, DWYT uses a pre-installed `rtk.exe` if present and otherwise skips RTK with a clear message; every other feature works normally.
 
 ---
 

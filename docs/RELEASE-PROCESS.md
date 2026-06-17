@@ -222,13 +222,20 @@ Each release includes:
 Users can install via:
 
 ```bash
-# Automatic installation (recommended)
+# Linux / macOS — automatic installation (recommended)
 curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
+```
 
+```powershell
+# Windows — native PowerShell installer (recommended)
+irm https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.ps1 | iex
+```
+
+```text
 # Manual installation
-# 1. Download binary for your platform
-# 2. Verify checksum
-# 3. Extract and move to PATH
+# 1. Download the binary for your platform
+# 2. Verify the checksum against checksums.txt
+# 3. Extract and move it to a directory on your PATH
 ```
 
 ---
@@ -383,5 +390,5 @@ Potential enhancements:
 
 ---
 
-**Last Updated:** 2026-05-05 — v4.0.0  
+**Last Updated:** 2026-06-17  
 **Maintained By:** DWYT Team
