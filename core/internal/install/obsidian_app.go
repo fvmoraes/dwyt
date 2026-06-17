@@ -1,12 +1,16 @@
 package install
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 )
@@ -98,9 +102,118 @@ func createObsidianSymlink(binDir, appImagePath string) {
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
+// installObsidianWindows installs the Obsidian desktop app. Preferred path is
+// winget (per-user, silent, no admin, stays updatable); if winget is missing or
+// fails it falls back to downloading the official Windows installer from the
+// GitHub releases and running it silently. Returns the resolved binary path.
 func installObsidianWindows() (string, error) {
 	if existing, ok := brain.FindObsidianBinary(); ok {
 		return existing, nil
 	}
-	return "", fmt.Errorf("obsidian not found — install from https://obsidian.md/download (Windows)")
+
+	if _, err := exec.LookPath("winget"); err == nil {
+		fmt.Println("  → obsidian: instalando via winget (Obsidian.Obsidian)…")
+		if err := runWingetInstall("Obsidian.Obsidian"); err != nil {
+			fmt.Printf("  ⚠ obsidian: winget falhou (%v); tentando instalador oficial…\n", err)
+		} else if loc, ok := waitForObsidianBinary(5); ok {
+			return loc, nil
+		}
+	}
+
+	loc, err := installObsidianWindowsInstaller()
+	if err != nil {
+		return "", fmt.Errorf("obsidian: instalação automática falhou (%w); instale manualmente de https://obsidian.md/download", err)
+	}
+	return loc, nil
+}
+
+// installObsidianWindowsInstaller downloads the official Windows installer and
+// runs it silently (electron-builder NSIS one-click installer honours "/S";
+// older Squirrel builds install per-user regardless of the flag).
+func installObsidianWindowsInstaller() (string, error) {
+	url, err := latestObsidianWindowsInstallerURL()
+	if err != nil {
+		return "", err
+	}
+	exePath := filepath.Join(os.TempDir(), "Obsidian-dwyt-setup.exe")
+	defer os.Remove(exePath)
+
+	fmt.Printf("  → obsidian: baixando instalador de %s\n", url)
+	if err := downloadObsidianInstaller(url, exePath); err != nil {
+		return "", err
+	}
+
+	fmt.Println("  → obsidian: executando instalador silencioso…")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := exec.CommandContext(ctx, exePath, "/S").Run(); err != nil {
+		// Fall back to a plain run for installers that ignore "/S".
+		_ = exec.CommandContext(ctx, exePath).Run()
+	}
+
+	if loc, ok := waitForObsidianBinary(15); ok {
+		return loc, nil
+	}
+	return "", fmt.Errorf("instalador executou mas o binário não foi encontrado")
+}
+
+// waitForObsidianBinary polls for the installed Obsidian binary for up to
+// `seconds`, since the installer drops files asynchronously.
+func waitForObsidianBinary(seconds int) (string, bool) {
+	for i := 0; i < seconds; i++ {
+		if loc, ok := brain.FindObsidianBinary(); ok {
+			return loc, true
+		}
+		time.Sleep(time.Second)
+	}
+	return "", false
+}
+
+func latestObsidianWindowsInstallerURL() (string, error) {
+	assets, err := fetchLatestObsidianAssets()
+	if err != nil {
+		return "", err
+	}
+	var amd64URL, arm64URL string
+	for _, a := range assets {
+		n := strings.ToLower(a.Name)
+		if !strings.HasSuffix(n, ".exe") || strings.Contains(n, "blockmap") {
+			continue
+		}
+		if strings.Contains(n, "arm64") {
+			arm64URL = a.URL
+		} else {
+			amd64URL = a.URL
+		}
+	}
+	if runtime.GOARCH == "arm64" && arm64URL != "" {
+		return arm64URL, nil
+	}
+	if amd64URL != "" {
+		return amd64URL, nil
+	}
+	if arm64URL != "" {
+		return arm64URL, nil
+	}
+	return "", fmt.Errorf("nenhum instalador .exe de Windows encontrado no release")
+}
+
+func downloadObsidianInstaller(url, dest string) error {
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return fmt.Errorf("obsidian download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("obsidian download HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("obsidian download read: %w", err)
+	}
+	// Sanity check against truncated downloads / error pages.
+	if len(data) < 10_000_000 {
+		return fmt.Errorf("instalador muito pequeno (%d bytes)", len(data))
+	}
+	return os.WriteFile(dest, data, 0755)
 }
