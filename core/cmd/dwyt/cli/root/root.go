@@ -19,6 +19,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procutil"
 	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/spf13/cobra"
@@ -332,14 +333,7 @@ func startServicesAsync(dwytBin string) int {
 }
 
 func openBrowserURL(url string) {
-	switch runtime.GOOS {
-	case "linux":
-		exec.Command("xdg-open", url).Start()
-	case "darwin":
-		exec.Command("open", url).Start()
-	case "windows":
-		exec.Command("cmd", "/c", "start", url).Start()
-	}
+	platform.OpenURL(url)
 }
 
 func getCWD() string {

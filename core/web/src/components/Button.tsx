@@ -14,12 +14,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<Variant, { bg: string; color: string; border: string; hoverBg: string }> = {
-  primary:   { bg: 'rgba(91, 141, 238, 0.85)', color: '#fff', border: 'rgba(91, 141, 238, 0.4)', hoverBg: 'rgba(91, 141, 238, 1)' },
-  secondary: { bg: 'rgba(255, 255, 255, 0.07)', color: '#e8eaf0', border: 'rgba(255, 255, 255, 0.12)', hoverBg: 'rgba(255, 255, 255, 0.12)' },
-  success:   { bg: 'rgba(74, 222, 128, 0.12)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.35)', hoverBg: 'rgba(74, 222, 128, 0.18)' },
-  danger:    { bg: 'rgba(248, 113, 113, 0.12)', color: '#f87171', border: 'rgba(248, 113, 113, 0.35)', hoverBg: 'rgba(248, 113, 113, 0.18)' },
-  ghost:     { bg: 'transparent', color: '#8b90a0', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
-  icon:      { bg: 'transparent', color: '#8b90a0', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
+  // Primary actions carry the Docling brand amber with dark, high-contrast text.
+  primary:   { bg: '#f5b301', color: '#1a1205', border: 'rgba(245, 179, 1, 0.55)', hoverBg: '#ffd43b' },
+  secondary: { bg: 'rgba(255, 255, 255, 0.06)', color: 'var(--text)', border: 'rgba(255, 255, 255, 0.12)', hoverBg: 'rgba(255, 255, 255, 0.12)' },
+  success:   { bg: 'rgba(74, 222, 128, 0.12)', color: 'var(--green)', border: 'rgba(74, 222, 128, 0.35)', hoverBg: 'rgba(74, 222, 128, 0.18)' },
+  danger:    { bg: 'rgba(248, 113, 113, 0.12)', color: 'var(--red)', border: 'rgba(248, 113, 113, 0.35)', hoverBg: 'rgba(248, 113, 113, 0.18)' },
+  ghost:     { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
+  icon:      { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
 }
 
 const sizeStyles = {
