@@ -469,10 +469,10 @@ export default function Dashboard() {
           </div>
         ) : (
           <div style={{ padding: '8px 14px', background: 'var(--card)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 18 }}>{'\uD83E\uDD16'}</span>
+            <span style={{ fontSize: 18 }}>{savingsWindow !== 'all' ? '\u23F1\uFE0F' : '\uD83E\uDD16'}</span>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{t.noDataTitle}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>{t.noDataSub}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{savingsWindow !== 'all' ? t.noWindowDataTitle : t.noDataTitle}</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>{savingsWindow !== 'all' ? t.noWindowDataSub : t.noDataSub}</div>
             </div>
           </div>
         )}

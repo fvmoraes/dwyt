@@ -40,8 +40,8 @@ func TestSavingsWindowCutoff(t *testing.T) {
 	}
 }
 
-// End-to-end: two polls record a delta, and the windowed view reflects only
-// the growth between polls instead of the cumulative total.
+// End-to-end: two polls record deltas, and the windowed view reflects only
+// the growth between polls instead of the cumulative total — for every metric.
 func TestToolDetailsWindowReflectsRecordedDeltas(t *testing.T) {
 	dwytHome := t.TempDir()
 	projectPath := t.TempDir()
@@ -60,13 +60,12 @@ func TestToolDetailsWindowReflectsRecordedDeltas(t *testing.T) {
 	}
 	pid := db.HashPath(projectPath)
 
-	// Simulate a baseline observation then growth, directly via the store
-	// (the detail funcs need real tools; the recording/aggregation path is
-	// what we validate here).
-	if err := store.RecordSavingsDelta(pid, "rtk", 1000, 1100); err != nil {
+	// Baseline observation then growth, directly via the store (the detail
+	// funcs need real tools; the recording/aggregation path is what we test).
+	if err := store.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 1000, "without": 1100, "commands": 50}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RecordSavingsDelta(pid, "rtk", 1200, 1320); err != nil {
+	if err := store.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 1200, "without": 1320, "commands": 58}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,7 +73,7 @@ func TestToolDetailsWindowReflectsRecordedDeltas(t *testing.T) {
 	if !ok {
 		t.Fatal("24h must be a valid window")
 	}
-	details := map[string]*ToolDetail{"rtk": {TokensSaved: 1200, WithoutDWYTTokens: 1320}}
+	details := map[string]*ToolDetail{"rtk": {TokensSaved: 1200, WithoutDWYTTokens: 1320, TotalCommands: 58, PctSaved: 90.9}}
 	ds.applySavingsWindow(projectPath, details, since)
 
 	if got := details["rtk"].TokensSaved; got != 200 {
@@ -82,5 +81,12 @@ func TestToolDetailsWindowReflectsRecordedDeltas(t *testing.T) {
 	}
 	if got := details["rtk"].WithoutDWYTTokens; got != 220 {
 		t.Fatalf("windowed rtk without = %d, want 220", got)
+	}
+	if got := details["rtk"].TotalCommands; got != 8 {
+		t.Fatalf("windowed rtk commands = %d, want 8 (58-50), not lifetime 58", got)
+	}
+	// pct is recomputed from the windowed totals: 200/220 ≈ 90.9%
+	if got := details["rtk"].PctSaved; got < 90 || got > 92 {
+		t.Fatalf("windowed rtk pct = %.2f, want ~90.9 (derived from window)", got)
 	}
 }

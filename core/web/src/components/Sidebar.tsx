@@ -40,6 +40,14 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
     loadProjects()
   }, [open, loadProjects])
 
+  // Close the per-project menu when clicking anywhere outside it.
+  useEffect(() => {
+    if (!menuFor) return
+    const close = () => setMenuFor(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [menuFor])
+
   async function switchTo(path: string) {
     setSwitching(path)
     try {

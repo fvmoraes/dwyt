@@ -45,9 +45,28 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 
 	workspace.Touch(body.Path)
 
-	pb, brainErr := brain.NewProjectObsidian(ds.DwytHome, body.Path)
+	ds.loadProjectObsidian(body.Path)
+
+	if strings.Contains(","+ds.clientsString()+",", ",kiro,") {
+		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.Path)
+	}
+
+	ds.broadcastSSE("project_switch", body.Path)
+
+	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
+}
+
+// loadProjectObsidian reloads the active project's Obsidian vault and runtime
+// state. Callers must have already set ds.DefaultProject / ds.StartCwd.
+func (ds *DashboardServer) loadProjectObsidian(path string) {
+	if ds.Store != nil {
+		ds.Store.TouchProject(path)
+		ds.Store.SetConfig("project_path", path)
+	}
+
+	pb, brainErr := brain.NewProjectObsidian(ds.DwytHome, path)
 	if brainErr != nil {
-		log.Error("failed to load Obsidian vault on switch", log.Fields{"error": brainErr.Error()})
+		log.Error("failed to load Obsidian vault", log.Fields{"error": brainErr.Error()})
 		ds.RuntimeState.ToolErrors["obsidian"] = brainErr.Error()
 		ds.ProjectObsidian = nil
 	} else {
@@ -63,18 +82,11 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		}
 		stats := pb.Stats()
 		if c, ok := stats["total_files"].(int); ok {
-			ds.RuntimeState.UpdateProjectObsidian(body.Path, c)
+			ds.RuntimeState.UpdateProjectObsidian(path, c)
 		}
 	}
 
-	ds.RuntimeState.SetCurrentProject(body.Path, filepath.Base(body.Path))
-	if strings.Contains(","+ds.clientsString()+",", ",kiro,") {
-		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.Path)
-	}
-
-	ds.broadcastSSE("project_switch", body.Path)
-
-	c.JSON(200, gin.H{"status": "switched", "project": body.Path})
+	ds.RuntimeState.SetCurrentProject(path, filepath.Base(path))
 }
 
 // apiProjectRemove performs a logical removal: the project leaves the active
@@ -101,17 +113,31 @@ func (ds *DashboardServer) apiProjectRemove(c *gin.Context) {
 	log.Info("project removed (logical, files preserved)", log.Fields{"path": body.Path})
 
 	// If the active project was the one removed, fall back to the most recent
-	// remaining project so the dashboard never points at a hidden entry.
+	// remaining project so the dashboard never points at a hidden entry — and
+	// fully reactivate it (Obsidian vault + runtime state) so every card,
+	// not just the path-scoped ones, reflects the new active project.
 	ds.projectMu.Lock()
-	if ds.DefaultProject == body.Path {
-		ds.DefaultProject = ""
-		if projects, err := ds.Store.ListProjects(); err == nil && len(projects) > 0 {
-			ds.DefaultProject = projects[0].Path
-			ds.StartCwd = projects[0].Path
-		}
-	}
+	wasActive := ds.DefaultProject == body.Path
 	next := ds.DefaultProject
+	if wasActive {
+		next = ""
+		if projects, err := ds.Store.ListProjects(); err == nil && len(projects) > 0 {
+			next = projects[0].Path
+		}
+		ds.DefaultProject = next
+		ds.StartCwd = next
+	}
 	ds.projectMu.Unlock()
+
+	if wasActive {
+		if next != "" {
+			workspace.Touch(next)
+			ds.loadProjectObsidian(next)
+		} else {
+			ds.ProjectObsidian = nil
+		}
+		ds.broadcastSSE("project_switch", next)
+	}
 
 	c.JSON(200, gin.H{"status": "removed", "path": body.Path, "active_project": next})
 }

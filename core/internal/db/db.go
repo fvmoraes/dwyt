@@ -65,21 +65,21 @@ func (s *Store) migrate() error {
 			project_id TEXT PRIMARY KEY,
 			tokens     INTEGER DEFAULT 0
 		);
-		CREATE TABLE IF NOT EXISTS savings_events (
+		CREATE TABLE IF NOT EXISTS metric_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			project_id TEXT NOT NULL,
 			tool       TEXT NOT NULL,
-			saved      INTEGER NOT NULL,
-			without    INTEGER NOT NULL,
+			metric     TEXT NOT NULL,
+			delta      INTEGER NOT NULL,
 			ts         INTEGER NOT NULL
 		);
-		CREATE INDEX IF NOT EXISTS idx_savings_events ON savings_events(project_id, ts);
-		CREATE TABLE IF NOT EXISTS savings_cursor (
+		CREATE INDEX IF NOT EXISTS idx_metric_events ON metric_events(project_id, ts);
+		CREATE TABLE IF NOT EXISTS metric_cursor (
 			project_id TEXT NOT NULL,
 			tool       TEXT NOT NULL,
-			saved      INTEGER NOT NULL,
-			without    INTEGER NOT NULL,
-			PRIMARY KEY (project_id, tool)
+			metric     TEXT NOT NULL,
+			cumulative INTEGER NOT NULL,
+			PRIMARY KEY (project_id, tool, metric)
 		);
 	`); err != nil {
 		return err
@@ -193,72 +193,68 @@ func (s *Store) GetHeadroomSavings(projectID string) (int64, error) {
 	return v, err
 }
 
-// ToolSavings is a per-tool savings pair used by the time-windowed metrics.
-type ToolSavings struct {
-	Saved   int64
-	Without int64
+// RecordMetricDeltas tracks the growth of a tool's cumulative metrics for a
+// project as timestamped events, enabling time-windowed queries (last hour,
+// 24h, 7d, ...). Every metric (tokens saved, commands, requests, graph nodes,
+// vault files, ...) is recorded the same way so the dashboard can scope the
+// whole card to a window. It is idempotent: only positive growth since the
+// last observation is stored, and a cumulative drop (reset/reindex) rebases
+// the cursor without emitting a bogus event.
+func (s *Store) RecordMetricDeltas(projectID, tool string, cumulative map[string]int64) error {
+	now := time.Now().Unix()
+	for metric, cur := range cumulative {
+		var prev int64
+		err := s.db.QueryRow(
+			`SELECT cumulative FROM metric_cursor WHERE project_id = ? AND tool = ? AND metric = ?`,
+			projectID, tool, metric,
+		).Scan(&prev)
+		if err == sql.ErrNoRows {
+			if _, err := s.db.Exec(
+				`INSERT INTO metric_cursor (project_id, tool, metric, cumulative) VALUES (?, ?, ?, ?)`,
+				projectID, tool, metric, cur,
+			); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if cur == prev {
+			continue
+		}
+		if cur < prev {
+			// Counter dropped (reset/reindex) — rebase, attribute nothing.
+			if _, err := s.db.Exec(
+				`UPDATE metric_cursor SET cumulative = ? WHERE project_id = ? AND tool = ? AND metric = ?`,
+				cur, projectID, tool, metric,
+			); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := s.db.Exec(
+			`INSERT INTO metric_events (project_id, tool, metric, delta, ts) VALUES (?, ?, ?, ?, ?)`,
+			projectID, tool, metric, cur-prev, now,
+		); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(
+			`UPDATE metric_cursor SET cumulative = ? WHERE project_id = ? AND tool = ? AND metric = ?`,
+			cur, projectID, tool, metric,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// RecordSavingsDelta tracks the growth of a tool's cumulative savings for a
-// project as a timestamped event, enabling time-windowed queries (last hour,
-// 24h, 7d, ...). It is idempotent: only positive growth since the last
-// observation is recorded, and a cumulative decrease (tool reset/reindex)
-// rebases the cursor without emitting a bogus event.
-func (s *Store) RecordSavingsDelta(projectID, tool string, savedCum, withoutCum int64) error {
-	var prevSaved, prevWithout int64
-	err := s.db.QueryRow(
-		`SELECT saved, without FROM savings_cursor WHERE project_id = ? AND tool = ?`,
-		projectID, tool,
-	).Scan(&prevSaved, &prevWithout)
-	if err == sql.ErrNoRows {
-		// First observation: set the baseline, attribute no history.
-		_, err = s.db.Exec(
-			`INSERT INTO savings_cursor (project_id, tool, saved, without) VALUES (?, ?, ?, ?)`,
-			projectID, tool, savedCum, withoutCum,
-		)
-		return err
-	}
-	if err != nil {
-		return err
-	}
-
-	if savedCum < prevSaved {
-		// Cumulative dropped (reindex/reset) — rebase, attribute nothing.
-		_, err = s.db.Exec(
-			`UPDATE savings_cursor SET saved = ?, without = ? WHERE project_id = ? AND tool = ?`,
-			savedCum, withoutCum, projectID, tool,
-		)
-		return err
-	}
-
-	dSaved := savedCum - prevSaved
-	if dSaved <= 0 {
-		return nil // no growth
-	}
-	dWithout := withoutCum - prevWithout
-	if dWithout < dSaved {
-		dWithout = dSaved
-	}
-
-	if _, err := s.db.Exec(
-		`INSERT INTO savings_events (project_id, tool, saved, without, ts) VALUES (?, ?, ?, ?, ?)`,
-		projectID, tool, dSaved, dWithout, time.Now().Unix(),
-	); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(
-		`UPDATE savings_cursor SET saved = ?, without = ? WHERE project_id = ? AND tool = ?`,
-		savedCum, withoutCum, projectID, tool,
-	)
-	return err
-}
-
-// SumSavingsByTool returns the savings accrued for a project since the given
-// unix timestamp, grouped by tool.
-func (s *Store) SumSavingsByTool(projectID string, sinceUnix int64) (map[string]ToolSavings, error) {
+// SumMetricsByTool returns the metric growth for a project since the given unix
+// timestamp, grouped as tool -> metric -> summed delta.
+func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]map[string]int64, error) {
 	rows, err := s.db.Query(
-		`SELECT tool, COALESCE(SUM(saved), 0), COALESCE(SUM(without), 0)
-		 FROM savings_events WHERE project_id = ? AND ts >= ? GROUP BY tool`,
+		`SELECT tool, metric, COALESCE(SUM(delta), 0)
+		 FROM metric_events WHERE project_id = ? AND ts >= ? GROUP BY tool, metric`,
 		projectID, sinceUnix,
 	)
 	if err != nil {
@@ -266,16 +262,27 @@ func (s *Store) SumSavingsByTool(projectID string, sinceUnix int64) (map[string]
 	}
 	defer rows.Close()
 
-	out := make(map[string]ToolSavings)
+	out := make(map[string]map[string]int64)
 	for rows.Next() {
-		var tool string
-		var saved, without int64
-		if err := rows.Scan(&tool, &saved, &without); err != nil {
+		var tool, metric string
+		var sum int64
+		if err := rows.Scan(&tool, &metric, &sum); err != nil {
 			return nil, err
 		}
-		out[tool] = ToolSavings{Saved: saved, Without: without}
+		if out[tool] == nil {
+			out[tool] = make(map[string]int64)
+		}
+		out[tool][metric] = sum
 	}
 	return out, nil
+}
+
+// PruneMetricEvents drops events older than the given unix timestamp. The
+// dashboard never queries beyond the largest window (7 days), so old rows are
+// pure dead weight.
+func (s *Store) PruneMetricEvents(olderThanUnix int64) error {
+	_, err := s.db.Exec(`DELETE FROM metric_events WHERE ts < ?`, olderThanUnix)
+	return err
 }
 
 func (s *Store) MarkIndexed(path string, nodes, edges int) error {

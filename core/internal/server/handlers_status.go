@@ -124,9 +124,9 @@ func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*T
 		"obsidian":            ds.detailObsidian(),
 	}
 
-	// Persist the cumulative savings as timestamped deltas so the dashboard can
-	// answer "how much did I save in the last hour / 24h / 7d?". Recording is
-	// idempotent (only positive growth since the last poll is stored).
+	// Persist the cumulative metrics as timestamped deltas so the dashboard can
+	// answer "how much did I save / run / index in the last hour / 24h / 7d?".
+	// Recording is idempotent (only positive growth since the last poll).
 	if ds.Store != nil && projectPath != "" {
 		ds.recordSavingsSnapshot(projectPath, details)
 
@@ -138,7 +138,35 @@ func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*T
 	return details
 }
 
-// recordSavingsSnapshot stores the per-tool delta since the previous poll.
+// toolMetrics extracts the cumulative numeric counters of a tool that are
+// meaningful to track over time, so the windowed view can scope every value
+// on the card — not just tokens saved.
+func toolMetrics(d *ToolDetail) map[string]int64 {
+	saved, without := normalizeSavings(d)
+	m := map[string]int64{"saved": saved, "without": without}
+	if d.TotalCommands > 0 {
+		m["commands"] = d.TotalCommands
+	}
+	if d.Requests > 0 {
+		m["requests"] = d.Requests
+	}
+	if d.IndexedNodes > 0 {
+		m["nodes"] = d.IndexedNodes
+	}
+	if d.IndexedEdges > 0 {
+		m["edges"] = d.IndexedEdges
+	}
+	if d.MemoryCount > 0 {
+		m["files"] = int64(d.MemoryCount)
+	}
+	if d.MemoryBytes > 0 {
+		m["bytes"] = d.MemoryBytes
+	}
+	return m
+}
+
+// recordSavingsSnapshot stores the per-tool, per-metric delta since the
+// previous poll, and prunes events past the largest supported window.
 func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map[string]*ToolDetail) {
 	pid := db.HashPath(projectPath)
 	ds.savingsMu.Lock()
@@ -147,19 +175,18 @@ func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map
 		if d == nil || d.UptimeSecs == -1 {
 			continue // tool not installed — skip
 		}
-		saved, without := normalizeSavings(d)
-		if saved <= 0 {
-			continue
-		}
-		ds.Store.RecordSavingsDelta(pid, tool, saved, without)
+		ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d))
 	}
+	// Keep the event log bounded: nothing is queried beyond 7 days.
+	ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix())
 }
 
-// applySavingsWindow replaces the cumulative totals with the amount accrued
-// inside the selected time window.
+// applySavingsWindow rewrites every counter on each card to reflect only the
+// selected time window (and the selected project). Rate fields are recomputed
+// from the windowed totals so the whole card stays internally consistent.
 func (ds *DashboardServer) applySavingsWindow(projectPath string, details map[string]*ToolDetail, since int64) {
 	pid := db.HashPath(projectPath)
-	sums, err := ds.Store.SumSavingsByTool(pid, since)
+	sums, err := ds.Store.SumMetricsByTool(pid, since)
 	if err != nil {
 		return
 	}
@@ -167,17 +194,40 @@ func (ds *DashboardServer) applySavingsWindow(projectPath string, details map[st
 		if d == nil {
 			continue
 		}
-		ts := sums[tool]
-		d.TokensSaved = ts.Saved
-		d.WithoutDWYTTokens = ts.Without
-		with := ts.Without - ts.Saved
+		m := sums[tool] // nil map reads yield 0 — exactly the "no activity" case
+
+		saved := m["saved"]
+		without := m["without"]
+		if without < saved {
+			without = saved
+		}
+		with := without - saved
 		if with < 0 {
 			with = 0
 		}
+
+		d.TokensSaved = saved
+		d.WithoutDWYTTokens = without
 		d.WithDWYTTokens = with
-		// These rate-based fields describe lifetime ratios, not the window —
-		// clear them so the windowed banner stays internally consistent.
 		d.TokensUsed = with
+		d.TotalCommands = m["commands"]
+		d.Requests = m["requests"]
+		d.IndexedNodes = m["nodes"]
+		d.IndexedEdges = m["edges"]
+		d.MemoryCount = int(m["files"])
+		d.MemoryBytes = m["bytes"]
+
+		// Rates are derived from the windowed totals, never lifetime.
+		pct := 0.0
+		if without > 0 {
+			pct = float64(saved) / float64(without) * 100
+		}
+		if d.PctSaved > 0 {
+			d.PctSaved = pct
+		}
+		if d.CompressionPct > 0 {
+			d.CompressionPct = pct
+		}
 	}
 }
 

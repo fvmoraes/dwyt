@@ -7,6 +7,10 @@ import LangToggle from '../components/LangToggle'
 import { useLang } from '../LangContext'
 import * as api from '../api'
 
+// All AI clients DWYT can integrate. Used as the default selection so every
+// client (including newly added ones) starts enabled on the setup screen.
+const ALL_IA_IDS = ['claude', 'codex', 'copilot', 'kiro', 'cursor', 'opencode', 'windsurf']
+
 export default function SetupWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()

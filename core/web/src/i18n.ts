@@ -14,6 +14,8 @@ export const T = {
     // Savings time window
     savingsWindow: 'Period', windowAll: 'All time',
     windowHint: 'showing savings accrued in the selected window',
+    noWindowDataTitle: 'No savings recorded in this period',
+    noWindowDataSub: 'Try a wider window, or use the tools while the dashboard is open to capture activity.',
     // Logs
     logsTitle: 'Logs',
     // Card labels
@@ -101,6 +103,8 @@ export const T = {
     // Janela de tempo da economia
     savingsWindow: 'Período', windowAll: 'Tudo',
     windowHint: 'mostrando a economia acumulada no período selecionado',
+    noWindowDataTitle: 'Nenhuma economia registrada neste período',
+    noWindowDataSub: 'Tente uma janela maior, ou use as ferramentas com o dashboard aberto para capturar a atividade.',
     logsTitle: 'Logs',
     tokensSavedLabel: 'Tokens economizados', uptime: 'Ativo', repos: 'Repos',
     scope: 'Escopo', port: 'Porta', requests: 'Requisições', compression: 'Compressão',
