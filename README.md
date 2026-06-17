@@ -8,22 +8,45 @@ DWYT orchestrates four tools that drastically reduce token usage in clients like
 
 ## One-command install
 
+### Linux / macOS
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash
 ```
 
 The script detects your platform, downloads the latest binary from GitHub Releases, overwrites any previous `dwyt` binary in `~/.local/bin`, configures PATH, and guides you through the next steps.
 
+### Windows (PowerShell)
+
+Windows has **full native support** — the installer is **native PowerShell, with no Git Bash or WSL required**. Open **Windows Terminal** (PowerShell) and run:
+
+```powershell
+irm https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.ps1 | iex
+```
+
+The installer downloads `dwyt_windows_<arch>.zip` from the latest release, verifies its **SHA-256** checksum, installs `dwyt.exe` under `%APPDATA%\dwyt\bin`, adds that folder to your user PATH, and runs `dwyt install` to set up the tools. From a local clone you can run `.\install.ps1` (add `-SkipDeps` to install only the binary).
+
+See the dedicated [Windows documentation](docs/windows/README.md) for installation, updating, troubleshooting, and Windows Terminal / PowerShell integration.
+
 ---
 
 ## Usage
+
+Linux / macOS:
 
 ```bash
 cd ~/my-project
 dwyt .
 ```
 
-The UI opens at `http://localhost:2737` with your project pre-loaded. **Everything is configured through the UI — no CLI commands needed.**
+Windows (PowerShell):
+
+```powershell
+cd C:\path\to\your\project
+dwyt .
+```
+
+The UI opens at `http://localhost:2737` with your project pre-loaded. **Everything is configured through the UI — no CLI commands needed.** The commands below are identical across platforms.
 
 ### Commands
 
@@ -359,12 +382,20 @@ See [Kiro Power](docs/KIRO-POWER.md).
 
 ## Headroom — technical details
 
-Headroom starts automatically in background on port 8787 with `dwyt .`. The `env.sh` injected into your shell RC exports:
+Headroom starts automatically in background on port 8787 with `dwyt .`. The `env.sh` injected into your shell RC (Linux / macOS) exports:
 
 ```bash
 export HEADROOM_PORT=8787
 export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
+```
+
+On Windows, DWYT writes the equivalent `env.ps1` under `%APPDATA%\dwyt`:
+
+```powershell
+$env:HEADROOM_PORT = "8787"
+$env:OPENAI_BASE_URL = "http://127.0.0.1:8787/v1"
+$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8787"
 ```
 
 On start, DWYT runs `headroom wrap` for each eligible enabled AI client, configuring their proxy settings natively. Codex with ChatGPT/OAuth login is skipped; Codex Headroom setup only runs for API-key login. On stop, `headroom unwrap` cleans up. **Automatic fallback**: if Headroom goes down, clients fall back to direct API endpoints.
@@ -400,10 +431,16 @@ Managed by the internal **ProcessManager**:
 |------|-------------|
 | Obsidian | **Mandatory** — primary knowledge engine (app optional, vault always works) |
 | Python 3 | Headroom installation |
-| curl or wget | Installer download |
+| curl or wget | Installer download (Linux / macOS) |
+| PowerShell 5.1+ | Installer download (Windows — built in; no Git Bash / WSL needed) |
 | Git | Dependency installation |
 
 The `dwyt` binary itself has no dependencies — it's a static Go executable with the React UI embedded.
+
+### Platform notes
+
+- **Linux / macOS / Windows** all run the dashboard, API, SQLite, MCP servers, Headroom proxy, and the cross-platform process manager natively.
+- **RTK** terminal compression has **no upstream Windows binary**. On Windows, DWYT uses a pre-installed `rtk.exe` if found and otherwise skips it with a clear message — every other feature works normally. See the [Windows troubleshooting guide](docs/windows/troubleshooting.md#rtk).
 
 ---
 

@@ -1,6 +1,6 @@
 # DWYT on Windows — Installation
 
-DWYT is a first-class citizen on Windows. The installer is native PowerShell —
+DWYT has full native support on Windows. The installer is native PowerShell —
 **no Git Bash or WSL required**.
 
 ## Requirements
