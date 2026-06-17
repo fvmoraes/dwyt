@@ -65,6 +65,22 @@ func (s *Store) migrate() error {
 			project_id TEXT PRIMARY KEY,
 			tokens     INTEGER DEFAULT 0
 		);
+		CREATE TABLE IF NOT EXISTS metric_events (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id TEXT NOT NULL,
+			tool       TEXT NOT NULL,
+			metric     TEXT NOT NULL,
+			delta      INTEGER NOT NULL,
+			ts         INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_metric_events ON metric_events(project_id, ts);
+		CREATE TABLE IF NOT EXISTS metric_cursor (
+			project_id TEXT NOT NULL,
+			tool       TEXT NOT NULL,
+			metric     TEXT NOT NULL,
+			cumulative INTEGER NOT NULL,
+			PRIMARY KEY (project_id, tool, metric)
+		);
 	`); err != nil {
 		return err
 	}
@@ -175,6 +191,98 @@ func (s *Store) GetHeadroomSavings(projectID string) (int64, error) {
 		return 0, nil
 	}
 	return v, err
+}
+
+// RecordMetricDeltas tracks the growth of a tool's cumulative metrics for a
+// project as timestamped events, enabling time-windowed queries (last hour,
+// 24h, 7d, ...). Every metric (tokens saved, commands, requests, graph nodes,
+// vault files, ...) is recorded the same way so the dashboard can scope the
+// whole card to a window. It is idempotent: only positive growth since the
+// last observation is stored, and a cumulative drop (reset/reindex) rebases
+// the cursor without emitting a bogus event.
+func (s *Store) RecordMetricDeltas(projectID, tool string, cumulative map[string]int64) error {
+	now := time.Now().Unix()
+	for metric, cur := range cumulative {
+		var prev int64
+		err := s.db.QueryRow(
+			`SELECT cumulative FROM metric_cursor WHERE project_id = ? AND tool = ? AND metric = ?`,
+			projectID, tool, metric,
+		).Scan(&prev)
+		if err == sql.ErrNoRows {
+			if _, err := s.db.Exec(
+				`INSERT INTO metric_cursor (project_id, tool, metric, cumulative) VALUES (?, ?, ?, ?)`,
+				projectID, tool, metric, cur,
+			); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if cur == prev {
+			continue
+		}
+		if cur < prev {
+			// Counter dropped (reset/reindex) — rebase, attribute nothing.
+			if _, err := s.db.Exec(
+				`UPDATE metric_cursor SET cumulative = ? WHERE project_id = ? AND tool = ? AND metric = ?`,
+				cur, projectID, tool, metric,
+			); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := s.db.Exec(
+			`INSERT INTO metric_events (project_id, tool, metric, delta, ts) VALUES (?, ?, ?, ?, ?)`,
+			projectID, tool, metric, cur-prev, now,
+		); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(
+			`UPDATE metric_cursor SET cumulative = ? WHERE project_id = ? AND tool = ? AND metric = ?`,
+			cur, projectID, tool, metric,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SumMetricsByTool returns the metric growth for a project since the given unix
+// timestamp, grouped as tool -> metric -> summed delta.
+func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]map[string]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT tool, metric, COALESCE(SUM(delta), 0)
+		 FROM metric_events WHERE project_id = ? AND ts >= ? GROUP BY tool, metric`,
+		projectID, sinceUnix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]map[string]int64)
+	for rows.Next() {
+		var tool, metric string
+		var sum int64
+		if err := rows.Scan(&tool, &metric, &sum); err != nil {
+			return nil, err
+		}
+		if out[tool] == nil {
+			out[tool] = make(map[string]int64)
+		}
+		out[tool][metric] = sum
+	}
+	return out, nil
+}
+
+// PruneMetricEvents drops events older than the given unix timestamp. The
+// dashboard never queries beyond the largest window (7 days), so old rows are
+// pure dead weight.
+func (s *Store) PruneMetricEvents(olderThanUnix int64) error {
+	_, err := s.db.Exec(`DELETE FROM metric_events WHERE ts < ?`, olderThanUnix)
+	return err
 }
 
 func (s *Store) MarkIndexed(path string, nodes, edges int) error {

@@ -2,23 +2,36 @@ package install
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 )
 
-// RTK instala o binário rtk em dwytBin e roda `rtk init --global` pra
-// registrar os hooks no shell.
+// RTK installs the rtk binary into dwytBin and runs `rtk init --global` to
+// register the shell hooks.
+//
+// On Linux/macOS it downloads the prebuilt release archive natively in Go
+// (with SHA-256 verification) — no shell/curl/tar needed. On Windows the rtk
+// project publishes no binary, so we try a user-provided rtk.exe and otherwise
+// fail with an actionable message; the other DWYT tools work regardless.
 func RTK(dwytBin string) error {
 	binPath := filepath.Join(dwytBin, rtkBinaryName())
 	os.MkdirAll(dwytBin, 0755)
 
-	runRTKUpstreamInstaller()
+	if runtime.GOOS == "windows" {
+		if err := copyRTKBinary(binPath); err != nil {
+			return fmt.Errorf("rtk: sem binário oficial para Windows. Instale manualmente ou use o WSL (https://github.com/rtk-ai/rtk); as demais ferramentas DWYT funcionam normalmente")
+		}
+		exec.Command(binPath, "init", "--global").Run()
+		return nil
+	}
 
-	if err := copyRTKBinary(binPath); err != nil {
-		return err
+	if err := installRTKNative(binPath); err != nil {
+		// Fall back to a pre-installed rtk (homebrew, manual install, ...).
+		if cpErr := copyRTKBinary(binPath); cpErr != nil {
+			return fmt.Errorf("rtk: %w", err)
+		}
 	}
 	if out, err := exec.Command(binPath, "init", "--global").CombinedOutput(); err != nil {
 		return fmt.Errorf("rtk init --global falhou: %w\n%s", err, string(out))
@@ -26,25 +39,55 @@ func RTK(dwytBin string) error {
 	return nil
 }
 
+// installRTKNative downloads and installs the rtk release binary for the
+// current Unix platform.
+func installRTKNative(binPath string) error {
+	target, err := rtkTargetTriple()
+	if err != nil {
+		return err
+	}
+	version, err := latestGitHubTag("rtk-ai/rtk")
+	if err != nil {
+		return fmt.Errorf("resolver versão do rtk: %w", err)
+	}
+	base := fmt.Sprintf("https://github.com/rtk-ai/rtk/releases/download/%s", version)
+	archive := fmt.Sprintf("rtk-%s.tar.gz", target)
+	return installReleaseBinary(releaseBinary{
+		archiveURL:  base + "/" + archive,
+		checksumURL: base + "/checksums.txt",
+		archiveName: archive,
+		destPath:    binPath,
+		innerNames:  []string{"rtk"},
+		isZip:       false,
+	})
+}
+
+// rtkTargetTriple maps the Go platform to rtk's Rust release target triple.
+func rtkTargetTriple() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		switch runtime.GOARCH {
+		case "amd64":
+			return "x86_64-unknown-linux-musl", nil
+		case "arm64":
+			return "aarch64-unknown-linux-gnu", nil
+		}
+	case "darwin":
+		switch runtime.GOARCH {
+		case "amd64":
+			return "x86_64-apple-darwin", nil
+		case "arm64":
+			return "aarch64-apple-darwin", nil
+		}
+	}
+	return "", fmt.Errorf("rtk: plataforma não suportada %s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
 func rtkBinaryName() string {
 	if runtime.GOOS == "windows" {
 		return "rtk.exe"
 	}
 	return "rtk"
-}
-
-// runRTKUpstreamInstaller dispara o instalador oficial do rtk; ignora
-// falhas porque o copyRTKBinary subsequente lida com binários já presentes
-// (homebrew, install manual anterior, etc.).
-func runRTKUpstreamInstaller() {
-	script := fetch("https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh")
-	if script == "" {
-		return
-	}
-	cmd := exec.Command("sh")
-	stdin, _ := cmd.StdinPipe()
-	go func() { io.WriteString(stdin, script); stdin.Close() }()
-	cmd.Run()
 }
 
 // copyRTKBinary procura um rtk já instalado nos paths comuns e copia para

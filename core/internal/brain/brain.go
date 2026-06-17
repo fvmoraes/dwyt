@@ -54,6 +54,9 @@ type ProjectObsidian struct {
 	mu           sync.RWMutex `json:"-"`
 	baseDir      string       `json:"-"`
 	brainDir     string       `json:"-"`
+	statsMu      sync.Mutex   `json:"-"`
+	statsCache   map[string]interface{}
+	statsAt      time.Time `json:"-"`
 }
 
 type BrainManager struct {
@@ -494,6 +497,7 @@ migrated: true
 func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
+	defer pb.invalidateStats()
 
 	now := time.Now()
 	pb.UpdatedAt = now
@@ -513,6 +517,7 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string, error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
+	defer pb.invalidateStats()
 
 	if strings.TrimSpace(snapshot.Client) == "" {
 		snapshot.Client = "dwyt"
@@ -706,6 +711,7 @@ func detectType(brainDir, path string) string {
 func (pb *ProjectObsidian) RebuildSummary() string {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
+	defer pb.invalidateStats()
 
 	var parts []string
 	typeCount := map[string]int{}
@@ -745,6 +751,17 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 }
 
 func (pb *ProjectObsidian) Stats() map[string]interface{} {
+	// Short TTL cache: the dashboard polls every few seconds and several
+	// handlers call Stats() within a single poll. Walking the vault each time
+	// is wasteful, so reuse a recent result. Writes invalidate via invalidateStats.
+	pb.statsMu.Lock()
+	if pb.statsCache != nil && time.Since(pb.statsAt) < 2*time.Second {
+		cached := pb.statsCache
+		pb.statsMu.Unlock()
+		return cached
+	}
+	pb.statsMu.Unlock()
+
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
 
@@ -763,7 +780,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 		return nil
 	})
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"project_id":    pb.ProjectID,
 		"project_name":  pb.ProjectName,
 		"project_path":  pb.ProjectPath,
@@ -777,6 +794,20 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 		"tools_enabled": pb.ToolsEnabled,
 		"obsidian_dir":  pb.brainDir,
 	}
+
+	pb.statsMu.Lock()
+	pb.statsCache = result
+	pb.statsAt = time.Now()
+	pb.statsMu.Unlock()
+	return result
+}
+
+// invalidateStats drops the cached Stats() result so the next read reflects a
+// just-written note immediately.
+func (pb *ProjectObsidian) invalidateStats() {
+	pb.statsMu.Lock()
+	pb.statsCache = nil
+	pb.statsMu.Unlock()
 }
 
 func (pb *ProjectObsidian) SetConfig(aiEnabled, toolsEnabled []string) {
@@ -889,6 +920,29 @@ func (pb *ProjectObsidian) OpenBrainDir() error {
 
 func (pb *ProjectObsidian) GetBrainDir() string {
 	return pb.brainDir
+}
+
+// CountVaultFiles returns the number of markdown notes in a project's existing
+// vault WITHOUT creating, seeding, or migrating it. The bool is false when no
+// vault directory exists yet. This is the read-only path used by list/context
+// endpoints, so a GET never mutates the filesystem.
+func CountVaultFiles(dwytHome, projectPath string) (int, bool) {
+	baseDir := filepath.Join(dwytHome, "projects", db.HashPath(projectPath))
+	if err := safePath(dwytHome, baseDir); err != nil {
+		return 0, false
+	}
+	if info, err := os.Stat(baseDir); err != nil || !info.IsDir() {
+		return 0, false
+	}
+	count := 0
+	filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+			return nil
+		}
+		count++
+		return nil
+	})
+	return count, true
 }
 
 func AutoSaveSession(pb *ProjectObsidian, tag string) error {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -15,13 +16,21 @@ import (
 var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
 // fetch baixa o corpo de uma URL como string. Vazio se falhar — chamadores
-// devem checar se a string é vazia antes de seguir.
+// devem checar se a string é vazia antes de seguir. Recusa esquemas que não
+// sejam HTTPS: scripts de install são canalizados para o shell, então um
+// downgrade para HTTP (MITM) seria um vetor de execução de código.
 func fetch(url string) string {
+	if !strings.HasPrefix(strings.ToLower(url), "https://") {
+		return ""
+	}
 	resp, err := httpClient.Get(url)
 	if err != nil {
 		return ""
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
 	body, _ := io.ReadAll(resp.Body)
 	return string(body)
 }

@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
 
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
 	tools := make(map[string]status.ServiceState)
-	for _, tool := range status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil).Tools {
+	for _, tool := range status.PollAll(ds.DwytBin, ds.projectObsidian() != nil).Tools {
 		tools[tool.Name] = tool.Status
 	}
 	c.JSON(200, gin.H{
@@ -30,7 +30,7 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
-	c.JSON(200, status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil))
+	c.JSON(200, status.PollAll(ds.DwytBin, ds.projectObsidian() != nil))
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {
@@ -38,7 +38,7 @@ func (ds *DashboardServer) apiMetrics(c *gin.Context) {
 	if projectPath == "" {
 		projectPath = ds.StartCwd
 	}
-	details := ds.toolDetails(projectPath)
+	details := ds.toolDetails(projectPath, c.Query("window"))
 	c.JSON(200, gin.H{
 		"rtk":          status.GetRTKMetrics(ds.DwytBin),
 		"headroom":     status.GetHeadroomMetrics(),
@@ -54,7 +54,7 @@ func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiServicesStatus(c *gin.Context) {
-	all := status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil)
+	all := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
 	c.JSON(200, all)
 }
 
@@ -62,24 +62,27 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	service := c.Query("service")
 	logs := make(map[string]string)
 
-	pollLog := func(name, bin, pattern string) string {
+	pollLog := func(label, bin, procName, healthURL string) string {
 		binPath := filepath.Join(ds.DwytBin, bin)
 		if _, err := os.Stat(binPath); err != nil {
-			return fmt.Sprintf("%s: não instalado", name)
+			return fmt.Sprintf("%s: não instalado", label)
 		}
-		out, err := exec.Command("pgrep", "-f", pattern).Output()
-		if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-			return fmt.Sprintf("%s: offline", name)
+		// Cross-platform: ask the process manager (PID tracked across OSes)
+		// then fall back to an HTTP health probe for externally-started procs.
+		if st := ds.ProcMan.Status(procName); st != nil && st.Running {
+			return fmt.Sprintf("%s: rodando (PID %d)", label, st.PID)
 		}
-		pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-		return fmt.Sprintf("%s: rodando (PID %s)", name, pid)
+		if healthURL != "" && health.ProbeURL(healthURL) {
+			return fmt.Sprintf("%s: online", label)
+		}
+		return fmt.Sprintf("%s: offline", label)
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", ds.DwytBin+"/codebase-memory-mcp")
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", "codebase", "http://127.0.0.1:9749/health")
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom", fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort))
+		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort))
 	}
 	if service == "" || service == "rtk" {
 		if _, err := os.Stat(fmt.Sprintf("%s/rtk", ds.DwytBin)); err == nil {
@@ -89,7 +92,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		}
 	}
 	if service == "" || service == "obsidian" {
-		if ds.ProjectObsidian == nil {
+		if ds.projectObsidian() == nil {
 			logs["obsidian"] = "obsidian: inactive (no vault loaded)"
 		} else {
 			logs["obsidian"] = "obsidian: online (Obsidian vault)"
@@ -113,16 +116,169 @@ func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
 		projectPath = ds.StartCwd
 	}
 
-	c.JSON(200, ds.toolDetails(projectPath))
+	c.JSON(200, ds.toolDetails(projectPath, c.Query("window")))
 }
 
-func (ds *DashboardServer) toolDetails(projectPath string) map[string]*ToolDetail {
-	return map[string]*ToolDetail{
+func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*ToolDetail {
+	details := map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(projectPath),
 		"obsidian":            ds.detailObsidian(),
 	}
+
+	// Persist the cumulative metrics as timestamped deltas so the dashboard can
+	// answer "how much did I save / run / index in the last hour / 24h / 7d?".
+	// Recording is idempotent (only positive growth since the last poll).
+	if ds.Store != nil && projectPath != "" {
+		ds.recordSavingsSnapshot(projectPath, details)
+
+		if since, ok := savingsWindowCutoff(window); ok {
+			ds.applySavingsWindow(projectPath, details, since)
+		}
+	}
+
+	return details
+}
+
+// toolMetrics extracts the cumulative numeric counters of a tool that are
+// meaningful to track over time, so the windowed view can scope every value
+// on the card — not just tokens saved.
+func toolMetrics(d *ToolDetail) map[string]int64 {
+	saved, without := normalizeSavings(d)
+	m := map[string]int64{"saved": saved, "without": without}
+	if d.TotalCommands > 0 {
+		m["commands"] = d.TotalCommands
+	}
+	if d.Requests > 0 {
+		m["requests"] = d.Requests
+	}
+	if d.IndexedNodes > 0 {
+		m["nodes"] = d.IndexedNodes
+	}
+	if d.IndexedEdges > 0 {
+		m["edges"] = d.IndexedEdges
+	}
+	if d.MemoryCount > 0 {
+		m["files"] = int64(d.MemoryCount)
+	}
+	if d.MemoryBytes > 0 {
+		m["bytes"] = d.MemoryBytes
+	}
+	return m
+}
+
+// recordSavingsSnapshot stores the per-tool, per-metric delta since the
+// previous poll, and prunes events past the largest supported window.
+func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map[string]*ToolDetail) {
+	pid := db.HashPath(projectPath)
+	ds.savingsMu.Lock()
+	defer ds.savingsMu.Unlock()
+	for tool, d := range details {
+		if d == nil || d.UptimeSecs == -1 {
+			continue // tool not installed — skip
+		}
+		ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d))
+	}
+	// Keep the event log bounded: nothing is queried beyond 7 days.
+	ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix())
+}
+
+// applySavingsWindow rewrites every counter on each card to reflect only the
+// selected time window (and the selected project). Rate fields are recomputed
+// from the windowed totals so the whole card stays internally consistent.
+func (ds *DashboardServer) applySavingsWindow(projectPath string, details map[string]*ToolDetail, since int64) {
+	pid := db.HashPath(projectPath)
+	sums, err := ds.Store.SumMetricsByTool(pid, since)
+	if err != nil {
+		return
+	}
+	for tool, d := range details {
+		if d == nil {
+			continue
+		}
+		m := sums[tool] // nil map reads yield 0 — exactly the "no activity" case
+
+		saved := m["saved"]
+		without := m["without"]
+		if without < saved {
+			without = saved
+		}
+		with := without - saved
+		if with < 0 {
+			with = 0
+		}
+
+		d.TokensSaved = saved
+		d.WithoutDWYTTokens = without
+		d.WithDWYTTokens = with
+		d.TokensUsed = with
+		d.TotalCommands = m["commands"]
+		d.Requests = m["requests"]
+		d.IndexedNodes = m["nodes"]
+		d.IndexedEdges = m["edges"]
+		d.MemoryCount = int(m["files"])
+		d.MemoryBytes = m["bytes"]
+
+		// Rates are derived from the windowed totals, never lifetime.
+		pct := 0.0
+		if without > 0 {
+			pct = float64(saved) / float64(without) * 100
+		}
+		if d.PctSaved > 0 {
+			d.PctSaved = pct
+		}
+		if d.CompressionPct > 0 {
+			d.CompressionPct = pct
+		}
+	}
+}
+
+// normalizeSavings mirrors calculateGlobalTokenSavings for a single tool,
+// deriving the "without DWYT" baseline when the tool only reports savings.
+func normalizeSavings(d *ToolDetail) (saved, without int64) {
+	saved = d.TokensSaved
+	if saved <= 0 {
+		return 0, 0
+	}
+	without = d.WithoutDWYTTokens
+	if without <= 0 {
+		switch {
+		case d.PctSaved > 0:
+			without = int64(float64(saved) / (d.PctSaved / 100))
+		case d.CompressionPct > 0:
+			without = int64(float64(saved) / (d.CompressionPct / 100))
+		case d.TokensUsed > 0:
+			without = saved + d.TokensUsed
+		default:
+			without = saved * 2
+		}
+	}
+	if without < saved {
+		without = saved
+	}
+	return saved, without
+}
+
+// savingsWindowCutoff maps a UI window label to a unix cutoff timestamp.
+// An empty label or "all" means no window (use cumulative totals).
+func savingsWindowCutoff(window string) (int64, bool) {
+	var d time.Duration
+	switch window {
+	case "1h":
+		d = time.Hour
+	case "6h":
+		d = 6 * time.Hour
+	case "24h":
+		d = 24 * time.Hour
+	case "2d":
+		d = 48 * time.Hour
+	case "7d":
+		d = 7 * 24 * time.Hour
+	default:
+		return 0, false
+	}
+	return time.Now().Add(-d).Unix(), true
 }
 
 type GlobalTokenSavings struct {
@@ -177,38 +333,6 @@ func calculateGlobalTokenSavings(details map[string]*ToolDetail) GlobalTokenSavi
 }
 
 // Context handler and helpers moved to handlers_context.go
-
-func uptimeFromPID(pattern string) (int64, string) {
-	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return -1, ""
-	}
-	pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-	statBytes, err := os.ReadFile("/proc/" + pid + "/stat")
-	if err != nil {
-		return 0, "rodando"
-	}
-	fields := strings.Fields(string(statBytes))
-	if len(fields) < 22 {
-		return 0, "rodando"
-	}
-	var startJiffies int64
-	fmt.Sscanf(fields[21], "%d", &startJiffies)
-
-	uptimeBytes, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0, "rodando"
-	}
-	var sysUptime float64
-	fmt.Sscanf(string(uptimeBytes), "%f", &sysUptime)
-
-	clkTck := int64(100)
-	processUptimeSecs := int64(sysUptime) - startJiffies/clkTck
-	if processUptimeSecs < 0 {
-		processUptimeSecs = 0
-	}
-	return processUptimeSecs, fmtUptime(processUptimeSecs)
-}
 
 func isPortOpen(port int) bool {
 	client := &http.Client{Timeout: 1 * time.Second}
@@ -293,9 +417,10 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 
 	var m *status.RTKMetrics
 	if projectPath != "" {
+		// Strictly project-scoped: never fall back to the global `rtk gain`,
+		// otherwise an un-initialized project would show every repo's totals.
 		m = status.GetRTKMetricsForPath(ds.DwytBin, projectPath)
-	}
-	if m == nil {
+	} else {
 		m = status.GetRTKMetrics(ds.DwytBin)
 	}
 	if m != nil {
@@ -430,11 +555,12 @@ func (ds *DashboardServer) headroomSavingsForPath(projectPath string) int64 {
 
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		d.UptimeSecs = -1
 		return d
 	}
-	stats := ds.ProjectObsidian.Stats()
+	stats := pb.Stats()
 	if files, ok := stats["total_files"].(int); ok {
 		d.MemoryCount = files
 	}

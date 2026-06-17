@@ -1,9 +1,42 @@
 package server
 
-import "github.com/gin-gonic/gin"
+import (
+	"fmt"
+
+	"github.com/gin-gonic/gin"
+)
+
+// localOriginGuard protects the loopback API from two browser-based attacks
+// that a localhost daemon is otherwise exposed to:
+//   - DNS rebinding: the Host header must resolve to the loopback daemon.
+//   - CSRF: browser cross-origin requests carry an Origin header; only the
+//     daemon's own origin is allowed. Non-browser callers (CLI, MCP server)
+//     send no Origin and are unaffected.
+func localOriginGuard(port int) gin.HandlerFunc {
+	allowedHosts := map[string]bool{
+		fmt.Sprintf("localhost:%d", port): true,
+		fmt.Sprintf("127.0.0.1:%d", port): true,
+	}
+	allowedOrigins := map[string]bool{
+		fmt.Sprintf("http://localhost:%d", port): true,
+		fmt.Sprintf("http://127.0.0.1:%d", port): true,
+	}
+	return func(c *gin.Context) {
+		if !allowedHosts[c.Request.Host] {
+			c.AbortWithStatusJSON(403, gin.H{"error": "forbidden host"})
+			return
+		}
+		if origin := c.GetHeader("Origin"); origin != "" && !allowedOrigins[origin] {
+			c.AbortWithStatusJSON(403, gin.H{"error": "forbidden origin"})
+			return
+		}
+		c.Next()
+	}
+}
 
 func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 	api := r.Group("/api")
+	api.Use(localOriginGuard(ds.Port))
 	{
 		api.GET("/health", ds.apiHealth)
 		api.GET("/status", ds.apiStatus)

@@ -77,4 +77,5 @@ type DashboardServer struct {
 	codebaseIndexCancel context.CancelFunc
 	headroomStartMu     sync.Mutex
 	headroomCursorMu    sync.Mutex
+	savingsMu           sync.Mutex
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -112,5 +113,76 @@ func TestHeadroomSavingsAreAttributedPerProject(t *testing.T) {
 	}
 	if v, _ := s.GetHeadroomSavings(idA); v != 150 {
 		t.Fatalf("non-positive deltas must not change savings, got %d", v)
+	}
+}
+
+func TestSavingsTimeWindowTracksDeltasPerTool(t *testing.T) {
+	s := newTestStore(t)
+	pid := HashPath("/tmp/proj")
+
+	// First observation sets the baseline — no event recorded yet.
+	if err := s.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 1000, "without": 2000, "commands": 10}); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumMetricsByTool(pid, 0); len(sums) != 0 {
+		t.Fatalf("first observation must not record an event, got %#v", sums)
+	}
+
+	// Growth is attributed to the window, across every metric.
+	if err := s.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 1500, "without": 2800, "commands": 14}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordMetricDeltas(pid, "headroom", map[string]int64{"saved": 0, "without": 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordMetricDeltas(pid, "headroom", map[string]int64{"saved": 300, "without": 600, "requests": 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	sums, err := s.SumMetricsByTool(pid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sums["rtk"]["saved"] != 500 || sums["rtk"]["without"] != 800 || sums["rtk"]["commands"] != 4 {
+		t.Fatalf("rtk window = %#v, want saved 500 / without 800 / commands 4", sums["rtk"])
+	}
+	if sums["headroom"]["saved"] != 300 {
+		t.Fatalf("headroom window saved = %d, want 300", sums["headroom"]["saved"])
+	}
+
+	// A cumulative drop (reindex/reset) rebases without emitting an event.
+	if err := s.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 100, "without": 200, "commands": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumMetricsByTool(pid, 0); sums["rtk"]["saved"] != 500 {
+		t.Fatalf("reset must not change recorded events, got %#v", sums["rtk"])
+	}
+
+	// Future cutoff excludes past events.
+	future := time.Now().Add(time.Hour).Unix()
+	if sums, _ := s.SumMetricsByTool(pid, future); len(sums) != 0 {
+		t.Fatalf("future cutoff should exclude all events, got %#v", sums)
+	}
+}
+
+func TestPruneMetricEventsDropsOldRows(t *testing.T) {
+	s := newTestStore(t)
+	pid := HashPath("/tmp/proj")
+	// Seed a baseline then growth so one event exists.
+	if err := s.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordMetricDeltas(pid, "rtk", map[string]int64{"saved": 200}); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumMetricsByTool(pid, 0); sums["rtk"]["saved"] != 100 {
+		t.Fatalf("expected one recorded event of 100, got %#v", sums["rtk"])
+	}
+	// Prune everything up to the future — table should be empty.
+	if err := s.PruneMetricEvents(time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumMetricsByTool(pid, 0); len(sums) != 0 {
+		t.Fatalf("prune should have dropped all events, got %#v", sums)
 	}
 }

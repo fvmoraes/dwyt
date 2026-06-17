@@ -123,14 +123,6 @@ func containsClient(clients []string, client string) bool {
 	return false
 }
 
-func writeIfMissing(path, content string) {
-	if _, err := os.Stat(path); err == nil {
-		return
-	}
-	os.MkdirAll(filepath.Dir(path), 0755)
-	os.WriteFile(path, []byte(content), 0644)
-}
-
 func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string) {
 	config := map[string]interface{}{}
 	if data, err := os.ReadFile(path); err == nil {
@@ -271,58 +263,6 @@ func writeJSON(path string, value interface{}) {
 
 // ── Templates with absolute binary paths ──────────────────────────────────────
 
-func mcpJSONTemplate(cbmcpBin, obsidianMCPBin string) string {
-	return fmt.Sprintf(`{
-  "mcpServers": {
-    "codebase": {
-      "type": "stdio",
-      "command": %q,
-      "env": {
-        "CBM_CACHE_DIR": %q
-      }
-    },
-    "obsidian": {
-      "type": "stdio",
-      "command": %q,
-      "env": {
-        "DWYT_API_URL": "http://localhost:2737/api"
-      }
-    }
-  }
-}
-`, cbmcpBin, filepath.Join(projectDwytHome(), "codebase"), obsidianMCPBin)
-}
-
-func opencodeJSONTemplate(cbmcpBin, obsidianMCPBin, rtkBin string) string {
-	return fmt.Sprintf(`{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": ["AGENTS.md"],
-  "mcp": {
-    "codebase": {
-      "type": "local",
-      "command": [%q],
-      "environment": {
-        "CBM_CACHE_DIR": %q
-      }
-    },
-    "obsidian": {
-      "type": "local",
-      "command": [%q],
-      "environment": {
-        "DWYT_API_URL": "http://localhost:2737/api"
-      }
-    }
-  },
-  "permission": {
-    "bash": "allow",
-    "edit": "allow",
-    "webfetch": "allow",
-    "skill": "allow"
-  }
-}
-`, cbmcpBin, filepath.Join(projectDwytHome(), "codebase"), obsidianMCPBin)
-}
-
 var markerStart = "<!-- dwyt:headroom-proxy-start -->"
 var markerEnd = "<!-- dwyt:headroom-proxy-end -->"
 
@@ -456,40 +396,4 @@ func removeMarkedBlocks(filePath string) error {
 		os.WriteFile(filePath, []byte(content), 0644)
 	}
 	return nil
-}
-
-func setOpenCodeBaseURL(filePath string, port int) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return
-	}
-	m["baseUrl"] = fmt.Sprintf("http://127.0.0.1:%d/v1", port)
-	newData, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return
-	}
-	os.WriteFile(filePath, newData, 0644)
-}
-
-func removeOpenCodeBaseURL(filePath string) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return
-	}
-	if url, ok := m["baseUrl"].(string); ok && strings.Contains(url, "127.0.0.1") {
-		delete(m, "baseUrl")
-		newData, err := json.MarshalIndent(m, "", "  ")
-		if err != nil {
-			return
-		}
-		os.WriteFile(filePath, newData, 0644)
-	}
 }

@@ -13,15 +13,16 @@ import (
 )
 
 func (ds *DashboardServer) apiObsidianStatus(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(200, gin.H{"status": "inactive", "active": false, "error": "no Obsidian vault loaded"})
 		return
 	}
 	c.JSON(200, gin.H{
 		"status":     "online",
 		"active":     true,
-		"vault_path": ds.ProjectObsidian.GetBrainDir(),
-		"stats":      ds.ProjectObsidian.Stats(),
+		"vault_path": pb.GetBrainDir(),
+		"stats":      pb.Stats(),
 	})
 }
 
@@ -31,16 +32,18 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "query parameter 'q' is required"})
 		return
 	}
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(200, gin.H{"results": []interface{}{}, "note": "no Obsidian vault"})
 		return
 	}
-	results := ds.ProjectObsidian.Search(query)
+	results := pb.Search(query)
 	c.JSON(200, gin.H{"results": results, "count": len(results)})
 }
 
 func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
@@ -59,7 +62,7 @@ func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "content is required"})
 		return
 	}
-	if err := ds.ProjectObsidian.SaveEntry(body.Type, body.Content, nil); err != nil {
+	if err := pb.SaveEntry(body.Type, body.Content, nil); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -67,7 +70,8 @@ func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
@@ -82,30 +86,32 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 	if strings.TrimSpace(body.Client) == "" {
 		body.Client = "dwyt"
 	}
-	path, err := ds.ProjectObsidian.SaveContextSnapshot(body)
+	path, err := pb.SaveContextSnapshot(body)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	summary := ds.ProjectObsidian.RebuildSummary()
+	summary := pb.RebuildSummary()
 	c.JSON(200, gin.H{"status": "saved", "file": path, "summary": summary})
 }
 
 func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	summary := ds.ProjectObsidian.RebuildSummary()
+	summary := pb.RebuildSummary()
 	c.JSON(200, gin.H{"status": "summarized", "summary": summary})
 }
 
 func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	if err := ds.ProjectObsidian.OpenInObsidian(); err != nil {
+	if err := pb.OpenInObsidian(); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -113,15 +119,16 @@ func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiObsidianOpenDir(c *gin.Context) {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
-	if err := ds.ProjectObsidian.OpenBrainDir(); err != nil {
+	if err := pb.OpenBrainDir(); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"status": "opened", "dir": ds.ProjectObsidian.GetBrainDir()})
+	c.JSON(200, gin.H{"status": "opened", "dir": pb.GetBrainDir()})
 }
 
 func (ds *DashboardServer) apiObsidianInstall(c *gin.Context) {
@@ -186,13 +193,14 @@ func (ds *DashboardServer) currentContextMarkdown() string {
 }
 
 func (ds *DashboardServer) obsidianStats() map[string]interface{} {
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		return map[string]interface{}{"status": "inactive", "active": false}
 	}
 	return map[string]interface{}{
 		"status":     "online",
 		"active":     true,
-		"vault_path": ds.ProjectObsidian.GetBrainDir(),
-		"stats":      ds.ProjectObsidian.Stats(),
+		"vault_path": pb.GetBrainDir(),
+		"stats":      pb.Stats(),
 	}
 }

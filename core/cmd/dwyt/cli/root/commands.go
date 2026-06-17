@@ -13,6 +13,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
+	"github.com/fvmoraes/dwyt/internal/procutil"
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/server"
 	"github.com/fvmoraes/dwyt/internal/status"
@@ -25,6 +26,7 @@ var daemonCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Info("daemon process starting")
+		procutil.WritePID(DwytHome, "daemon", os.Getpid())
 		srv := server.New(2737, DwytBin, DwytHome, version)
 		return srv.Start()
 	},
@@ -35,11 +37,17 @@ var stopCmd = &cobra.Command{
 	Short: "Stop all DWYT services",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		health.StopAll()
-		exe, _ := os.Executable()
-		exec.Command("pkill", "-f", exe+" daemon").Run()
-		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
-		exec.Command("pkill", "-f", "codebase-memory-mcp").Run()
-		exec.Command("pkill", "-f", "headroom proxy").Run()
+		// Cross-platform: terminate every PID DWYT recorded (daemon + services).
+		procutil.StopAllTracked(DwytHome)
+		// Unix best-effort fallback for processes from older versions that
+		// predate PID files. Skipped on Windows (no pkill; PID files suffice).
+		if runtime.GOOS != "windows" {
+			exe, _ := os.Executable()
+			exec.Command("pkill", "-f", exe+" daemon").Run()
+			exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+			exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
+			exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
+		}
 		log.Info("all services stopped")
 		fmt.Println("  \u2713 Servi\u00E7os parados")
 		return nil
@@ -158,13 +166,17 @@ var uninstallCmd = &cobra.Command{
 func stopAllProcesses() {
 	fmt.Println("  → Stopping all processes...")
 	health.StopAll()
-	exe, _ := os.Executable()
-	exec.Command("pkill", "-f", exe+" daemon").Run()
-	exec.Command("pkill", "-f", "dwyt.*daemon").Run()
-	exec.Command("pkill", "-f", "codebase-memory-mcp").Run()
-	exec.Command("pkill", "-f", "headroom proxy").Run()
-	exec.Command("pkill", "-f", "headroom").Run()
-	exec.Command("pkill", "-f", "rtk").Run()
+	// Cross-platform: terminate every recorded PID (daemon + managed services).
+	procutil.StopAllTracked(DwytHome)
+	// Unix best-effort fallback for pre-PID-file installs.
+	if runtime.GOOS != "windows" {
+		exe, _ := os.Executable()
+		exec.Command("pkill", "-f", exe+" daemon").Run()
+		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+		exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
+		exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
+		exec.Command("pkill", "-f", filepath.Join(DwytBin, "rtk")).Run()
+	}
 	time.Sleep(500 * time.Millisecond)
 	fmt.Println("  ✓ Processes stopped")
 }

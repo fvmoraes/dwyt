@@ -98,6 +98,19 @@ func (s *RuntimeState) SetVersion(version string) {
 	s.maybeSave()
 }
 
+// SetToolError records (or clears, when msg is empty) the last error for a
+// tool. Centralizes access so ToolErrors is never mutated without the lock.
+func (s *RuntimeState) SetToolError(tool, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if msg == "" {
+		delete(s.ToolErrors, tool)
+	} else {
+		s.ToolErrors[tool] = msg
+	}
+	s.maybeSave()
+}
+
 // ── Process tracking ──────────────────────────────────────────────────────
 
 // RegisterProcess adds or updates a managed process in the state.

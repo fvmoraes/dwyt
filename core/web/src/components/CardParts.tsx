@@ -37,7 +37,7 @@ export function RepoRow({ projectName, projectPath, label }: {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1px 0' }}>
       <span style={{ color: 'var(--muted)', fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
-      <span title={projectPath} style={{ fontSize: 8, color: '#339af0', fontFamily: 'monospace', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span title={projectPath} style={{ fontSize: 8, color: '#f5b301', fontFamily: 'monospace', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {'\uD83D\uDCC1'} {name}
       </span>
     </div>

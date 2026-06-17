@@ -18,6 +18,11 @@ import (
 // fica linkado ao libexpat do sistema e quebra o pip silenciosamente.
 func findCompatiblePython() (string, error) {
 	candidates := []string{"python3.12", "python3.11", "python3.10", "python3", "python"}
+	if runtime.GOOS == "windows" {
+		// Windows rarely has versioned python3.x on PATH; "python" and the
+		// "py" launcher are the norm.
+		candidates = []string{"python", "py", "python3"}
+	}
 	var lastErr error
 	var anyFound bool
 	for _, name := range candidates {
@@ -38,7 +43,7 @@ func findCompatiblePython() (string, error) {
 		return "", fmt.Errorf("nenhum Python encontrado passou no pre-flight: %w\n%s",
 			lastErr, pythonRemediationHint())
 	}
-	return "", fmt.Errorf("python3 não encontrado no PATH (instale Python 3.10–3.12; macOS: brew install python@3.12)")
+	return "", fmt.Errorf("python não encontrado no PATH (instale Python 3.10–3.12)\n%s", pythonRemediationHint())
 }
 
 // warnIfNewerPython emite um aviso para Python 3.13+, mas segue tentando —
@@ -77,6 +82,9 @@ func pythonRemediationHint() string {
 			"    codesign --force --sign - <pyexpat-path-acima>"
 	case "linux":
 		return "  Tente: instale o pacote dev do Python (ex: apt install python3.12-venv) e libexpat1"
+	case "windows":
+		return "  Windows: instale o Python 3.10–3.12 de https://python.org (marque \"Add python.exe to PATH\")\n" +
+			"  ou via winget: winget install Python.Python.3.12"
 	default:
 		return "  Reinstale o Python 3.10–3.12"
 	}

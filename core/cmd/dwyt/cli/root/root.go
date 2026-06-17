@@ -19,6 +19,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/integrate"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/procutil"
 	"github.com/fvmoraes/dwyt/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -239,11 +240,18 @@ func normalizeDaemonVersion(v string) string {
 }
 
 func stopDaemonProcess() {
-	exe, _ := os.Executable()
-	if exe != "" {
-		exec.Command("pkill", "-f", exe+" daemon").Run()
+	// Cross-platform: prefer the recorded daemon PID.
+	if pid := procutil.ReadPID(filepath.Join(procutil.PIDDir(DwytHome), "daemon.pid")); pid > 0 {
+		procutil.Terminate(pid)
+		procutil.RemovePID(DwytHome, "daemon")
 	}
-	exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+	if runtime.GOOS != "windows" {
+		exe, _ := os.Executable()
+		if exe != "" {
+			exec.Command("pkill", "-f", exe+" daemon").Run()
+		}
+		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+	}
 }
 
 func switchProject(projectPath string) error {
