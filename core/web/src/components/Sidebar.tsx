@@ -104,13 +104,13 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
         transition: 'transform 0.2s ease',
         padding: '40px 12px 12px', overflowY: 'auto',
       }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: '#3bc9db', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#ffd43b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
           Projects ({projects.length})
         </div>
 
         {projects.length === 0 && (
           <div style={{ fontSize: 10, color: 'var(--muted)', padding: '6px 0' }}>
-            No projects yet. Run <code style={{ color: '#339af0' }}>dwyt .</code> in a directory.
+            No projects yet. Run <code style={{ color: '#f5b301' }}>dwyt .</code> in a directory.
           </div>
         )}
 
@@ -123,8 +123,8 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
           <div key={p.id}
             style={{
               padding: '6px 8px', borderRadius: 5, marginBottom: 3,
-              background: isActive ? 'rgba(51,154,240,0.13)' : 'transparent',
-              border: isActive ? '1px solid rgba(51,154,240,0.25)' : '1px solid transparent',
+              background: isActive ? 'rgba(245,179,1,0.13)' : 'transparent',
+              border: isActive ? '1px solid rgba(245,179,1,0.25)' : '1px solid transparent',
               opacity: isSwitching || isRemoving ? 0.6 : 1,
               position: 'relative',
             }}
@@ -135,7 +135,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                 style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, cursor: isSwitching || isRemoving ? 'wait' : 'pointer' }}
               >
                 <span style={{ fontSize: 12 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
-                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#339af0' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#f5b301' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.name}
                 </span>
               </div>

@@ -77,11 +77,12 @@ export async function installSetup(config: object) {
   return r.json()
 }
 
-export async function getToolDetails(projectPath?: string) {
-  const url = projectPath
-    ? `${API}/tool-details?path=${encodeURIComponent(projectPath)}`
-    : `${API}/tool-details`
-  const r = await fetch(url)
+export async function getToolDetails(projectPath?: string, window?: string) {
+  const params = new URLSearchParams()
+  if (projectPath) params.set('path', projectPath)
+  if (window && window !== 'all') params.set('window', window)
+  const qs = params.toString()
+  const r = await fetch(`${API}/tool-details${qs ? `?${qs}` : ''}`)
   return r.json()
 }
 

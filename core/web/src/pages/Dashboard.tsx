@@ -108,11 +108,18 @@ export default function Dashboard() {
   const [kiroPower, setKiroPower] = useState<api.KiroPowerStatus | null>(null)
   const [refreshingKiroPower, setRefreshingKiroPower] = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
+  const savingsWindow = searchParams.get('window') || 'all'
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const setReload = useCallback((secs: number) => {
     const p = new URLSearchParams(searchParams)
     if (secs === 0) { p.delete('reload') } else { p.set('reload', String(secs)) }
+    setSearchParams(p)
+  }, [searchParams, setSearchParams])
+
+  const setSavingsWindow = useCallback((w: string) => {
+    const p = new URLSearchParams(searchParams)
+    if (w === 'all') { p.delete('window') } else { p.set('window', w) }
     setSearchParams(p)
   }, [searchParams, setSearchParams])
 
@@ -125,7 +132,7 @@ export default function Dashboard() {
 
   const pollAll = useCallback(async () => {
     try { setTools((await api.getStatus()).tools || []) } catch { /* */ }
-    try { setDetails(await api.getToolDetails(indexPath || undefined) || {}) } catch { /* */ }
+    try { setDetails(await api.getToolDetails(indexPath || undefined, savingsWindow) || {}) } catch { /* */ }
     try { setLogs((await fetch('http://localhost:2737/api/logs').then(r => r.json())).logs || {}) } catch { /* */ }
     try {
       const ms = await api.getBrainStatus()
@@ -136,7 +143,7 @@ export default function Dashboard() {
       if (reg.mcpServers) setMCPRegistry(reg.mcpServers)
     } catch { /* */ }
     try { setKiroPower(await api.getKiroPowerStatus()) } catch { /* */ }
-  }, [indexPath])
+  }, [indexPath, savingsWindow])
 
   useEffect(() => {
     api.getContext().then(c => {
@@ -298,7 +305,7 @@ export default function Dashboard() {
             {RELOAD_OPTIONS.map(o => (
               <button key={o.value} onClick={() => setReload(o.value)}
                 style={reloadSecs === o.value
-                  ? { background: '#339af0', color: '#fff', fontWeight: 700, boxShadow: '0 0 5px rgba(51,154,240,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
+                  ? { background: '#f5b301', color: '#1a1205', fontWeight: 700, boxShadow: '0 0 5px rgba(245,179,1,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
                   : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
                 }
               >{o.label}</button>
@@ -332,15 +339,15 @@ export default function Dashboard() {
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: '#339af0', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
+            <span style={{ fontSize: 9, color: '#f5b301', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
         </div>
       )}
 
       {versionCheck?.update_available && (
-        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #3bc9db', background: '#142329', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #ffd43b', background: '#2a2310', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: '#66d9e8', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
+            <div style={{ fontSize: 10, color: '#ffd66b', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
             <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>
               {t.currentVersion}: {versionCheck.current || releaseVersion || 'dev'} · {t.latestVersion}: {versionCheck.latest}
             </div>
@@ -367,7 +374,7 @@ export default function Dashboard() {
       {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
         <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
           <div style={{ padding: '6px 12px', background: '#1e1f23', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#339af0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#f5b301', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
           </div>
           <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
             {projectCtx.projects.map((p) => (
@@ -383,7 +390,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {p.nodes && p.nodes > 0 && <span style={{ fontSize: 9, color: '#f08d49' }}>{'\uD83E\uDDE0'} {p.nodes}</span>}
-                  {p.indexed_at && <span style={{ fontSize: 9, color: '#339af0' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
+                  {p.indexed_at && <span style={{ fontSize: 9, color: '#f5b301' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
                   <span style={{ fontSize: 9, color: 'var(--muted)' }}>{'\u2192'}</span>
                 </div>
               </button>
@@ -391,6 +398,30 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{t.savingsWindow}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 4px' }}>
+          {[
+            { label: t.windowAll, value: 'all' },
+            { label: '1h', value: '1h' },
+            { label: '6h', value: '6h' },
+            { label: '24h', value: '24h' },
+            { label: '2d', value: '2d' },
+            { label: '7d', value: '7d' },
+          ].map(o => (
+            <button key={o.value} onClick={() => setSavingsWindow(o.value)}
+              style={savingsWindow === o.value
+                ? { background: 'var(--blue)', color: '#1a1205', fontWeight: 700, boxShadow: '0 0 5px rgba(245,179,1,0.45)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
+                : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
+              }
+            >{o.label}</button>
+          ))}
+        </div>
+        {savingsWindow !== 'all' && (
+          <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.windowHint}</span>
+        )}
+      </div>
 
       <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
         {hasData ? (
@@ -409,13 +440,13 @@ export default function Dashboard() {
               <div style={{ padding: '5px 10px', background: '#1a2a1a' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: '#3bc9db', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
+                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: '#ffd43b', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
                   {savingsPct > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#2f9e44' }}>{'\u2193'} {savingsPct}%</span>}
                 </div>
                 <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
                 {savingsPct > 0 && (
                   <div className="progress-bar" style={{ marginTop: 4 }}>
-                    <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: '#3bc9db' }} />
+                    <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: '#ffd43b' }} />
                   </div>
                 )}
               </div>
@@ -423,9 +454,9 @@ export default function Dashboard() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '3px 8px', background: '#1a1b1f', gap: 6 }}>
               {[
                 { label: t.terminalOptimized, saved: rtkSaved, color: '#845ef7' },
-                { label: t.compressionActive, saved: headroomSaved, color: '#3bc9db' },
+                { label: t.compressionActive, saved: headroomSaved, color: '#ffd43b' },
                 { label: t.obsidianActive, saved: obsidianSaved, color: '#f08d49' },
-                { label: t.codeMap, saved: codebaseSaved, color: '#339af0' },
+                { label: t.codeMap, saved: codebaseSaved, color: '#f5b301' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ fontSize: 9, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>

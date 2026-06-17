@@ -3,6 +3,7 @@ package db
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -112,5 +113,54 @@ func TestHeadroomSavingsAreAttributedPerProject(t *testing.T) {
 	}
 	if v, _ := s.GetHeadroomSavings(idA); v != 150 {
 		t.Fatalf("non-positive deltas must not change savings, got %d", v)
+	}
+}
+
+func TestSavingsTimeWindowTracksDeltasPerTool(t *testing.T) {
+	s := newTestStore(t)
+	pid := HashPath("/tmp/proj")
+
+	// First observation sets the baseline — no event recorded yet.
+	if err := s.RecordSavingsDelta(pid, "rtk", 1000, 2000); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumSavingsByTool(pid, 0); len(sums) != 0 {
+		t.Fatalf("first observation must not record an event, got %#v", sums)
+	}
+
+	// Growth is attributed to the window.
+	if err := s.RecordSavingsDelta(pid, "rtk", 1500, 2800); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordSavingsDelta(pid, "headroom", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordSavingsDelta(pid, "headroom", 300, 600); err != nil {
+		t.Fatal(err)
+	}
+
+	sums, err := s.SumSavingsByTool(pid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sums["rtk"].Saved != 500 || sums["rtk"].Without != 800 {
+		t.Fatalf("rtk window = %#v, want saved 500 / without 800", sums["rtk"])
+	}
+	if sums["headroom"].Saved != 300 {
+		t.Fatalf("headroom window saved = %d, want 300", sums["headroom"].Saved)
+	}
+
+	// A cumulative drop (reindex/reset) rebases without emitting an event.
+	if err := s.RecordSavingsDelta(pid, "rtk", 100, 200); err != nil {
+		t.Fatal(err)
+	}
+	if sums, _ := s.SumSavingsByTool(pid, 0); sums["rtk"].Saved != 500 {
+		t.Fatalf("reset must not change recorded events, got %#v", sums["rtk"])
+	}
+
+	// Future cutoff excludes past events.
+	future := time.Now().Add(time.Hour).Unix()
+	if sums, _ := s.SumSavingsByTool(pid, future); len(sums) != 0 {
+		t.Fatalf("future cutoff should exclude all events, got %#v", sums)
 	}
 }

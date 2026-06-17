@@ -84,7 +84,7 @@ export default function Logo({ size = 32, showText = true }: Props) {
           fontSize="22" fontWeight="700" letterSpacing="1"
           fill="#c1c2c5"
         >
-          DW<tspan fill="#3bc9db">YT</tspan>
+          DW<tspan fill="#ffd43b">YT</tspan>
         </text>
       )}
     </svg>

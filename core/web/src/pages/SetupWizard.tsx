@@ -29,7 +29,7 @@ export default function SetupWizard() {
   ]
 
   const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'obsidian'])
-  const [ias,         setIas]         = useState<string[]>(['claude', 'codex', 'opencode', 'cursor', 'kiro', 'copilot', 'windsurf'])
+  const [ias,         setIas]         = useState<string[]>([...ALL_IA_IDS])
   const [projectPath, setProjectPath] = useState('')
   const [saving,      setSaving]      = useState(false)
   const [installing,  setInstalling]  = useState(false)
@@ -46,7 +46,10 @@ export default function SetupWizard() {
       const config  = configRes.status === 'fulfilled' ? configRes.value : null
       const cwdData = cwdRes.status    === 'fulfilled' ? cwdRes.value    : null
       if (config?.tools?.length) setTools(config.tools)
-      if (config?.ias?.length)   setIas(config.ias)
+      // Every known AI client is enabled by default. Union the saved selection
+      // with the full list so clients added after the last setup (e.g. Windsurf)
+      // still come pre-checked. The user can uncheck before installing.
+      setIas(Array.from(new Set([...(config?.ias || []), ...ALL_IA_IDS])))
       setProjectPath(urlProject || config?.project_path || cwdData?.cwd || '')
       setReady(true)
     })

@@ -11,6 +11,9 @@ export const T = {
     wouldBeSpent: 'tokens would be spent', tokensSpent: 'tokens spent', tokensSaved: 'tokens saved',
     noDataTitle: 'Without DWYT you would spend far more tokens',
     noDataSub: 'Install the tools and start using them — savings data will appear here.',
+    // Savings time window
+    savingsWindow: 'Period', windowAll: 'All time',
+    windowHint: 'showing savings accrued in the selected window',
     // Logs
     logsTitle: 'Logs',
     // Card labels
@@ -95,6 +98,9 @@ export const T = {
     wouldBeSpent: 'tokens seriam gastos', tokensSpent: 'tokens gastos', tokensSaved: 'tokens economizados',
     noDataTitle: 'Sem DWYT você gastaria muito mais tokens',
     noDataSub: 'Instale as ferramentas e comece a usar — os dados de economia aparecerão aqui.',
+    // Janela de tempo da economia
+    savingsWindow: 'Período', windowAll: 'Tudo',
+    windowHint: 'mostrando a economia acumulada no período selecionado',
     logsTitle: 'Logs',
     tokensSavedLabel: 'Tokens economizados', uptime: 'Ativo', repos: 'Repos',
     scope: 'Escopo', port: 'Porta', requests: 'Requisições', compression: 'Compressão',

@@ -65,6 +65,22 @@ func (s *Store) migrate() error {
 			project_id TEXT PRIMARY KEY,
 			tokens     INTEGER DEFAULT 0
 		);
+		CREATE TABLE IF NOT EXISTS savings_events (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id TEXT NOT NULL,
+			tool       TEXT NOT NULL,
+			saved      INTEGER NOT NULL,
+			without    INTEGER NOT NULL,
+			ts         INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_savings_events ON savings_events(project_id, ts);
+		CREATE TABLE IF NOT EXISTS savings_cursor (
+			project_id TEXT NOT NULL,
+			tool       TEXT NOT NULL,
+			saved      INTEGER NOT NULL,
+			without    INTEGER NOT NULL,
+			PRIMARY KEY (project_id, tool)
+		);
 	`); err != nil {
 		return err
 	}
@@ -175,6 +191,91 @@ func (s *Store) GetHeadroomSavings(projectID string) (int64, error) {
 		return 0, nil
 	}
 	return v, err
+}
+
+// ToolSavings is a per-tool savings pair used by the time-windowed metrics.
+type ToolSavings struct {
+	Saved   int64
+	Without int64
+}
+
+// RecordSavingsDelta tracks the growth of a tool's cumulative savings for a
+// project as a timestamped event, enabling time-windowed queries (last hour,
+// 24h, 7d, ...). It is idempotent: only positive growth since the last
+// observation is recorded, and a cumulative decrease (tool reset/reindex)
+// rebases the cursor without emitting a bogus event.
+func (s *Store) RecordSavingsDelta(projectID, tool string, savedCum, withoutCum int64) error {
+	var prevSaved, prevWithout int64
+	err := s.db.QueryRow(
+		`SELECT saved, without FROM savings_cursor WHERE project_id = ? AND tool = ?`,
+		projectID, tool,
+	).Scan(&prevSaved, &prevWithout)
+	if err == sql.ErrNoRows {
+		// First observation: set the baseline, attribute no history.
+		_, err = s.db.Exec(
+			`INSERT INTO savings_cursor (project_id, tool, saved, without) VALUES (?, ?, ?, ?)`,
+			projectID, tool, savedCum, withoutCum,
+		)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+
+	if savedCum < prevSaved {
+		// Cumulative dropped (reindex/reset) — rebase, attribute nothing.
+		_, err = s.db.Exec(
+			`UPDATE savings_cursor SET saved = ?, without = ? WHERE project_id = ? AND tool = ?`,
+			savedCum, withoutCum, projectID, tool,
+		)
+		return err
+	}
+
+	dSaved := savedCum - prevSaved
+	if dSaved <= 0 {
+		return nil // no growth
+	}
+	dWithout := withoutCum - prevWithout
+	if dWithout < dSaved {
+		dWithout = dSaved
+	}
+
+	if _, err := s.db.Exec(
+		`INSERT INTO savings_events (project_id, tool, saved, without, ts) VALUES (?, ?, ?, ?, ?)`,
+		projectID, tool, dSaved, dWithout, time.Now().Unix(),
+	); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`UPDATE savings_cursor SET saved = ?, without = ? WHERE project_id = ? AND tool = ?`,
+		savedCum, withoutCum, projectID, tool,
+	)
+	return err
+}
+
+// SumSavingsByTool returns the savings accrued for a project since the given
+// unix timestamp, grouped by tool.
+func (s *Store) SumSavingsByTool(projectID string, sinceUnix int64) (map[string]ToolSavings, error) {
+	rows, err := s.db.Query(
+		`SELECT tool, COALESCE(SUM(saved), 0), COALESCE(SUM(without), 0)
+		 FROM savings_events WHERE project_id = ? AND ts >= ? GROUP BY tool`,
+		projectID, sinceUnix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]ToolSavings)
+	for rows.Next() {
+		var tool string
+		var saved, without int64
+		if err := rows.Scan(&tool, &saved, &without); err != nil {
+			return nil, err
+		}
+		out[tool] = ToolSavings{Saved: saved, Without: without}
+	}
+	return out, nil
 }
 
 func (s *Store) MarkIndexed(path string, nodes, edges int) error {

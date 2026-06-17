@@ -38,7 +38,7 @@ func (ds *DashboardServer) apiMetrics(c *gin.Context) {
 	if projectPath == "" {
 		projectPath = ds.StartCwd
 	}
-	details := ds.toolDetails(projectPath)
+	details := ds.toolDetails(projectPath, c.Query("window"))
 	c.JSON(200, gin.H{
 		"rtk":          status.GetRTKMetrics(ds.DwytBin),
 		"headroom":     status.GetHeadroomMetrics(),
@@ -113,16 +113,119 @@ func (ds *DashboardServer) apiToolDetails(c *gin.Context) {
 		projectPath = ds.StartCwd
 	}
 
-	c.JSON(200, ds.toolDetails(projectPath))
+	c.JSON(200, ds.toolDetails(projectPath, c.Query("window")))
 }
 
-func (ds *DashboardServer) toolDetails(projectPath string) map[string]*ToolDetail {
-	return map[string]*ToolDetail{
+func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*ToolDetail {
+	details := map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(projectPath),
 		"obsidian":            ds.detailObsidian(),
 	}
+
+	// Persist the cumulative savings as timestamped deltas so the dashboard can
+	// answer "how much did I save in the last hour / 24h / 7d?". Recording is
+	// idempotent (only positive growth since the last poll is stored).
+	if ds.Store != nil && projectPath != "" {
+		ds.recordSavingsSnapshot(projectPath, details)
+
+		if since, ok := savingsWindowCutoff(window); ok {
+			ds.applySavingsWindow(projectPath, details, since)
+		}
+	}
+
+	return details
+}
+
+// recordSavingsSnapshot stores the per-tool delta since the previous poll.
+func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map[string]*ToolDetail) {
+	pid := db.HashPath(projectPath)
+	ds.savingsMu.Lock()
+	defer ds.savingsMu.Unlock()
+	for tool, d := range details {
+		if d == nil || d.UptimeSecs == -1 {
+			continue // tool not installed — skip
+		}
+		saved, without := normalizeSavings(d)
+		if saved <= 0 {
+			continue
+		}
+		ds.Store.RecordSavingsDelta(pid, tool, saved, without)
+	}
+}
+
+// applySavingsWindow replaces the cumulative totals with the amount accrued
+// inside the selected time window.
+func (ds *DashboardServer) applySavingsWindow(projectPath string, details map[string]*ToolDetail, since int64) {
+	pid := db.HashPath(projectPath)
+	sums, err := ds.Store.SumSavingsByTool(pid, since)
+	if err != nil {
+		return
+	}
+	for tool, d := range details {
+		if d == nil {
+			continue
+		}
+		ts := sums[tool]
+		d.TokensSaved = ts.Saved
+		d.WithoutDWYTTokens = ts.Without
+		with := ts.Without - ts.Saved
+		if with < 0 {
+			with = 0
+		}
+		d.WithDWYTTokens = with
+		// These rate-based fields describe lifetime ratios, not the window —
+		// clear them so the windowed banner stays internally consistent.
+		d.TokensUsed = with
+	}
+}
+
+// normalizeSavings mirrors calculateGlobalTokenSavings for a single tool,
+// deriving the "without DWYT" baseline when the tool only reports savings.
+func normalizeSavings(d *ToolDetail) (saved, without int64) {
+	saved = d.TokensSaved
+	if saved <= 0 {
+		return 0, 0
+	}
+	without = d.WithoutDWYTTokens
+	if without <= 0 {
+		switch {
+		case d.PctSaved > 0:
+			without = int64(float64(saved) / (d.PctSaved / 100))
+		case d.CompressionPct > 0:
+			without = int64(float64(saved) / (d.CompressionPct / 100))
+		case d.TokensUsed > 0:
+			without = saved + d.TokensUsed
+		default:
+			without = saved * 2
+		}
+	}
+	if without < saved {
+		without = saved
+	}
+	return saved, without
+}
+
+// savingsWindowCutoff maps a UI window label to a unix cutoff timestamp.
+// An empty label or "all" means no window (use cumulative totals).
+func savingsWindowCutoff(window string) (int64, bool) {
+	var d time.Duration
+	switch window {
+	case "1h":
+		d = time.Hour
+	case "6h":
+		d = 6 * time.Hour
+	case "24h":
+		d = 24 * time.Hour
+	case "2d":
+		d = 48 * time.Hour
+	case "7d":
+		d = 7 * 24 * time.Hour
+	default:
+		return 0, false
+	}
+	return time.Now().Add(-d).Unix(), true
 }
 
 type GlobalTokenSavings struct {
@@ -293,9 +396,10 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 
 	var m *status.RTKMetrics
 	if projectPath != "" {
+		// Strictly project-scoped: never fall back to the global `rtk gain`,
+		// otherwise an un-initialized project would show every repo's totals.
 		m = status.GetRTKMetricsForPath(ds.DwytBin, projectPath)
-	}
-	if m == nil {
+	} else {
 		m = status.GetRTKMetrics(ds.DwytBin)
 	}
 	if m != nil {
