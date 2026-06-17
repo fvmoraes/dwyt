@@ -27,6 +27,9 @@ export default function CardRTK({ indexPath, repoName, t, rtkTool, getDetail, to
       <Row label={t.savingsPct} value={det?.pct_saved ? `${det.pct_saved.toFixed(1)}%` : '\u2014'} />
       <Row label={t.uptime} value={fmtUptimeFromDet(det)} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
+      {det?.scope === 'global' && (
+        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>* {t.scopeGlobalRtkNote}</div>
+      )}
       <Hr />
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <span style={{ fontSize: 9, color: '#845ef7', fontWeight: 600, textTransform: 'uppercase' }}>{t.rtkCli}</span>

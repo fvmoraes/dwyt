@@ -29,7 +29,7 @@ export default function Toggle({ checked, onChange, label, description, disabled
         <div style={{ fontSize: 11, fontWeight: 500 }}>{label}</div>
         {description && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{description}</div>}
       </div>
-      <div style={{ fontSize: 10, color: checked ? 'var(--green)' : 'var(--muted)', minWidth: 20, textAlign: 'right' }}>
+      <div style={{ fontSize: 10, color: checked ? 'var(--blue)' : 'var(--muted)', minWidth: 20, textAlign: 'right', fontWeight: checked ? 700 : 400 }}>
         {disabled ? 'ON' : checked ? 'ON' : 'OFF'}
       </div>
     </label>

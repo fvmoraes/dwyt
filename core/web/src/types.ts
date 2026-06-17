@@ -28,6 +28,7 @@ export interface ToolDetail {
   last_updated?: string
   savings_basis?: string
   estimation_source?: string
+  scope?: string
 }
 
 export type Details = Record<string, ToolDetail>

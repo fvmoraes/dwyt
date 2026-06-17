@@ -47,6 +47,7 @@ type ToolDetail struct {
 	LastUpdated       string   `json:"last_updated,omitempty"`
 	SavingsBasis      string   `json:"savings_basis,omitempty"`
 	EstimationSource  string   `json:"estimation_source,omitempty"`
+	Scope             string   `json:"scope,omitempty"` // "project" | "global"
 }
 
 type DashboardServer struct {
@@ -76,6 +77,5 @@ type DashboardServer struct {
 	}
 	codebaseIndexCancel context.CancelFunc
 	headroomStartMu     sync.Mutex
-	headroomCursorMu    sync.Mutex
 	savingsMu           sync.Mutex
 }

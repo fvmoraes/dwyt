@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/platform"
 )
 
 type BrainEntry struct {
@@ -823,15 +823,7 @@ func (pb *ProjectObsidian) OpenInObsidian() error {
 	}
 	openPath := filepath.Join(pb.brainDir, "index.md")
 	vaultURI := "obsidian://open?path=" + url.QueryEscape(openPath)
-	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
-		cmd = exec.Command("open", vaultURI)
-	} else if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", "start", "", vaultURI)
-	} else {
-		cmd = exec.Command("xdg-open", vaultURI)
-	}
-	if err := cmd.Start(); err != nil {
+	if err := platform.OpenURL(vaultURI); err != nil {
 		return fmt.Errorf("obsidian: failed to open vault via URI: %w", err)
 	}
 	return nil
@@ -909,13 +901,7 @@ func obsidianConfigPath() (string, error) {
 }
 
 func (pb *ProjectObsidian) OpenBrainDir() error {
-	cmd := exec.Command("xdg-open", pb.brainDir)
-	if runtime.GOOS == "darwin" {
-		cmd = exec.Command("open", pb.brainDir)
-	} else if runtime.GOOS == "windows" {
-		cmd = exec.Command("explorer", pb.brainDir)
-	}
-	return cmd.Start()
+	return platform.OpenPath(pb.brainDir)
 }
 
 func (pb *ProjectObsidian) GetBrainDir() string {

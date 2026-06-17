@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +61,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	service := c.Query("service")
 	logs := make(map[string]string)
 
-	pollLog := func(label, bin, procName, healthURL string) string {
+	pollLog := func(label, bin, procName, healthURL string, onDemand bool) string {
 		binPath := filepath.Join(ds.DwytBin, bin)
 		if _, err := os.Stat(binPath); err != nil {
 			return fmt.Sprintf("%s: não instalado", label)
@@ -75,14 +74,20 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		if healthURL != "" && health.ProbeURL(healthURL) {
 			return fmt.Sprintf("%s: online", label)
 		}
+		// On-demand stdio MCP servers are launched per-request by the AI
+		// clients; they have no persistent HTTP endpoint, so "installed" means
+		// "available", not "offline".
+		if onDemand {
+			return fmt.Sprintf("%s: disponível (sob demanda)", label)
+		}
 		return fmt.Sprintf("%s: offline", label)
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", "codebase", "http://127.0.0.1:9749/health")
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", "codebase", "http://127.0.0.1:9749/health", true)
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort))
+		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort), false)
 	}
 	if service == "" || service == "rtk" {
 		if _, err := os.Stat(fmt.Sprintf("%s/rtk", ds.DwytBin)); err == nil {
@@ -123,7 +128,7 @@ func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*T
 	details := map[string]*ToolDetail{
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
-		"headroom":            ds.detailHeadroom(projectPath),
+		"headroom":            ds.detailHeadroom(),
 		"obsidian":            ds.detailObsidian(),
 	}
 
@@ -416,17 +421,22 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	d.UptimeLabel = label
 
 	var m *status.RTKMetrics
+	scope := "project"
 	if projectPath != "" {
-		// Strictly project-scoped: never fall back to the global `rtk gain`,
-		// otherwise an un-initialized project would show every repo's totals.
+		// Strictly project-scoped first.
 		m = status.GetRTKMetricsForPath(ds.DwytBin, projectPath)
-	} else {
+	}
+	if m == nil {
+		// The project isn't RTK-initialized (no .rtk) — show the global RTK
+		// totals so the card isn't empty, clearly labelled as global scope.
 		m = status.GetRTKMetrics(ds.DwytBin)
+		scope = "global"
 	}
 	if m != nil {
 		d.TokensSaved = m.TokensSaved
 		d.TotalCommands = m.TotalCommands
 		d.PctSaved = m.PctSaved
+		d.Scope = scope
 	}
 	if projectPath != "" {
 		d.Repos = []string{projectPath}
@@ -434,8 +444,8 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	return d
 }
 
-func (ds *DashboardServer) detailHeadroom(projectPath string) *ToolDetail {
-	d := &ToolDetail{ProxyPort: ds.HeadroomPort}
+func (ds *DashboardServer) detailHeadroom() *ToolDetail {
+	d := &ToolDetail{ProxyPort: ds.HeadroomPort, Scope: "global"}
 	bin := filepath.Join(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
@@ -450,107 +460,84 @@ func (ds *DashboardServer) detailHeadroom(projectPath string) *ToolDetail {
 		d.UptimeLabel = "installed"
 	}
 
-	gotStats := false
+	// Headroom is a single shared proxy; its /stats counters are global.
 	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", ds.HeadroomPort)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, err := client.Get(statsURL); err == nil {
 		defer resp.Body.Close()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
-			gotStats = true
-			if ps, ok := stats["persistent_savings"].(map[string]interface{}); ok {
-				if lt, ok := ps["lifetime"].(map[string]interface{}); ok {
-					if v, ok := lt["tokens_saved"].(float64); ok {
-						d.TokensSaved = int64(v)
-					}
-				}
-			}
-			if rq, ok := stats["requests"].(map[string]interface{}); ok {
-				if v, ok := rq["total"].(float64); ok {
-					d.Requests = int64(v)
-				}
-			}
-			if sm, ok := stats["summary"].(map[string]interface{}); ok {
-				if cp, ok := sm["compression"].(map[string]interface{}); ok {
-					if v, ok := cp["avg_compression_pct"].(float64); ok {
-						d.CompressionPct = v
-					}
-				}
-			}
-			if d.TokensSaved == 0 {
-				if v, ok := stats["tokens_saved"].(float64); ok {
-					d.TokensSaved = int64(v)
-				}
-			}
-			if d.Requests == 0 {
-				if v, ok := stats["requests"].(float64); ok {
-					d.Requests = int64(v)
-				}
-			}
-			if d.CompressionPct == 0 {
-				if v, ok := stats["compression_pct"].(float64); ok {
-					d.CompressionPct = v
-				}
-			}
+			d.TokensSaved = headroomTokensSaved(stats)
+			d.Requests = headroomRequests(stats)
+			d.CompressionPct = headroomCompressionPct(stats)
 		}
-	}
-
-	// Headroom is a single shared proxy, so its /stats lifetime counter is
-	// global across every project. Attribute the growth since the last poll
-	// to the currently active project, then report only the selected
-	// project's own accumulated savings — never the global total.
-	if ds.Store != nil {
-		if gotStats {
-			ds.recordHeadroomDelta(d.TokensSaved)
-		}
-		d.TokensSaved = ds.headroomSavingsForPath(projectPath)
 	}
 
 	d.Repos = nil
 	return d
 }
 
-// recordHeadroomDelta credits the increase in the global lifetime counter to
-// the active project. It is guarded so a proxy restart (counter reset) or an
-// offline proxy (zero reading) never double-counts or misattributes tokens.
-func (ds *DashboardServer) recordHeadroomDelta(lifetime int64) {
-	ds.headroomCursorMu.Lock()
-	defer ds.headroomCursorMu.Unlock()
-
-	prevStr, err := ds.Store.GetConfig("headroom_lifetime_cursor")
-	if err != nil {
-		// First observation: set the baseline without attributing history.
-		ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
-		return
-	}
-	prev, _ := strconv.ParseInt(prevStr, 10, 64)
-	if lifetime <= prev {
-		// No growth, or the proxy reset its counter — rebase, attribute nothing.
-		if lifetime < prev {
-			ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
+// headroomTokensSaved digs the savings out of the headroom /stats payload,
+// tolerating schema differences across headroom versions:
+//   - persistent_savings.lifetime.tokens_saved (older)
+//   - summary.compression.total_tokens_saved_with_cli_filtering / _with_rtk
+//   - top-level tokens_saved
+func headroomTokensSaved(stats map[string]interface{}) int64 {
+	if ps, ok := stats["persistent_savings"].(map[string]interface{}); ok {
+		if lt, ok := ps["lifetime"].(map[string]interface{}); ok {
+			if v, ok := lt["tokens_saved"].(float64); ok && v > 0 {
+				return int64(v)
+			}
 		}
-		return
 	}
-
-	delta := lifetime - prev
-	ds.projectMu.RLock()
-	active := ds.DefaultProject
-	ds.projectMu.RUnlock()
-	if active != "" {
-		ds.Store.AddHeadroomSavings(db.HashPath(active), delta)
+	if sm, ok := stats["summary"].(map[string]interface{}); ok {
+		if cp, ok := sm["compression"].(map[string]interface{}); ok {
+			for _, key := range []string{
+				"total_tokens_saved_with_cli_filtering",
+				"total_tokens_saved_with_rtk",
+				"total_tokens_removed",
+			} {
+				if v, ok := cp[key].(float64); ok && v > 0 {
+					return int64(v)
+				}
+			}
+		}
 	}
-	ds.Store.SetConfig("headroom_lifetime_cursor", strconv.FormatInt(lifetime, 10))
+	if v, ok := stats["tokens_saved"].(float64); ok {
+		return int64(v)
+	}
+	return 0
 }
 
-func (ds *DashboardServer) headroomSavingsForPath(projectPath string) int64 {
-	if projectPath == "" {
-		return 0
+func headroomRequests(stats map[string]interface{}) int64 {
+	if sm, ok := stats["summary"].(map[string]interface{}); ok {
+		if v, ok := sm["api_requests"].(float64); ok && v > 0 {
+			return int64(v)
+		}
 	}
-	v, err := ds.Store.GetHeadroomSavings(db.HashPath(projectPath))
-	if err != nil {
-		return 0
+	if rq, ok := stats["requests"].(map[string]interface{}); ok {
+		if v, ok := rq["total"].(float64); ok {
+			return int64(v)
+		}
 	}
-	return v
+	if v, ok := stats["requests"].(float64); ok {
+		return int64(v)
+	}
+	return 0
+}
+
+func headroomCompressionPct(stats map[string]interface{}) float64 {
+	if sm, ok := stats["summary"].(map[string]interface{}); ok {
+		if cp, ok := sm["compression"].(map[string]interface{}); ok {
+			if v, ok := cp["avg_compression_pct"].(float64); ok {
+				return v
+			}
+		}
+	}
+	if v, ok := stats["compression_pct"].(float64); ok {
+		return v
+	}
+	return 0
 }
 
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
