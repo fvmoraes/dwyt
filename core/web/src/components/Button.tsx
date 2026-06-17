@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { useState, type ButtonHTMLAttributes, type ReactNode, type MouseEvent } from 'react'
 
 type Variant = 'primary' | 'secondary' | 'success' | 'danger' | 'ghost' | 'icon'
 
@@ -39,17 +39,37 @@ export default function Button({
   title,
   children,
   style,
+  onClick,
   ...props
 }: ButtonProps) {
   const v = variantStyles[variant]
   const sz = sizeStyles[size]
 
+  // Auto-lock: when the click handler returns a Promise (an async action /
+  // network request), disable the button and show a loading state until it
+  // settles. This prevents duplicate submissions from multiple clicks and
+  // re-enables only after the operation completes or errors.
+  const [busy, setBusy] = useState(false)
+  const isLoading = !!loading || busy
+  const isDisabled = !!disabled || isLoading
+
+  const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
+    if (isDisabled || !onClick) return
+    const result = onClick(e) as unknown
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      setBusy(true)
+      Promise.resolve(result).finally(() => setBusy(false))
+    }
+  }
+
   return (
     <button
       {...props}
-      disabled={disabled || loading}
+      onClick={handleClick}
+      disabled={isDisabled}
       title={title || label}
       aria-label={label || title}
+      aria-busy={isLoading}
       style={{
         background: v.bg,
         color: v.color,
@@ -58,8 +78,8 @@ export default function Button({
         fontSize: sz.fontSize,
         padding: icon && !label ? '3px 6px' : sz.padding,
         fontWeight: 600,
-        cursor: disabled || loading ? 'default' : 'pointer',
-        opacity: disabled ? 0.38 : 1,
+        cursor: isDisabled ? 'default' : 'pointer',
+        opacity: isDisabled ? (isLoading ? 0.6 : 0.38) : 1,
         transition: 'background 0.12s, border-color 0.12s, opacity 0.12s',
         display: 'inline-flex',
         alignItems: 'center',
@@ -68,17 +88,17 @@ export default function Button({
         ...style,
       }}
       onMouseEnter={e => {
-        if (!disabled && !loading) {
+        if (!isDisabled) {
           (e.currentTarget as HTMLButtonElement).style.background = v.hoverBg
         }
       }}
       onMouseLeave={e => {
-        if (!disabled && !loading) {
+        if (!isDisabled) {
           (e.currentTarget as HTMLButtonElement).style.background = v.bg
         }
       }}
     >
-      {loading ? '...' : icon ? <span style={{ fontSize: sz.fontSize + 2 }}>{icon}</span> : null}
+      {isLoading ? '...' : icon ? <span style={{ fontSize: sz.fontSize + 2 }}>{icon}</span> : null}
       {label ? <span>{label}</span> : null}
       {children}
     </button>

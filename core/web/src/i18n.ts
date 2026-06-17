@@ -93,6 +93,9 @@ export const T = {
     // RTK CLI info
     rtkCli: 'CLI Tool', rtkCliDesc: 'Prefix commands with rtk',
     variable: 'variable',
+    scopeGlobal: 'global',
+    scopeGlobalRtkNote: 'global RTK total (this project has no .rtk yet)',
+    scopeGlobalHeadroomNote: 'global proxy total (shared across projects)',
   },
   pt: {
     auto: 'Auto', refresh: '↺ Atualizar', logs: 'Logs', hideLogs: 'Esconder Logs', setup: '← Setup',
@@ -176,6 +179,9 @@ export const T = {
     removing: 'Removendo...',
     rtkCli: 'Ferramenta CLI', rtkCliDesc: 'Prefixe comandos com rtk',
     variable: 'variável',
+    scopeGlobal: 'global',
+    scopeGlobalRtkNote: 'total global do RTK (este projeto ainda não tem .rtk)',
+    scopeGlobalHeadroomNote: 'total global do proxy (compartilhado entre projetos)',
   },
 } as const
 

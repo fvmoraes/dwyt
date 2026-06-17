@@ -25,6 +25,9 @@ export default function CardHeadroom({ det, state, badgeText, repoName, indexPat
       <Row label={t.compression} value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '\u2014'} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
+      {det?.scope === 'global' && (
+        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>* {t.scopeGlobalHeadroomNote}</div>
+      )}
       <Hr />
       <div style={{ display: 'flex', gap: 4 }}>
         <Button variant="success" size="xs" label={t.start} onClick={onStart} />
