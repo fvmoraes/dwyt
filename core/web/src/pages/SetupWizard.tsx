@@ -7,10 +7,6 @@ import LangToggle from '../components/LangToggle'
 import { useLang } from '../LangContext'
 import * as api from '../api'
 
-// All AI clients DWYT can integrate. Used as the default selection so every
-// client (including newly added ones) starts enabled on the setup screen.
-const ALL_IA_IDS = ['claude', 'codex', 'copilot', 'kiro', 'cursor', 'opencode', 'windsurf']
-
 export default function SetupWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -33,9 +29,10 @@ export default function SetupWizard() {
   ]
 
   const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'obsidian'])
-  const [ias,         setIas]         = useState<string[]>([...ALL_IA_IDS])
+  const [ias,         setIas]         = useState<string[]>([])
   const [projectPath, setProjectPath] = useState('')
   const [saving,      setSaving]      = useState(false)
+  const [clientWarning, setClientWarning] = useState(false)
   const [installing,  setInstalling]  = useState(false)
   const [installProgress, setInstallProgress] = useState<Record<string, string>>({})
   const [expanded,    setExpanded]    = useState<number[]>([0, 1, 2])
@@ -50,10 +47,9 @@ export default function SetupWizard() {
       const config  = configRes.status === 'fulfilled' ? configRes.value : null
       const cwdData = cwdRes.status    === 'fulfilled' ? cwdRes.value    : null
       if (config?.tools?.length) setTools(config.tools)
-      // Every known AI client is enabled by default. Union the saved selection
-      // with the full list so clients added after the last setup (e.g. Windsurf)
-      // still come pre-checked. The user can uncheck before installing.
-      setIas(Array.from(new Set([...(config?.ias || []), ...ALL_IA_IDS])))
+      // AI clients start disabled by default; the user explicitly enables the
+      // ones to install. Returning users keep their previously saved selection.
+      setIas(config?.ias || [])
       setProjectPath(urlProject || config?.project_path || cwdData?.cwd || '')
       setReady(true)
     })
@@ -80,6 +76,7 @@ export default function SetupWizard() {
 
   async function handleSave() {
     if (!projectPath) return
+    if (ias.length === 0) { setClientWarning(true); return }
     setSaving(true)
     const selectedTools = tools.includes('obsidian') ? tools : [...tools, 'obsidian']
     try {
@@ -247,7 +244,7 @@ export default function SetupWizard() {
           {IAS.map(ia => (
             <Toggle key={ia.id} label={ia.label} description={ia.desc}
               checked={ias.includes(ia.id)}
-              onChange={() => toggle(ias, ia.id, setIas)} />
+              onChange={() => { toggle(ias, ia.id, setIas); if (clientWarning) setClientWarning(false) }} />
           ))}
         </div>
       ),
@@ -272,6 +269,19 @@ export default function SetupWizard() {
           <LangToggle />
         </div>
       </div>
+
+      {/* Warning: no AI client selected */}
+      {clientWarning && (
+        <div role="alert" style={{
+          marginBottom: 10, padding: '8px 10px', borderRadius: 6,
+          fontSize: 11, fontWeight: 600,
+          color: 'var(--danger, #ff6b6b)',
+          background: 'rgba(255, 107, 107, 0.08)',
+          border: '1px solid var(--danger, #ff6b6b)',
+        }}>
+          {t.selectAtLeastOneClient}
+        </div>
+      )}
 
       {/* Accordion */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
