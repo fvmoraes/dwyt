@@ -3,9 +3,9 @@ package server
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +23,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 
 	toolsInstalled := map[string]bool{}
 	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom"} {
-		_, err := os.Stat(filepath.Join(ds.DwytBin, t))
+		_, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, t))
 		toolsInstalled[t] = err == nil
 	}
 	toolsInstalled["obsidian"] = true

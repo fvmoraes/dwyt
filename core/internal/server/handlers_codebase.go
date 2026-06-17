@@ -11,6 +11,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,7 +58,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 			ds.codebaseProgress.mu.Unlock()
 		}()
 
-		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+		bin := platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")
 		argJSON, _ := json.Marshal(map[string]string{"repo_path": body.Path})
 		cmd := exec.CommandContext(ctx, bin, "cli", "index_repository", string(argJSON))
 		cmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
@@ -116,7 +117,7 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 	}
 	uiURL := fmt.Sprintf("http://localhost:%d", uiPort)
 
-	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+	bin := platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")
 	if isPortOpen(uiPort) {
 		c.JSON(200, gin.H{"url": uiURL, "started": false, "ready": true})
 		return

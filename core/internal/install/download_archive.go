@@ -81,9 +81,61 @@ func installReleaseBinary(rb releaseBinary) error {
 	if err := os.MkdirAll(filepath.Dir(rb.destPath), 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(rb.destPath, binData, 0755); err != nil {
+	if err := writeExecutableReplacingRunning(rb.destPath, binData); err != nil {
 		return fmt.Errorf("write %s: %w", rb.destPath, err)
 	}
+	return nil
+}
+
+// writeExecutableReplacingRunning writes binData to destPath even when destPath
+// is an executable that is currently running. On Windows the OS refuses to
+// overwrite or delete a running .exe ("The process cannot access the file
+// because it is being used by another process"), but it *does* allow renaming
+// it. So we stage the new bytes in a sibling temp file and atomically rename it
+// into place, moving any locked existing binary aside first. On Unix this is a
+// plain atomic replace via rename.
+func writeExecutableReplacingRunning(destPath string, binData []byte) error {
+	dir := filepath.Dir(destPath)
+	tmp, err := os.CreateTemp(dir, filepath.Base(destPath)+".new-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	// Best-effort cleanup if we don't end up moving it into place.
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := tmp.Write(binData); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		return err
+	}
+
+	// Fast path: atomic replace. On Unix this succeeds even if the target is
+	// running; on Windows it succeeds only if the target isn't locked.
+	if err := os.Rename(tmpPath, destPath); err == nil {
+		return nil
+	}
+
+	// Slow path (Windows, target locked): move the running binary aside, then
+	// rename the new one into place. A running .exe can be renamed but not
+	// overwritten. The stale ".old" file is removed on the next install once
+	// the previous process has exited.
+	oldPath := destPath + ".old"
+	_ = os.Remove(oldPath)
+	if err := os.Rename(destPath, oldPath); err != nil {
+		return fmt.Errorf("move running binary aside: %w", err)
+	}
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		// Try to restore the original to avoid leaving no binary at all.
+		_ = os.Rename(oldPath, destPath)
+		return err
+	}
+	_ = os.Remove(oldPath) // best effort; may still be locked
 	return nil
 }
 

@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// isWindowsStorePythonStub reports whether path is a Microsoft Store
+// "App Execution Alias" for Python rather than a real interpreter. These stubs
+// live under ...\AppData\Local\Microsoft\WindowsApps\ and, when executed
+// without the Store package installed, just print "Python was not found..."
+// and exit with code 9009. Treating them as a real Python yields a misleading
+// "ensurepip indisponível" failure, so we skip them outright.
+func isWindowsStorePythonStub(path string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(path), `\microsoft\windowsapps\`)
+}
+
 // findCompatiblePython localiza um interpretador Python compatível com
 // headroom-ai. Versões 3.10–3.12 têm wheels disponíveis para todas as
 // dependências; 3.13+ frequentemente quebram (faltam wheels para libs com
@@ -19,15 +32,22 @@ import (
 func findCompatiblePython() (string, error) {
 	candidates := []string{"python3.12", "python3.11", "python3.10", "python3", "python"}
 	if runtime.GOOS == "windows" {
-		// Windows rarely has versioned python3.x on PATH; "python" and the
-		// "py" launcher are the norm.
-		candidates = []string{"python", "py", "python3"}
+		// Windows rarely has versioned python3.x on PATH; the "py" launcher is
+		// the most reliable real interpreter, while "python"/"python3" on PATH
+		// are frequently the Microsoft Store alias stubs.
+		candidates = []string{"py", "python", "python3"}
 	}
 	var lastErr error
 	var anyFound bool
 	for _, name := range candidates {
 		path, err := exec.LookPath(name)
 		if err != nil {
+			continue
+		}
+		if isWindowsStorePythonStub(path) {
+			// Not a real interpreter — the Store alias stub. Skip it without
+			// marking anyFound, so the user gets the "install Python" hint.
+			fmt.Printf("  ⚠ headroom: ignorando alias da Microsoft Store %s (não é um Python real)\n", path)
 			continue
 		}
 		anyFound = true

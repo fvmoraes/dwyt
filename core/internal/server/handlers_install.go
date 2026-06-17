@@ -14,6 +14,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/gin-gonic/gin"
 )
 
@@ -202,7 +203,7 @@ func (ds *DashboardServer) integrateProject(config Config, setStatus func(string
 func (ds *DashboardServer) indexCodebase(config Config, setStatus func(string, string)) {
 	setStatus("index", "installing")
 	argJSON, _ := json.Marshal(map[string]string{"repo_path": config.ProjectPath})
-	indexCmd := exec.Command(filepath.Join(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository", string(argJSON))
+	indexCmd := exec.Command(platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository", string(argJSON))
 	indexCmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
 	if err := indexCmd.Run(); err != nil {
 		setStatus("index", "error: "+err.Error())

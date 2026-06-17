@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -62,7 +62,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	logs := make(map[string]string)
 
 	pollLog := func(label, bin, procName, healthURL string, onDemand bool) string {
-		binPath := filepath.Join(ds.DwytBin, bin)
+		binPath := platform.DWYTLauncherPath(ds.DwytBin, bin)
 		if _, err := os.Stat(binPath); err != nil {
 			return fmt.Sprintf("%s: não instalado", label)
 		}
@@ -90,7 +90,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort), false)
 	}
 	if service == "" || service == "rtk" {
-		if _, err := os.Stat(fmt.Sprintf("%s/rtk", ds.DwytBin)); err == nil {
+		if _, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, "rtk")); err == nil {
 			logs["rtk"] = "rtk: disponível (ferramenta CLI)"
 		} else {
 			logs["rtk"] = "rtk: não instalado"
@@ -387,7 +387,7 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 	if projectPath != "" {
 		d.Repos = []string{projectPath}
 	}
-	bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
+	bin := platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
@@ -411,7 +411,7 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 
 func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	d := &ToolDetail{}
-	bin := filepath.Join(ds.DwytBin, "rtk")
+	bin := platform.DWYTLauncherPath(ds.DwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
@@ -446,7 +446,7 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 
 func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	d := &ToolDetail{ProxyPort: ds.HeadroomPort, Scope: "global"}
-	bin := filepath.Join(ds.DwytBin, "headroom")
+	bin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d

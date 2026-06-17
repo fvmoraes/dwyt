@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/detect"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/security"
 )
 
@@ -92,7 +93,7 @@ func removeCodebaseData(home string, e *detect.Env) {
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
-	cbmcpBin := filepath.Join(e.DwytBin, "codebase-memory-mcp")
+	cbmcpBin := platform.DWYTLauncherPath(e.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(cbmcpBin); err == nil {
 		exec.Command(cbmcpBin, "uninstall", "-y").Run()
 		fmt.Println("  ✓ Codebase agent configs removed")

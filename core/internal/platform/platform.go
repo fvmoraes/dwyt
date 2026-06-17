@@ -79,6 +79,26 @@ func GetExecutablePath(name string) string {
 	return filepath.Join(GetBinDir(), ExecutableName(name))
 }
 
+// DWYTLauncherName returns the on-disk filename (inside the bin dir) of a
+// DWYT-managed tool launcher for the current OS. Native binaries get the
+// platform executable suffix (.exe on Windows). Headroom is a Python console
+// script exposed through a .bat shim on Windows (see install.headroomWrapperName),
+// so it is special-cased — using ".exe" there would point at a file that does
+// not exist.
+func DWYTLauncherName(tool string) string {
+	if IsWindows() && tool == "headroom" {
+		return "headroom.bat"
+	}
+	return ExecutableName(tool)
+}
+
+// DWYTLauncherPath joins binDir with the platform-correct launcher filename for
+// the given tool. binDir is taken as-is so callers can keep their own bin dir
+// (e.g. a server's configured DwytBin) rather than the process default.
+func DWYTLauncherPath(binDir, tool string) string {
+	return filepath.Join(binDir, DWYTLauncherName(tool))
+}
+
 // LookPath finds an executable on PATH (cross-platform via exec.LookPath).
 func LookPath(name string) (string, bool) {
 	p, err := exec.LookPath(name)
