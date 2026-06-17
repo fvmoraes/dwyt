@@ -9,9 +9,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // releaseBinary describes a prebuilt binary published as a release archive
@@ -88,6 +90,36 @@ func installReleaseBinary(rb releaseBinary) error {
 func sha256Sum(data []byte) []byte {
 	h := sha256.Sum256(data)
 	return h[:]
+}
+
+// latestGitHubTag resolves the newest release tag of a "owner/repo" by reading
+// the redirect on /releases/latest — no API call, so it isn't subject to the
+// anonymous REST rate limit. Cross-platform (pure HTTP).
+func latestGitHubTag(repo string) (string, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // capture the 3xx instead of following it
+		},
+	}
+	resp, err := client.Get(fmt.Sprintf("https://github.com/%s/releases/latest", repo))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", fmt.Errorf("no redirect location resolving latest release of %s", repo)
+	}
+	idx := strings.LastIndex(loc, "/tag/")
+	if idx < 0 {
+		return "", fmt.Errorf("unexpected release URL for %s: %s", repo, loc)
+	}
+	tag := strings.TrimSpace(loc[idx+len("/tag/"):])
+	if tag == "" {
+		return "", fmt.Errorf("empty release tag for %s", repo)
+	}
+	return tag, nil
 }
 
 // expectedSHA256 finds the hash for asset in a "checksums.txt" body whose lines
