@@ -75,18 +75,19 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	clients := ds.clientsString()
+	clientList := splitClients(clients)
 	if body.Name != "" {
-		if err := reg.ConfigureMCPByName(body.ProjectPath, body.Name); err != nil {
+		if err := reg.ConfigureMCPByName(body.ProjectPath, body.Name, clientList); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 	} else {
-		if err := reg.ConfigureMCP(body.ProjectPath); err != nil {
+		if err := reg.ConfigureMCP(body.ProjectPath, clientList); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 	}
-	clients := ds.clientsString()
 	integrate.Project(body.ProjectPath, clients, ds.DwytBin)
 	if strings.Contains(","+clients+",", ",kiro,") {
 		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath)

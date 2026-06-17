@@ -390,8 +390,9 @@ func removeManagedBlock(content, start, end string) string {
 	}
 }
 
-// ConfigureMCPByName writes MCP configuration for a specific MCP server only.
-func (r *Registry) ConfigureMCPByName(projectPath, name string) error {
+// ConfigureMCPByName writes MCP configuration for a specific MCP server only,
+// limited to the AI clients the user selected.
+func (r *Registry) ConfigureMCPByName(projectPath, name string, clients []string) error {
 	if _, ok := r.MCPServers[name]; !ok {
 		return fmt.Errorf("mcp server %s not found in registry", name)
 	}
@@ -399,7 +400,7 @@ func (r *Registry) ConfigureMCPByName(projectPath, name string) error {
 		return fmt.Errorf("mcp registry save failed: %w", err)
 	}
 
-	errors := r.syncConfiguredTargets(projectPath)
+	errors := r.syncConfiguredTargets(projectPath, clients)
 	if len(errors) > 0 {
 		return fmt.Errorf("sync errors: %v", errors)
 	}
@@ -407,8 +408,8 @@ func (r *Registry) ConfigureMCPByName(projectPath, name string) error {
 	return nil
 }
 
-// ConfigureMCP writes MCP configurations to all supported agents.
-func (r *Registry) ConfigureMCP(projectPath string) error {
+// ConfigureMCP writes MCP configurations to the AI clients the user selected.
+func (r *Registry) ConfigureMCP(projectPath string, clients []string) error {
 	// Save the updated registry first
 	if err := r.Save(); err != nil {
 		return fmt.Errorf("mcp registry save failed: %w", err)
@@ -420,7 +421,7 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 		backup[k] = v
 	}
 
-	errors := r.syncConfiguredTargets(projectPath)
+	errors := r.syncConfiguredTargets(projectPath, clients)
 
 	if len(errors) > 0 {
 		// Rollback: restore registry to pre-sync state
@@ -433,9 +434,22 @@ func (r *Registry) ConfigureMCP(projectPath string) error {
 	return nil
 }
 
-// SyncAll syncs MCP config for all agents using the given project path.
-func (r *Registry) SyncAll(projectPath string) error {
-	return r.ConfigureMCP(projectPath)
+// SyncAll syncs MCP config for the selected agents using the given project path.
+func (r *Registry) SyncAll(projectPath string, clients []string) error {
+	return r.ConfigureMCP(projectPath, clients)
+}
+
+// clientSet builds a lookup set from a list of selected client ids, trimming
+// blanks. An empty input yields an empty set, so nothing gets synced.
+func clientSet(clients []string) map[string]bool {
+	set := make(map[string]bool, len(clients))
+	for _, c := range clients {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			set[c] = true
+		}
+	}
+	return set
 }
 
 // Toggle enables or disables an MCP server by name.

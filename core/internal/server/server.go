@@ -323,30 +323,39 @@ func (ds *DashboardServer) startMCPsIfNeeded() {
 	}()
 }
 
+// clientsString returns the comma-separated AI clients the user selected in
+// setup. It returns an empty string when no selection has been saved — DWYT
+// then configures nothing, instead of silently falling back to "all clients".
 func (ds *DashboardServer) clientsString() string {
 	if ds.Store == nil {
-		return defaultClientsString()
+		return ""
 	}
 	raw, err := ds.Store.GetConfig("setup")
 	if err != nil {
-		return defaultClientsString()
+		return ""
 	}
 	var cfg Config
 	if json.Unmarshal([]byte(raw), &cfg) != nil {
-		return defaultClientsString()
+		return ""
 	}
 	clients := strings.Join(cfg.Ias, ",")
 	if clients == "" {
 		clients = strings.Join(cfg.Clients, ",")
 	}
-	if clients == "" {
-		clients = defaultClientsString()
-	}
 	return clients
 }
 
-func defaultClientsString() string {
-	return "claude,codex,copilot,kiro,cursor,opencode,windsurf,continue"
+// splitClients turns a comma-separated client string into a trimmed,
+// non-empty slice. Used to thread the user's selection into the MCP registry.
+func splitClients(clients string) []string {
+	var out []string
+	for _, c := range strings.Split(clients, ",") {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 var headroomWrapMap = map[string]string{
@@ -365,9 +374,8 @@ func headroomEligibleClients(cfg Config) []string {
 	if len(clientList) == 0 {
 		clientList = cfg.Clients
 	}
-	if len(clientList) == 0 {
-		clientList = strings.Split(defaultClientsString(), ",")
-	}
+	// No selection means no eligible clients — Headroom is only relevant for
+	// the clients the user actually chose.
 
 	var result []string
 	seen := make(map[string]bool)
