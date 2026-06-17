@@ -58,6 +58,8 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 
 // loadProjectObsidian reloads the active project's Obsidian vault and runtime
 // state. Callers must have already set ds.DefaultProject / ds.StartCwd.
+// The (potentially heavy) vault construction happens outside the lock; only
+// the pointer swap is guarded, so concurrent readers never see a torn value.
 func (ds *DashboardServer) loadProjectObsidian(path string) {
 	if ds.Store != nil {
 		ds.Store.TouchProject(path)
@@ -67,26 +69,42 @@ func (ds *DashboardServer) loadProjectObsidian(path string) {
 	pb, brainErr := brain.NewProjectObsidian(ds.DwytHome, path)
 	if brainErr != nil {
 		log.Error("failed to load Obsidian vault", log.Fields{"error": brainErr.Error()})
-		ds.RuntimeState.ToolErrors["obsidian"] = brainErr.Error()
-		ds.ProjectObsidian = nil
-	} else {
-		ds.ProjectObsidian = pb
-		delete(ds.RuntimeState.ToolErrors, "obsidian")
-		if ds.Store != nil {
-			if raw, err := ds.Store.GetConfig("setup"); err == nil {
-				var cfg Config
-				if unmarshalErr := json.Unmarshal([]byte(raw), &cfg); unmarshalErr == nil {
-					pb.SetConfig(cfg.Ias, cfg.Tools)
-				}
+		ds.setProjectObsidian(nil)
+		ds.RuntimeState.SetToolError("obsidian", brainErr.Error())
+		ds.RuntimeState.SetCurrentProject(path, filepath.Base(path))
+		return
+	}
+
+	ds.RuntimeState.SetToolError("obsidian", "")
+	if ds.Store != nil {
+		if raw, err := ds.Store.GetConfig("setup"); err == nil {
+			var cfg Config
+			if unmarshalErr := json.Unmarshal([]byte(raw), &cfg); unmarshalErr == nil {
+				pb.SetConfig(cfg.Ias, cfg.Tools)
 			}
 		}
-		stats := pb.Stats()
-		if c, ok := stats["total_files"].(int); ok {
-			ds.RuntimeState.UpdateProjectObsidian(path, c)
-		}
+	}
+	ds.setProjectObsidian(pb)
+	stats := pb.Stats()
+	if c, ok := stats["total_files"].(int); ok {
+		ds.RuntimeState.UpdateProjectObsidian(path, c)
 	}
 
 	ds.RuntimeState.SetCurrentProject(path, filepath.Base(path))
+}
+
+// projectObsidian returns the active vault pointer under a read lock.
+func (ds *DashboardServer) projectObsidian() *brain.ProjectObsidian {
+	ds.projectMu.RLock()
+	defer ds.projectMu.RUnlock()
+	return ds.ProjectObsidian
+}
+
+// setProjectObsidian swaps the active vault pointer under a write lock.
+func (ds *DashboardServer) setProjectObsidian(pb *brain.ProjectObsidian) {
+	ds.projectMu.Lock()
+	defer ds.projectMu.Unlock()
+	ds.ProjectObsidian = pb
 }
 
 // apiProjectRemove performs a logical removal: the project leaves the active
@@ -134,7 +152,7 @@ func (ds *DashboardServer) apiProjectRemove(c *gin.Context) {
 			workspace.Touch(next)
 			ds.loadProjectObsidian(next)
 		} else {
-			ds.ProjectObsidian = nil
+			ds.setProjectObsidian(nil)
 		}
 		ds.broadcastSSE("project_switch", next)
 	}

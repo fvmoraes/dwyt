@@ -69,14 +69,9 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 					item["nodes"] = p.Nodes
 					item["edges"] = p.Edges
 				}
-				if pb, err := brain.NewProjectObsidian(ds.DwytHome, p.Path); err == nil {
-					stats := pb.Stats()
-					item["obsidian_count"] = stats["total_files"]
-					if count, ok := stats["total_files"].(int); ok && count > 0 {
-						item["has_obsidian"] = true
-					} else {
-						item["has_obsidian"] = false
-					}
+				if count, ok := brain.CountVaultFiles(ds.DwytHome, p.Path); ok {
+					item["obsidian_count"] = count
+					item["has_obsidian"] = count > 0
 				} else {
 					item["obsidian_count"] = 0
 					item["has_obsidian"] = false

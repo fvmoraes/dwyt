@@ -390,8 +390,3 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states
 }
-
-func pgrep(pattern string) bool {
-	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	return err == nil && len(strings.TrimSpace(string(out))) > 0
-}

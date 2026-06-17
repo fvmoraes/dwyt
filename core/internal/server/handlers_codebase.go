@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,8 +58,8 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		}()
 
 		bin := filepath.Join(ds.DwytBin, "codebase-memory-mcp")
-		cmd := exec.CommandContext(ctx, bin, "cli", "index_repository",
-			fmt.Sprintf(`{"repo_path":"%s"}`, body.Path))
+		argJSON, _ := json.Marshal(map[string]string{"repo_path": body.Path})
+		cmd := exec.CommandContext(ctx, bin, "cli", "index_repository", string(argJSON))
 		cmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
 
 		ds.codebaseProgress.mu.Lock()

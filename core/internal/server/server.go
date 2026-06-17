@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,24 +144,30 @@ func (ds *DashboardServer) Start() error {
 
 	sub, _ := fs.Sub(reactFS, "dashboard/dist")
 	r.Use(func(c *gin.Context) {
-		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+		p := c.Request.URL.Path
+		if strings.HasPrefix(p, "/api") {
 			c.Next()
 			return
 		}
-		if data, err := fs.ReadFile(sub, c.Request.URL.Path[1:]); err == nil {
-			ct := "application/octet-stream"
-			if len(c.Request.URL.Path) > 3 && c.Request.URL.Path[len(c.Request.URL.Path)-3:] == ".js" {
-				ct = "application/javascript"
-			} else if len(c.Request.URL.Path) > 4 && c.Request.URL.Path[len(c.Request.URL.Path)-4:] == ".css" {
-				ct = "text/css"
-			} else if len(c.Request.URL.Path) > 4 && c.Request.URL.Path[len(c.Request.URL.Path)-4:] == ".svg" {
-				ct = "image/svg+xml"
+		clean := strings.TrimPrefix(p, "/")
+		if clean == "" {
+			clean = "index.html"
+		}
+		if data, err := fs.ReadFile(sub, clean); err == nil {
+			// Vite emits content-hashed filenames under assets/, so those are
+			// safe to cache forever. index.html must always revalidate.
+			if strings.HasPrefix(clean, "assets/") {
+				c.Header("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				c.Header("Cache-Control", "no-cache")
 			}
-			c.Data(200, ct, data)
+			c.Data(200, staticContentType(clean), data)
 			c.Abort()
 			return
 		}
+		// SPA fallback: unknown non-API paths serve index.html (client routing).
 		if data, err := fs.ReadFile(sub, "index.html"); err == nil {
+			c.Header("Cache-Control", "no-cache")
 			c.Data(200, "text/html; charset=utf-8", data)
 			c.Abort()
 			return
@@ -181,11 +188,35 @@ func (ds *DashboardServer) Start() error {
 	return r.Run(addr)
 }
 
+// staticContentType resolves the MIME type for an embedded asset, with
+// explicit fallbacks for the web types Go's mime package may not register.
+func staticContentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".js", ".mjs":
+		return "application/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".png":
+		return "image/png"
+	case ".woff2":
+		return "font/woff2"
+	}
+	if ct := mime.TypeByExtension(filepath.Ext(name)); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
 func (ds *DashboardServer) apiSSE(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
 
 	ch := make(chan string, 10)
 	ds.sseMu.Lock()
@@ -213,7 +244,7 @@ func (ds *DashboardServer) broadcastLoop() {
 	ticker := time.NewTicker(3 * time.Second)
 	go func() {
 		for range ticker.C {
-			s := status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil)
+			s := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
 			data, _ := json.Marshal(s)
 			ds.sseMu.Lock()
 			for ch := range ds.sseClients {

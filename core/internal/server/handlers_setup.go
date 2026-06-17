@@ -71,7 +71,7 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 	}
 
 	results["rtk"] = "available"
-	if ds.ProjectObsidian != nil {
+	if ds.projectObsidian() != nil {
 		results["obsidian"] = "available"
 	} else {
 		results["obsidian"] = "no_vault"

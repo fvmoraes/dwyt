@@ -6,14 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/procutil"
 )
 
 type ServiceStatus struct {
@@ -37,6 +36,8 @@ type ManagedProcess struct {
 	PID       int
 	StartedAt time.Time
 	LogDir    string
+	cmd       *exec.Cmd     // handle to the running child, for reaping
+	done      chan struct{} // closed by the reaper when the child exits
 	mu        sync.Mutex
 }
 
@@ -44,6 +45,7 @@ type ProcessManager struct {
 	processes map[string]*ManagedProcess
 	mu        sync.RWMutex
 	logDir    string
+	dwytHome  string
 }
 
 func New(dwytHome string) *ProcessManager {
@@ -52,6 +54,7 @@ func New(dwytHome string) *ProcessManager {
 	return &ProcessManager{
 		processes: make(map[string]*ManagedProcess),
 		logDir:    logDir,
+		dwytHome:  dwytHome,
 	}
 }
 
@@ -131,6 +134,23 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 
 	mp.PID = cmd.Process.Pid
 	mp.StartedAt = time.Now()
+	mp.cmd = cmd
+	procutil.WritePID(pm.dwytHome, name, mp.PID)
+	// Reaper: wait on the child so it never lingers as a zombie when it exits
+	// on its own (crash) or is signalled by Stop(). Clears PID once reaped.
+	done := make(chan struct{})
+	mp.done = done
+	go func() {
+		cmd.Wait()
+		close(done)
+		mp.mu.Lock()
+		if mp.cmd == cmd {
+			mp.PID = 0
+			mp.cmd = nil
+			procutil.RemovePID(pm.dwytHome, name)
+		}
+		mp.mu.Unlock()
+	}()
 	log.Info("process started", log.Fields{"service": name, "pid": mp.PID, "port": mp.Port})
 
 	if mp.HealthURL != "" {
@@ -143,11 +163,10 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 			retries = 10
 		}
 		if err := waitForHealth(healthURL, retries, timeout); err != nil {
-			// Kill process that failed healthcheck
-			if proc, procErr := os.FindProcess(mp.PID); procErr == nil {
-				proc.Signal(syscall.SIGKILL)
+			// Kill the process that failed its healthcheck; the reaper collects it.
+			if cmd.Process != nil {
+				procutil.Terminate(cmd.Process.Pid)
 			}
-			mp.PID = 0
 			log.Warn("process started but healthcheck failed, killed", log.Fields{"service": name, "error": err.Error()})
 			return &ServiceStatus{Name: name, Status: "error", State: "error", Running: false, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, err
 		}
@@ -170,31 +189,25 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 		return pm.statusLocked(mp), nil
 	}
 
-	proc, err := os.FindProcess(mp.PID)
-	if err != nil {
-		mp.PID = 0
-		return pm.statusLocked(mp), nil
-	}
-
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		log.Info("SIGTERM failed, using SIGKILL", log.Fields{"service": name, "pid": mp.PID})
-		proc.Signal(syscall.SIGKILL)
-	} else {
-		done := make(chan struct{})
-		go func() {
-			proc.Wait()
-			close(done)
-		}()
+	// Prefer the tracked child handle so we coordinate with the reaper
+	// goroutine (which owns the single Wait()). procutil.Terminate is
+	// cross-platform (SIGTERM→SIGKILL on Unix, taskkill /F /T on Windows).
+	pid := mp.PID
+	done := mp.done
+	procutil.Terminate(pid)
+	if done != nil {
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
-			log.Warn("process didn't exit on SIGTERM, sending SIGKILL", log.Fields{"service": name, "pid": mp.PID})
-			proc.Signal(syscall.SIGKILL)
+		case <-time.After(6 * time.Second):
+			log.Warn("process didn't exit after terminate", log.Fields{"service": name, "pid": pid})
+			procutil.Terminate(pid)
 			<-done
 		}
 	}
 
 	mp.PID = 0
+	mp.cmd = nil
+	procutil.RemovePID(pm.dwytHome, name)
 	log.Info("process stopped", log.Fields{"service": name})
 	return pm.statusLocked(mp), nil
 }
@@ -276,37 +289,11 @@ func (pm *ProcessManager) statusLocked(mp *ManagedProcess) *ServiceStatus {
 	return s
 }
 
+// Running reports whether the managed child is alive. It relies on the reaper
+// goroutine, which clears PID/cmd the instant the process exits — so this is
+// accurate and cross-platform without probing /proc or sending signals.
 func (mp *ManagedProcess) Running() bool {
-	if mp.PID == 0 {
-		return false
-	}
-	proc, err := os.FindProcess(mp.PID)
-	if err != nil {
-		mp.PID = 0
-		return false
-	}
-
-	// Check if process is not a zombie (Linux only)
-	if runtime.GOOS == "linux" {
-		statPath := fmt.Sprintf("/proc/%d/stat", mp.PID)
-		data, err := os.ReadFile(statPath)
-		if err != nil {
-			mp.PID = 0
-			return false
-		}
-		fields := strings.Fields(string(data))
-		if len(fields) > 2 && fields[2] == "Z" {
-			mp.PID = 0
-			return false
-		}
-	}
-
-	err = proc.Signal(syscall.Signal(0))
-	if err != nil {
-		mp.PID = 0
-		return false
-	}
-	return true
+	return mp.PID != 0 && mp.cmd != nil
 }
 
 func probeURL(url string) bool {
@@ -337,30 +324,12 @@ func waitForHealth(url string, maxRetries int, timeout time.Duration) error {
 }
 
 func tailBytes(data []byte, n int) []byte {
-	lines := splitLines(string(data))
+	if n <= 0 {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	result := ""
-	for _, l := range lines {
-		result += l + "\n"
-	}
-	return []byte(result)
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	current := ""
-	for _, c := range s {
-		if c == '\n' {
-			lines = append(lines, current)
-			current = ""
-		} else {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
+	return []byte(strings.Join(lines, "\n") + "\n")
 }

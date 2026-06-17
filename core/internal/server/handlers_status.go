@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
 
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
 	tools := make(map[string]status.ServiceState)
-	for _, tool := range status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil).Tools {
+	for _, tool := range status.PollAll(ds.DwytBin, ds.projectObsidian() != nil).Tools {
 		tools[tool.Name] = tool.Status
 	}
 	c.JSON(200, gin.H{
@@ -30,7 +30,7 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
-	c.JSON(200, status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil))
+	c.JSON(200, status.PollAll(ds.DwytBin, ds.projectObsidian() != nil))
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {
@@ -54,7 +54,7 @@ func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiServicesStatus(c *gin.Context) {
-	all := status.PollAll(ds.DwytBin, ds.ProjectObsidian != nil)
+	all := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
 	c.JSON(200, all)
 }
 
@@ -62,24 +62,27 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	service := c.Query("service")
 	logs := make(map[string]string)
 
-	pollLog := func(name, bin, pattern string) string {
+	pollLog := func(label, bin, procName, healthURL string) string {
 		binPath := filepath.Join(ds.DwytBin, bin)
 		if _, err := os.Stat(binPath); err != nil {
-			return fmt.Sprintf("%s: não instalado", name)
+			return fmt.Sprintf("%s: não instalado", label)
 		}
-		out, err := exec.Command("pgrep", "-f", pattern).Output()
-		if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-			return fmt.Sprintf("%s: offline", name)
+		// Cross-platform: ask the process manager (PID tracked across OSes)
+		// then fall back to an HTTP health probe for externally-started procs.
+		if st := ds.ProcMan.Status(procName); st != nil && st.Running {
+			return fmt.Sprintf("%s: rodando (PID %d)", label, st.PID)
 		}
-		pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-		return fmt.Sprintf("%s: rodando (PID %s)", name, pid)
+		if healthURL != "" && health.ProbeURL(healthURL) {
+			return fmt.Sprintf("%s: online", label)
+		}
+		return fmt.Sprintf("%s: offline", label)
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", ds.DwytBin+"/codebase-memory-mcp")
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", "codebase", "http://127.0.0.1:9749/health")
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom", fmt.Sprintf("headroom proxy --port %d", ds.HeadroomPort))
+		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort))
 	}
 	if service == "" || service == "rtk" {
 		if _, err := os.Stat(fmt.Sprintf("%s/rtk", ds.DwytBin)); err == nil {
@@ -89,7 +92,7 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 		}
 	}
 	if service == "" || service == "obsidian" {
-		if ds.ProjectObsidian == nil {
+		if ds.projectObsidian() == nil {
 			logs["obsidian"] = "obsidian: inactive (no vault loaded)"
 		} else {
 			logs["obsidian"] = "obsidian: online (Obsidian vault)"
@@ -331,38 +334,6 @@ func calculateGlobalTokenSavings(details map[string]*ToolDetail) GlobalTokenSavi
 
 // Context handler and helpers moved to handlers_context.go
 
-func uptimeFromPID(pattern string) (int64, string) {
-	out, err := exec.Command("pgrep", "-f", pattern).Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return -1, ""
-	}
-	pid := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-	statBytes, err := os.ReadFile("/proc/" + pid + "/stat")
-	if err != nil {
-		return 0, "rodando"
-	}
-	fields := strings.Fields(string(statBytes))
-	if len(fields) < 22 {
-		return 0, "rodando"
-	}
-	var startJiffies int64
-	fmt.Sscanf(fields[21], "%d", &startJiffies)
-
-	uptimeBytes, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0, "rodando"
-	}
-	var sysUptime float64
-	fmt.Sscanf(string(uptimeBytes), "%f", &sysUptime)
-
-	clkTck := int64(100)
-	processUptimeSecs := int64(sysUptime) - startJiffies/clkTck
-	if processUptimeSecs < 0 {
-		processUptimeSecs = 0
-	}
-	return processUptimeSecs, fmtUptime(processUptimeSecs)
-}
-
 func isPortOpen(port int) bool {
 	client := &http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
@@ -584,11 +555,12 @@ func (ds *DashboardServer) headroomSavingsForPath(projectPath string) int64 {
 
 func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
-	if ds.ProjectObsidian == nil {
+	pb := ds.projectObsidian()
+	if pb == nil {
 		d.UptimeSecs = -1
 		return d
 	}
-	stats := ds.ProjectObsidian.Stats()
+	stats := pb.Stats()
 	if files, ok := stats["total_files"].(int); ok {
 		d.MemoryCount = files
 	}

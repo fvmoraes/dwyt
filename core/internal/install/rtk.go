@@ -11,9 +11,22 @@ import (
 
 // RTK instala o binário rtk em dwytBin e roda `rtk init --global` pra
 // registrar os hooks no shell.
+//
+// Nota Windows: o projeto rtk não publica binário para Windows (o instalador
+// oficial só cobre Linux/macOS). Nesse caso tentamos um rtk.exe já instalado
+// pelo usuário e, se não houver, retornamos uma mensagem clara em vez de uma
+// falha obscura.
 func RTK(dwytBin string) error {
 	binPath := filepath.Join(dwytBin, rtkBinaryName())
 	os.MkdirAll(dwytBin, 0755)
+
+	if runtime.GOOS == "windows" {
+		if err := copyRTKBinary(binPath); err != nil {
+			return fmt.Errorf("rtk: sem binário oficial para Windows. Instale manualmente ou use o WSL (https://github.com/rtk-ai/rtk); as demais ferramentas DWYT funcionam normalmente")
+		}
+		exec.Command(binPath, "init", "--global").Run()
+		return nil
+	}
 
 	runRTKUpstreamInstaller()
 
@@ -41,7 +54,20 @@ func runRTKUpstreamInstaller() {
 	if script == "" {
 		return
 	}
-	cmd := exec.Command("sh")
+	// Prefer a POSIX shell; on Windows without Git Bash/WSL there is none, so
+	// we skip the upstream installer and rely on copyRTKBinary finding a
+	// pre-installed rtk.exe.
+	shell := ""
+	for _, candidate := range []string{"bash", "sh"} {
+		if p, err := exec.LookPath(candidate); err == nil {
+			shell = p
+			break
+		}
+	}
+	if shell == "" {
+		return
+	}
+	cmd := exec.Command(shell)
 	stdin, _ := cmd.StdinPipe()
 	go func() { io.WriteString(stdin, script); stdin.Close() }()
 	cmd.Run()
