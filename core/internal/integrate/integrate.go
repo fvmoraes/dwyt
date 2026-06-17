@@ -35,11 +35,15 @@ func Project(projectPath, clients, dwytBin string) {
 		rtkBin += ".exe"
 	}
 
-	// .mcp.json at the project root is the de-facto standard; Codex,
-	// Claude Code, and several others read it directly.
-	writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin)
-	writeOrMergeVSCodeMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), cbmcpBin, obsidianMCPBin)
-	writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, rtkBin)
+	// Only touch files for clients the user explicitly selected. Nothing
+	// here runs when clientList is empty — DWYT never installs configs for
+	// clients that were left unchecked in setup.
+
+	// .mcp.json at the project root is the de-facto standard read by Claude
+	// Code and Codex. Write it only when one of those clients is selected.
+	if containsClient(clientList, "claude") || containsClient(clientList, "codex") {
+		writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin)
+	}
 
 	if containsClient(clientList, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
@@ -68,6 +72,12 @@ func Project(projectPath, clients, dwytBin string) {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
+		// Copilot in VS Code reads MCP servers from .vscode/mcp.json.
+		writeOrMergeVSCodeMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), cbmcpBin, obsidianMCPBin)
+	}
+
+	if containsClient(clientList, "opencode") {
+		writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, rtkBin)
 	}
 
 	if containsClient(clientList, "windsurf") {
@@ -98,9 +108,8 @@ func Project(projectPath, clients, dwytBin string) {
 }
 
 func normalizeClients(clients string) []string {
-	if strings.TrimSpace(clients) == "" {
-		return []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode", "windsurf", "continue"}
-	}
+	// An empty selection means the user enabled no AI clients — DWYT must
+	// install nothing client-specific. Never fall back to "all clients".
 	seen := map[string]bool{}
 	var result []string
 	for _, c := range strings.Split(clients, ",") {

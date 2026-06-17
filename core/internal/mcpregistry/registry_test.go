@@ -57,7 +57,8 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectPath := t.TempDir()
-	if err := reg.ConfigureMCP(projectPath); err != nil {
+	allClients := []string{"claude", "codex", "copilot", "kiro", "cursor", "opencode", "windsurf", "continue"}
+	if err := reg.ConfigureMCP(projectPath, allClients); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,6 +95,82 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 		!strings.Contains(string(codex), "[mcp_servers.obsidian]") ||
 		!strings.Contains(string(codex), "[mcp_servers.obsidian.env]") {
 		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
+	}
+}
+
+func TestConfigureMCPRespectsClientSelection(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	t.Setenv("HOME", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := t.TempDir()
+	if err := reg.ConfigureMCP(projectPath, []string{"kiro"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Kiro configs must exist.
+	for _, p := range []string{
+		filepath.Join(".kiro", "settings", "mcp.json"),
+		filepath.Join(".kiro", "mcp.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(projectPath, p)); err != nil {
+			t.Fatalf("expected kiro config %s: %v", p, err)
+		}
+	}
+
+	// No other client config — including the global Codex/Claude files — may exist.
+	for _, p := range []string{
+		".mcp.json",
+		"opencode.json",
+		filepath.Join(".claude", "mcp.json"),
+		filepath.Join(".cursor", "mcp.json"),
+		filepath.Join(".vscode", "mcp.json"),
+		filepath.Join(".windsurf", "mcp.json"),
+		filepath.Join(".continue", "mcp.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(projectPath, p)); err == nil {
+			t.Fatalf("%s must NOT be created when only kiro is selected", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); err == nil {
+		t.Fatal("global Codex config must NOT be written when only kiro is selected")
+	}
+}
+
+func TestConfigureMCPEmptySelectionWritesNothing(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	t.Setenv("HOME", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := t.TempDir()
+	if err := reg.ConfigureMCP(projectPath, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no files written for empty selection, got: %v", entries)
 	}
 }
 

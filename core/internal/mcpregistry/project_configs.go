@@ -6,31 +6,54 @@ import (
 	"path/filepath"
 )
 
-func (r *Registry) syncConfiguredTargets(projectPath string) []string {
+// syncConfiguredTargets writes MCP configs only for the AI clients the user
+// selected. An empty selection writes nothing — DWYT never touches configs for
+// clients that were left unchecked in setup.
+func (r *Registry) syncConfiguredTargets(projectPath string, clients []string) []string {
+	sel := clientSet(clients)
 	errors := []string{}
-	if err := r.SyncClaudeDesktop(); err != nil {
-		errors = append(errors, "claude: "+err.Error())
+
+	// Global (machine-level) client configs.
+	if sel["claude"] {
+		if err := r.SyncClaudeDesktop(); err != nil {
+			errors = append(errors, "claude: "+err.Error())
+		}
 	}
-	if err := r.SyncCodexGlobal(); err != nil {
-		errors = append(errors, "codex: "+err.Error())
+	if sel["codex"] {
+		if err := r.SyncCodexGlobal(); err != nil {
+			errors = append(errors, "codex: "+err.Error())
+		}
 	}
-	if projectPath != "" {
-		for _, target := range []struct {
-			name string
-			sync func(string) error
-		}{
-			{"project", r.SyncProjectMCP},
-			{"claude-project", r.SyncClaudeProject},
-			{"vscode", r.SyncVSCode},
-			{"cursor", r.SyncCursor},
-			{"kiro", r.SyncKiro},
-			{"opencode", r.SyncOpenCodeProject},
-			{"windsurf", r.SyncWindsurf},
-			{"continue", r.SyncContinue},
-		} {
-			if err := target.sync(projectPath); err != nil {
-				errors = append(errors, target.name+": "+err.Error())
-			}
+
+	if projectPath == "" {
+		return errors
+	}
+
+	// .mcp.json at the project root is read by both Claude Code and Codex.
+	if sel["claude"] || sel["codex"] {
+		if err := r.SyncProjectMCP(projectPath); err != nil {
+			errors = append(errors, "project: "+err.Error())
+		}
+	}
+
+	for _, target := range []struct {
+		client string
+		name   string
+		sync   func(string) error
+	}{
+		{"claude", "claude-project", r.SyncClaudeProject},
+		{"copilot", "vscode", r.SyncVSCode},
+		{"cursor", "cursor", r.SyncCursor},
+		{"kiro", "kiro", r.SyncKiro},
+		{"opencode", "opencode", r.SyncOpenCodeProject},
+		{"windsurf", "windsurf", r.SyncWindsurf},
+		{"continue", "continue", r.SyncContinue},
+	} {
+		if !sel[target.client] {
+			continue
+		}
+		if err := target.sync(projectPath); err != nil {
+			errors = append(errors, target.name+": "+err.Error())
 		}
 	}
 	return errors

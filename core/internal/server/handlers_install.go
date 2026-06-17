@@ -159,7 +159,7 @@ func (ds *DashboardServer) integrateProject(config Config, setStatus func(string
 	}
 	integrate.Project(config.ProjectPath, clients, ds.DwytBin)
 	if reg, err := mcpregistry.Load(); err == nil {
-		if err := reg.ConfigureMCP(config.ProjectPath); err != nil {
+		if err := reg.ConfigureMCP(config.ProjectPath, splitClients(clients)); err != nil {
 			setStatus("mcp-config", "error: "+err.Error())
 		} else {
 			setStatus("mcp-config", "ok")

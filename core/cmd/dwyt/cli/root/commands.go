@@ -16,6 +16,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/procutil"
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/server"
+	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/spf13/cobra"
 )
@@ -207,11 +208,27 @@ func syncMCPAll() error {
 	if err != nil {
 		return fmt.Errorf("mcp registry: %w", err)
 	}
+	clients := selectedClients()
+	if len(clients) == 0 {
+		fmt.Println("\n  ⚠ No AI clients selected yet — run 'dwyt' setup to choose your clients first.")
+		fmt.Println("    Nothing was changed.")
+		return nil
+	}
 	cwd, _ := os.Getwd()
-	if err := reg.ConfigureMCP(cwd); err != nil {
+	if err := reg.ConfigureMCP(cwd, clients); err != nil {
 		return fmt.Errorf("mcp configure: %w", err)
 	}
-	fmt.Println("\n  ✓ MCP configs synced for Claude Desktop and VSCode")
+	fmt.Printf("\n  ✓ MCP configs synced for: %v\n", clients)
 	fmt.Printf("  Registry: %s\n\n", filepath.Join(os.Getenv("HOME"), ".dwyt", "config", "mcp-registry.json"))
+	return nil
+}
+
+// selectedClients reads the AI clients chosen during setup from the shared
+// runtime state. Returns nil when no selection has been recorded — callers
+// decide how to handle the empty case rather than defaulting to all clients.
+func selectedClients() []string {
+	if s := state.Init(DwytHome); s != nil && len(s.Clients) > 0 {
+		return s.Clients
+	}
 	return nil
 }
