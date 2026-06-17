@@ -1,11 +1,18 @@
 .DS_Store
-.codex
+.codex/
 .vscode/
 .dwyt/
+.claude/
+.cursor/
+.cursorrules
+.windsurf/
+.kiro/
+.continue/
+copilot-instructions.md
+AGENTS.md
+CLAUDE.md
 
 # dwyt start
 *mcp.json
 *opencode.json
 # dwyt end
-.cursorrules
-.windsurf/rules/dwyt.md
