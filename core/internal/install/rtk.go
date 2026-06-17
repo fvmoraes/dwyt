@@ -11,36 +11,36 @@ import (
 // RTK installs the rtk binary into dwytBin and runs `rtk init --global` to
 // register the shell hooks.
 //
-// On Linux/macOS it downloads the prebuilt release archive natively in Go
-// (with SHA-256 verification) — no shell/curl/tar needed. On Windows the rtk
-// project publishes no binary, so we try a user-provided rtk.exe and otherwise
-// fail with an actionable message; the other DWYT tools work regardless.
+// It downloads the prebuilt release archive natively in Go (with SHA-256
+// verification) — no shell/curl/tar needed. rtk now publishes an official
+// Windows build (rtk-x86_64-pc-windows-msvc.zip), so Windows is handled the
+// same way as Linux/macOS. If the download fails we fall back to an rtk
+// already on disk (homebrew/manual install/user-provided rtk.exe).
 func RTK(dwytBin string) error {
 	binPath := filepath.Join(dwytBin, rtkBinaryName())
 	os.MkdirAll(dwytBin, 0755)
 
-	if runtime.GOOS == "windows" {
-		if err := copyRTKBinary(binPath); err != nil {
-			return fmt.Errorf("rtk: sem binário oficial para Windows. Instale manualmente ou use o WSL (https://github.com/rtk-ai/rtk); as demais ferramentas DWYT funcionam normalmente")
+	if err := installRTKNative(binPath); err != nil {
+		// Fall back to a pre-installed rtk (homebrew, manual install, or a
+		// user-provided rtk.exe on Windows).
+		if cpErr := copyRTKBinary(binPath); cpErr != nil {
+			return fmt.Errorf("rtk: download falhou (%w); e nenhum rtk encontrado localmente — instale manualmente de https://github.com/rtk-ai/rtk", err)
 		}
-		exec.Command(binPath, "init", "--global").Run()
-		return nil
 	}
 
-	if err := installRTKNative(binPath); err != nil {
-		// Fall back to a pre-installed rtk (homebrew, manual install, ...).
-		if cpErr := copyRTKBinary(binPath); cpErr != nil {
-			return fmt.Errorf("rtk: %w", err)
-		}
-	}
-	if out, err := exec.Command(binPath, "init", "--global").CombinedOutput(); err != nil {
+	// init --global registers the shell hooks. On Windows the hooks are
+	// optional (the binary works when invoked directly), so a failure there is
+	// not fatal.
+	out, err := exec.Command(binPath, "init", "--global").CombinedOutput()
+	if err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("rtk init --global falhou: %w\n%s", err, string(out))
 	}
 	return nil
 }
 
 // installRTKNative downloads and installs the rtk release binary for the
-// current Unix platform.
+// current platform. Windows ships a .zip with rtk.exe inside; Unix ships a
+// .tar.gz with rtk.
 func installRTKNative(binPath string) error {
 	target, err := rtkTargetTriple()
 	if err != nil {
@@ -51,14 +51,20 @@ func installRTKNative(binPath string) error {
 		return fmt.Errorf("resolver versão do rtk: %w", err)
 	}
 	base := fmt.Sprintf("https://github.com/rtk-ai/rtk/releases/download/%s", version)
-	archive := fmt.Sprintf("rtk-%s.tar.gz", target)
+
+	isZip := runtime.GOOS == "windows"
+	ext := "tar.gz"
+	if isZip {
+		ext = "zip"
+	}
+	archive := fmt.Sprintf("rtk-%s.%s", target, ext)
 	return installReleaseBinary(releaseBinary{
 		archiveURL:  base + "/" + archive,
 		checksumURL: base + "/checksums.txt",
 		archiveName: archive,
 		destPath:    binPath,
-		innerNames:  []string{"rtk"},
-		isZip:       false,
+		innerNames:  []string{"rtk", "rtk.exe"},
+		isZip:       isZip,
 	})
 }
 
@@ -78,6 +84,11 @@ func rtkTargetTriple() (string, error) {
 			return "x86_64-apple-darwin", nil
 		case "arm64":
 			return "aarch64-apple-darwin", nil
+		}
+	case "windows":
+		switch runtime.GOARCH {
+		case "amd64":
+			return "x86_64-pc-windows-msvc", nil
 		}
 	}
 	return "", fmt.Errorf("rtk: plataforma não suportada %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -99,7 +110,7 @@ func copyRTKBinary(binPath string) error {
 		if err != nil {
 			continue
 		}
-		if err := os.WriteFile(binPath, data, 0755); err != nil {
+		if err := writeExecutableReplacingRunning(binPath, data); err != nil {
 			return fmt.Errorf("rtk: copiar de %s para %s: %w", candidate, binPath, err)
 		}
 		return nil

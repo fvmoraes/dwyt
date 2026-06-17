@@ -19,6 +19,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/state"
@@ -28,6 +29,16 @@ import (
 
 //go:embed dashboard/dist
 var reactFS embed.FS
+
+// launcherCommand builds an exec.Cmd for a DWYT launcher binary, running ".bat"
+// shims (the Windows headroom launcher) through "cmd /c" since CreateProcess
+// cannot execute a batch file directly. Native executables run as-is.
+func launcherCommand(bin string, args ...string) *exec.Cmd {
+	if platform.IsWindows() && strings.EqualFold(filepath.Ext(bin), ".bat") {
+		return exec.Command("cmd", append([]string{"/c", bin}, args...)...)
+	}
+	return exec.Command(bin, args...)
+}
 
 func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	cwd, _ := os.Getwd()
@@ -77,13 +88,13 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 
 	procmanInstance := procman.New(dwytHome)
-	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	codebaseBin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
 	if err := install.ObsidianMCP(dwytBin); err != nil {
 		log.Warn("obsidian MCP self-install failed", log.Fields{"error": err.Error()})
 	}
-	obsidianMCPBin := filepath.Join(dwytBin, "dwyt-obsidian-mcp")
+	obsidianMCPBin := platform.DWYTLauncherPath(dwytBin, "dwyt-obsidian-mcp")
 	procmanInstance.Register("obsidian", obsidianMCPBin, "", 0)
 
 	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
@@ -97,7 +108,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 	status.SetHeadroomPort(headroomPort)
 
-	headroomBin := filepath.Join(dwytBin, "headroom")
+	headroomBin := platform.DWYTLauncherPath(dwytBin, "headroom")
 	procmanInstance.Register("headroom", headroomBin, "/health", headroomPort, "proxy", "--port", "{port}")
 
 	headroomHealthURL := fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)
@@ -277,7 +288,7 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 	ds.headroomStartMu.Lock()
 	defer ds.headroomStartMu.Unlock()
 
-	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err != nil {
 		return
 	}
@@ -312,7 +323,7 @@ func (ds *DashboardServer) startMCPsIfNeeded() {
 	go func() {
 		time.Sleep(2 * time.Second)
 
-		if _, err := os.Stat(filepath.Join(ds.DwytBin, "codebase-memory-mcp")); err == nil {
+		if _, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")); err == nil {
 			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
 				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
 				ds.RuntimeState.RegisterProcess("codebase", st.PID, st.Port)
@@ -397,7 +408,7 @@ func headroomEligibleClients(cfg Config) []string {
 }
 
 func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
-	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err != nil {
 		return
 	}
@@ -409,7 +420,7 @@ func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
 			continue
 		}
 		if hrName, ok := headroomWrapMap[c]; ok {
-			cmd := exec.Command(headroomBin, "wrap", hrName)
+			cmd := launcherCommand(headroomBin, "wrap", hrName)
 			cmd.Dir = projectPath
 			if out, err := cmd.CombinedOutput(); err != nil {
 				msg := "headroom wrap failed"
@@ -425,7 +436,7 @@ func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
 }
 
 func (ds *DashboardServer) runHeadroomUnwrap(projectPath string) {
-	headroomBin := filepath.Join(ds.DwytBin, "headroom")
+	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err != nil {
 		return
 	}
@@ -433,7 +444,7 @@ func (ds *DashboardServer) runHeadroomUnwrap(projectPath string) {
 	for _, c := range strings.Split(clients, ",") {
 		c = strings.TrimSpace(c)
 		if _, ok := headroomWrapMap[c]; ok {
-			cmd := exec.Command(headroomBin, "unwrap", c)
+			cmd := launcherCommand(headroomBin, "unwrap", c)
 			cmd.Dir = projectPath
 			cmd.Run()
 			log.Info("headroom unwrap", log.Fields{"client": c})

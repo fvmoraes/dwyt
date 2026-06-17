@@ -12,6 +12,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/platform"
 )
 
 type ServiceState string
@@ -98,7 +99,7 @@ func pollCBMCP(dwytBin string) ToolStatus {
 		return ts
 	}
 
-	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	bin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
 	}
@@ -122,7 +123,7 @@ func pollCBMCP(dwytBin string) ToolStatus {
 
 func pollRTK(dwytBin string) ToolStatus {
 	ts := ToolStatus{Name: "rtk", Status: StateNotInstalled, State: StateNotInstalled}
-	bin := filepath.Join(dwytBin, "rtk")
+	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
 	}
@@ -151,7 +152,7 @@ func pollHeadroom(dwytBin string) ToolStatus {
 		ts.State = StateOnline
 		ts.Details = fmt.Sprintf("proxy on port %d", headroomDefaultPort)
 	} else {
-		bin := filepath.Join(dwytBin, "headroom")
+		bin := platform.DWYTLauncherPath(dwytBin, "headroom")
 		if _, err := os.Stat(bin); err != nil {
 			return ts
 		}
@@ -225,7 +226,7 @@ func obsidianAppInstalled() bool {
 }
 
 func GetRTKMetrics(dwytBin string) *RTKMetrics {
-	bin := filepath.Join(dwytBin, "rtk")
+	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
@@ -310,7 +311,7 @@ func parseTokenCount(s string) int64 {
 }
 
 func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
-	bin := filepath.Join(dwytBin, "rtk")
+	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
@@ -354,7 +355,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	states := make(map[string]ServiceState)
 
 	// codebase: MCP server launched on-demand by clients, not a persistent service
-	bin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	bin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	if health.ProbeURL("http://127.0.0.1:9749/health") {
 		states["codebase-memory-mcp"] = StateOnline
 	} else if _, err := os.Stat(bin); err != nil {
@@ -366,7 +367,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	}
 
 	// headroom
-	bin = filepath.Join(dwytBin, "headroom")
+	bin = platform.DWYTLauncherPath(dwytBin, "headroom")
 	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)) {
 		states["headroom"] = StateOnline
 	} else if _, err := os.Stat(bin); err != nil {
@@ -376,7 +377,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 	}
 
 	// rtk
-	bin = filepath.Join(dwytBin, "rtk")
+	bin = platform.DWYTLauncherPath(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		states["rtk"] = StateNotInstalled
 	} else {

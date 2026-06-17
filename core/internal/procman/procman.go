@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,17 @@ func (pm *ProcessManager) get(name string) *ManagedProcess {
 	return pm.processes[name]
 }
 
+// buildServiceCommand constructs the exec.Cmd for a managed binary. On Windows
+// a ".bat" shim (e.g. the headroom launcher) cannot be executed directly by
+// CreateProcess, so it is run through "cmd /c". Everywhere else the binary is
+// invoked directly.
+func buildServiceCommand(binPath string, args []string) *exec.Cmd {
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(binPath), ".bat") {
+		return exec.Command("cmd", append([]string{"/c", binPath}, args...)...)
+	}
+	return exec.Command(binPath, args...)
+}
+
 func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	mp := pm.get(name)
 	if mp == nil {
@@ -108,7 +120,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 		}
 	}
 
-	cmd := exec.Command(binPath, args...)
+	cmd := buildServiceCommand(binPath, args)
 	// MCP servers that use stdio need stdin to stay alive.
 	// For services with a healthURL (HTTP-based like codebase UI), we can close stdin.
 	// For stdio-based services, we keep stdin open indefinitely.

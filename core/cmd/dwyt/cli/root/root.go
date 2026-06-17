@@ -127,7 +127,7 @@ func runDefault(projectPath string) error {
 	headroomPort := startServicesAsync(e.DwytBin)
 
 	for _, bin := range []string{"rtk"} {
-		if _, err := os.Stat(filepath.Join(e.DwytBin, bin)); err == nil {
+		if _, err := os.Stat(platform.DWYTLauncherPath(e.DwytBin, bin)); err == nil {
 			fmt.Printf("  \u2192  %-25s available\n", bin)
 		} else {
 			fmt.Printf("  \u2192  %-25s not installed (install via UI)\n", bin)
@@ -313,7 +313,7 @@ func kiroEnabledInConfig(cfg map[string]interface{}) bool {
 }
 
 func startServicesAsync(dwytBin string) int {
-	codebaseBin := filepath.Join(dwytBin, "codebase-memory-mcp")
+	codebaseBin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(codebaseBin); err == nil {
 		fmt.Printf("  \u2192  codebase-memory-mcp     available (index on demand)\n")
 	} else {
@@ -321,7 +321,7 @@ func startServicesAsync(dwytBin string) int {
 	}
 
 	headroomPort := health.FindFreePort(8787)
-	headroomBin := filepath.Join(dwytBin, "headroom")
+	headroomBin := platform.DWYTLauncherPath(dwytBin, "headroom")
 	if _, err := os.Stat(headroomBin); err == nil {
 		fmt.Printf("  \u2192  headroom                will start on port %d via daemon\n", headroomPort)
 	} else {

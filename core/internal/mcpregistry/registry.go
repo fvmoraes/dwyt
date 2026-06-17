@@ -28,8 +28,32 @@ func dwytHome() string {
 	if h := os.Getenv("DWYT_HOME"); h != "" {
 		return h
 	}
+	// Must mirror detect.Detect(): on Windows DWYT lives under %APPDATA%\dwyt,
+	// not ~/.dwyt. If these diverge, the MCP command paths written to client
+	// configs point at a directory where the binaries were never installed,
+	// and the client fails to launch the server ("não é reconhecido como um
+	// comando ...").
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			home, _ := os.UserHomeDir()
+			appData = filepath.Join(home, "AppData", "Roaming")
+		}
+		return filepath.Join(appData, "dwyt")
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".dwyt")
+}
+
+// exeName returns the platform-correct executable basename. On Windows the MCP
+// binaries are installed with a ".exe" suffix, so the registry must store and
+// look them up by that exact name — otherwise the configured command path is
+// missing the extension and the client cannot spawn the process.
+func exeName(base string) string {
+	if runtime.GOOS == "windows" {
+		return base + ".exe"
+	}
+	return base
 }
 
 func configDir() string {
@@ -68,22 +92,37 @@ func Load() (*Registry, error) {
 
 	// Ensure default entries
 	binDir := filepath.Join(dwytHome(), "bin")
+	canonicalCommand := map[string]string{
+		"codebase": filepath.Join(binDir, exeName("codebase-memory-mcp")),
+		"obsidian": filepath.Join(binDir, exeName("dwyt-obsidian-mcp")),
+	}
 	defaults := map[string]MCPServerEntry{
 		"codebase": {
-			Command:   filepath.Join(binDir, "codebase-memory-mcp"),
+			Command:   canonicalCommand["codebase"],
 			Port:      9749,
 			HealthURL: "/health",
 			Enabled:   true,
 		},
 		"obsidian": {
-			Command: filepath.Join(binDir, "dwyt-obsidian-mcp"),
+			Command: canonicalCommand["obsidian"],
 			Enabled: true,
 		},
 	}
 
 	for name, entry := range defaults {
-		if _, exists := r.MCPServers[name]; !exists {
+		existing, exists := r.MCPServers[name]
+		if !exists {
 			r.MCPServers[name] = entry
+			migrated = true
+			continue
+		}
+		// Heal a stale command path on an existing entry — e.g. a registry
+		// written by an older build that stored the Unix name without ".exe"
+		// on Windows, or that used the wrong home directory. Preserve the
+		// user-tunable fields and only correct the command path.
+		if existing.Command != canonicalCommand[name] {
+			existing.Command = canonicalCommand[name]
+			r.MCPServers[name] = existing
 			migrated = true
 		}
 	}
@@ -120,8 +159,17 @@ func (r *Registry) IsBinaryInstalled(name string) bool {
 	if !ok {
 		return false
 	}
-	_, err := os.Stat(entry.Command)
-	return err == nil
+	if _, err := os.Stat(entry.Command); err == nil {
+		return true
+	}
+	// On Windows tolerate an entry whose command lacks the ".exe" suffix, so a
+	// legacy registry still resolves the real binary on disk.
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(entry.Command), ".exe") {
+		if _, err := os.Stat(entry.Command + ".exe"); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // SyncClaudeDesktop writes the Claude Desktop MCP config.
