@@ -90,15 +90,44 @@ func ensurePipInVenv(workDir, pipBin, pyBin string) error {
 	return nil
 }
 
-// pipInstallHeadroom uses `python -m pip` instead of the pip binary
-// directly. `pip install --upgrade pip` fails with OSError
-// "[Errno 2] No such file or directory" when pip tries to overwrite its
-// own script while running; loading pip as a module avoids that conflict.
+// pipInstallHeadroom installs headroom-ai, preferring a prebuilt wheel and only
+// falling back to a source build when no compatible wheel exists for the
+// platform. The wheel path needs no build toolchain (it covers modern Linux
+// x86_64/arm64 and macOS Apple Silicon). The source path — required on Windows,
+// macOS Intel, and old/musl Linux, since headroom-ai is a Rust/maturin project
+// — first provisions the native toolchain (Rust + C/C++ linker) where it can.
+//
+// `python -m pip` is used instead of the pip binary directly: `pip install
+// --upgrade pip` fails with OSError "[Errno 2] No such file or directory" when
+// pip tries to overwrite its own script while running; loading pip as a module
+// avoids that conflict.
 func pipInstallHeadroom(workDir, pyBin string) error {
 	if err := runPip(workDir, pyBin, "upgrade pip", "install", "--upgrade", "pip"); err != nil {
 		return err
 	}
-	return runPip(workDir, pyBin, "pip install headroom-ai[proxy]", "install", "headroom-ai[proxy]")
+
+	// Preferred: install headroom-ai from a prebuilt wheel (no toolchain). The
+	// --only-binary scope is limited to headroom-ai so its dependencies may
+	// still come from sdists as usual; we just refuse to *build headroom-ai
+	// itself* from source here.
+	if err := runPip(workDir, pyBin, "pip install headroom-ai[proxy] (wheel)",
+		"install", "--only-binary=headroom-ai", "headroom-ai[proxy]"); err == nil {
+		return nil
+	}
+
+	// Fallback: no compatible wheel for this platform — build from source.
+	fmt.Println("  → headroom: sem wheel para esta plataforma; compilando do código-fonte…")
+	if err := ensureWindowsBuildTools(); err != nil {
+		return err
+	}
+	if err := runPip(workDir, pyBin, "pip install headroom-ai[proxy] (source)",
+		"install", "headroom-ai[proxy]"); err != nil {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("%w\n%s", err, windowsToolchainHint())
+		}
+		return err
+	}
+	return nil
 }
 
 // runPip runs `python -m pip <args...>` with a timeout, anchoring the
