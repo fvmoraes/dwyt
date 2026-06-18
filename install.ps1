@@ -80,14 +80,19 @@ try {
   Copy-Item -Path $exe.FullName -Destination $dest -Force
   Write-Ok "Installed: $dest"
 
-  # Add bin dir to the user PATH (persistent) if missing.
+  # Persist bin dir on the user PATH (registry) so future terminals see it.
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if (($userPath -split ';') -notcontains $binDir) {
     Write-Step "Adding $binDir to your user PATH ..."
     $newPath = if ([string]::IsNullOrEmpty($userPath)) { $binDir } else { "$userPath;$binDir" }
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    $env:Path = "$env:Path;$binDir"   # current session
-    Write-Ok "PATH updated (restart terminals to pick it up)."
+    Write-Ok "PATH updated (new terminals pick it up automatically)."
+  }
+  # Always expose it in THIS session too, so `dwyt` works immediately — even on
+  # a re-install where the registry PATH already contained it (otherwise the
+  # current shell, opened before the first install, never sees the new entry).
+  if (($env:Path -split ';') -notcontains $binDir) {
+    $env:Path = "$binDir;$env:Path"
   }
 
   $version = & $dest version 2>&1
@@ -103,6 +108,7 @@ try {
   Write-Host ""
   Write-Ok "DWYT installed."
   Write-Host "  Next: open a project folder and run 'dwyt .'" -ForegroundColor Cyan
+  Write-Host "  (Already-open terminals from before the install need a restart to find 'dwyt'.)" -ForegroundColor DarkGray
   Write-Host "  The dashboard opens at http://localhost:2737" -ForegroundColor Cyan
   Write-Host ""
 }

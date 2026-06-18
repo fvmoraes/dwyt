@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +14,21 @@ import (
 
 const (
 	dwytLatestReleaseURL = "https://api.github.com/repos/fvmoraes/dwyt/releases/latest"
-	dwytInstallCommand   = "curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash"
+	// Update commands are OS-specific: Windows users get the PowerShell
+	// installer, everyone else the curl|bash one. The daemon runs on the
+	// user's machine, so runtime.GOOS reflects their platform.
+	dwytInstallCommandUnix    = "curl -fsSL https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.sh | bash"
+	dwytInstallCommandWindows = "irm https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.ps1 | iex"
 )
+
+// dwytInstallCommand returns the platform-appropriate one-liner to download and
+// install the latest DWYT release.
+func dwytInstallCommand() string {
+	if runtime.GOOS == "windows" {
+		return dwytInstallCommandWindows
+	}
+	return dwytInstallCommandUnix
+}
 
 type githubRelease struct {
 	TagName string `json:"tag_name"`
@@ -27,7 +41,7 @@ func (ds *DashboardServer) apiVersionCheck(c *gin.Context) {
 		"current":          current,
 		"latest":           "",
 		"update_available": false,
-		"install_command":  dwytInstallCommand,
+		"install_command":  dwytInstallCommand(),
 		"release_url":      "",
 	}
 
