@@ -20,7 +20,7 @@ export default function CardRTK({ indexPath, repoName, t, rtkTool, getDetail, to
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.terminalOptimized} color="#845ef7" state={state} badgeText={b} />
+      <CardHeader label={t.terminalOptimized} color="#22d3ee" state={state} badgeText={b} />
       <Hr />
       <Row label={t.commands} value={det?.total_commands ? String(det.total_commands) : '\u2014'} />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
@@ -32,12 +32,12 @@ export default function CardRTK({ indexPath, repoName, t, rtkTool, getDetail, to
       )}
       <Hr />
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <span style={{ fontSize: 9, color: '#845ef7', fontWeight: 600, textTransform: 'uppercase' }}>{t.rtkCli}</span>
+        <span style={{ fontSize: 9, color: '#22d3ee', fontWeight: 600, textTransform: 'uppercase' }}>{t.rtkCli}</span>
         <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.rtkCliDesc}</span>
       </div>
       {det?.pct_saved ? (
         <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%`, background: '#845ef7' }} />
+          <div className="progress-fill" style={{ width: `${Math.min(det.pct_saved, 100)}%`, background: '#22d3ee' }} />
         </div>
       ) : null}
     </div>

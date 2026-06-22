@@ -18,7 +18,7 @@ interface Props {
 export default function CardHeadroom({ det, state, badgeText, repoName, indexPath, t, fmtN, onStart, onStop, onOpenStats }: Props) {
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.compressionActive} color="#ffd43b" state={state} badgeText={badgeText} />
+      <CardHeader label={t.compressionActive} color="#a1683a" state={state} badgeText={badgeText} />
       <Hr />
       <Row label={t.requests} value={det?.requests ? String(det.requests) : '\u2014'} />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
