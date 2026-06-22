@@ -53,7 +53,7 @@ export default function CardObsidian({
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.obsidianActive} color="#f08d49" state={state} badgeText={badgeText} />
+      <CardHeader label={t.obsidianActive} color="#5e00de" state={state} badgeText={badgeText} />
       <Hr />
       <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />

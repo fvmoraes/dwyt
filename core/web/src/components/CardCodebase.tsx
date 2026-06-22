@@ -61,7 +61,7 @@ export default function CardCodebase(props: Props) {
           {indexing && (
             <div style={{ marginTop: 2 }}>
               <div className="progress-bar">
-                <div className="progress-fill" style={{ width: '60%', background: '#f6a5c0', animation: 'pulse 1.5s infinite' }} />
+                <div className="progress-fill" style={{ width: '60%', background: '#00c774', animation: 'pulse 1.5s infinite' }} />
               </div>
               <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.indexingInBg}</span>
             </div>
