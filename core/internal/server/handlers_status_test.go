@@ -95,12 +95,20 @@ func TestDetailCBMCPUsesCodebaseSQLiteGraphWhenStoreHasNoCounts(t *testing.T) {
 		Store:          store,
 		ProcMan:        procman.New(dwytHome),
 	}
+	// Before any MCP call, an indexed-but-unused graph reports no savings.
 	detail := ds.detailCBMCP(projectPath)
-	if detail.TokensSaved <= 0 {
-		t.Fatalf("expected codebase token savings from graph DB, got %#v", detail)
+	if detail.TokensSaved != 0 {
+		t.Fatalf("expected no savings before any MCP call, got %#v", detail)
 	}
 	if detail.IndexedNodes != 100 || detail.IndexedEdges != 300 {
 		t.Fatalf("expected graph counts to be surfaced, got nodes=%d edges=%d", detail.IndexedNodes, detail.IndexedEdges)
+	}
+
+	// After a real codebase MCP interaction, savings accrue from the ledger.
+	ds.creditCodebaseUsage(projectPath)
+	detail = ds.detailCBMCP(projectPath)
+	if detail.TokensSaved <= 0 {
+		t.Fatalf("expected codebase token savings after a call, got %#v", detail)
 	}
 	pj, err := store.GetProjectByPath(projectPath)
 	if err != nil {

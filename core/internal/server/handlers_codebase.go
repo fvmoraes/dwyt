@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/platform"
@@ -93,6 +94,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 				nodes, edges := countCodebaseGraph(ds.DwytHome, body.Path)
 				ds.Store.MarkIndexed(body.Path, nodes, edges)
 			}
+			ds.creditCodebaseUsage(body.Path)
 		}
 		ds.broadcastSSE("index_update", ds.codebaseProgress.progress)
 	}()
@@ -112,6 +114,7 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 	uiPort := 9749
 	if st := ds.ProcMan.Status("codebase"); st != nil && st.Running && st.Healthy && st.Port > 0 {
 		uiPort = st.Port
+		ds.creditCodebaseUsage(ds.DefaultProject)
 		c.JSON(200, gin.H{"url": fmt.Sprintf("http://localhost:%d", uiPort), "started": false, "ready": true})
 		return
 	}
@@ -119,6 +122,7 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 
 	bin := platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")
 	if isPortOpen(uiPort) {
+		ds.creditCodebaseUsage(ds.DefaultProject)
 		c.JSON(200, gin.H{"url": uiURL, "started": false, "ready": true})
 		return
 	}
@@ -139,7 +143,29 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 	go func() {
 		ds.ProcMan.Start("codebase")
 	}()
+	ds.creditCodebaseUsage(ds.DefaultProject)
 	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "starting": true})
+}
+
+// creditCodebaseUsage records one real codebase MCP interaction (graph UI
+// opened, or a (re)index completed) against a project and credits the tokens
+// that the indexed graph saves a manual exploration. This is what gates
+// codebase savings behind actual use instead of mere indexing.
+//
+// Note: stdio tool calls (search_graph, trace_path, ...) flow directly between
+// the AI client and the on-demand binary and are not observable by the
+// dashboard, so only the dashboard-visible interactions are credited here.
+func (ds *DashboardServer) creditCodebaseUsage(projectPath string) {
+	if ds.Store == nil || projectPath == "" {
+		return
+	}
+	nodes, edges := ds.codebaseGraphStats(projectPath)
+	saved, used := estimateCodebaseTokenSavings(nodes, edges)
+	without := int64(0)
+	if saved > 0 {
+		without = saved + used
+	}
+	_ = ds.Store.AddMCPUsage(db.HashPath(projectPath), "codebase", 1, saved, without)
 }
 
 func (ds *DashboardServer) apiCodebaseStart(c *gin.Context) {

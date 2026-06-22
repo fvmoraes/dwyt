@@ -129,7 +129,7 @@ func (ds *DashboardServer) toolDetails(projectPath, window string) map[string]*T
 		"codebase-memory-mcp": ds.detailCBMCP(projectPath),
 		"rtk":                 ds.detailRTK(projectPath),
 		"headroom":            ds.detailHeadroom(),
-		"obsidian":            ds.detailObsidian(),
+		"obsidian":            ds.detailObsidian(projectPath),
 	}
 
 	// Persist the cumulative metrics as timestamped deltas so the dashboard can
@@ -403,8 +403,14 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 	if nodes, edges := ds.codebaseGraphStats(projectPath); nodes > 0 || edges > 0 {
 		d.IndexedNodes = int64(nodes)
 		d.IndexedEdges = int64(edges)
-		saved, used := estimateCodebaseTokenSavings(nodes, edges)
-		applyTokenEstimate(d, saved, used, "local_estimate:codebase_graph_metadata", "estimated from code graph nodes and edges avoided by MCP lookup")
+	}
+	// Savings accrue only from real MCP usage, never from a freshly indexed but
+	// unused graph. The ledger is credited when the dashboard observes a
+	// codebase MCP call (graph UI opened, (re)index run).
+	if ds.Store != nil && projectPath != "" {
+		if calls, saved, without, err := ds.Store.GetMCPUsage(db.HashPath(projectPath), "codebase"); err == nil && calls > 0 && saved > 0 {
+			applyTokenEstimate(d, saved, without-saved, "usage_ledger:codebase_mcp_calls", "estimated from code graph lookups actually performed via the MCP")
+		}
 	}
 	return d
 }
@@ -540,7 +546,7 @@ func headroomCompressionPct(stats map[string]interface{}) float64 {
 	return 0
 }
 
-func (ds *DashboardServer) detailObsidian() *ToolDetail {
+func (ds *DashboardServer) detailObsidian(projectPath string) *ToolDetail {
 	d := &ToolDetail{Repos: ds.loadedRepos()}
 	pb := ds.projectObsidian()
 	if pb == nil {
@@ -553,8 +559,13 @@ func (ds *DashboardServer) detailObsidian() *ToolDetail {
 	}
 	if totalBytes, ok := stats["total_bytes"].(int64); ok {
 		d.MemoryBytes = totalBytes
-		saved, used := estimateObsidianTokenSavings(d.MemoryCount, totalBytes)
-		applyTokenEstimate(d, saved, used, "local_estimate:obsidian_markdown_bytes", "estimated from vault markdown bytes avoided by Obsidian MCP reuse")
+	}
+	// Savings accrue only from real Obsidian MCP calls (search / summarize /
+	// save-context). A vault that exists but is never queried stays at zero.
+	if ds.Store != nil && projectPath != "" {
+		if calls, saved, without, err := ds.Store.GetMCPUsage(db.HashPath(projectPath), "obsidian"); err == nil && calls > 0 && saved > 0 {
+			applyTokenEstimate(d, saved, without-saved, "usage_ledger:obsidian_mcp_calls", "estimated from vault retrievals actually performed via the MCP")
+		}
 	}
 	if lu, ok := stats["last_updated"].(string); ok {
 		d.LastUpdated = lu

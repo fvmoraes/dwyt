@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +39,7 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		return
 	}
 	results := pb.Search(query)
+	ds.creditObsidianUsage()
 	c.JSON(200, gin.H{"results": results, "count": len(results)})
 }
 
@@ -92,6 +94,7 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 		return
 	}
 	summary := pb.RebuildSummary()
+	ds.creditObsidianUsage()
 	c.JSON(200, gin.H{"status": "saved", "file": path, "summary": summary})
 }
 
@@ -102,6 +105,7 @@ func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
 		return
 	}
 	summary := pb.RebuildSummary()
+	ds.creditObsidianUsage()
 	c.JSON(200, gin.H{"status": "summarized", "summary": summary})
 }
 
@@ -203,4 +207,40 @@ func (ds *DashboardServer) obsidianStats() map[string]interface{} {
 		"vault_path": pb.GetBrainDir(),
 		"stats":      pb.Stats(),
 	}
+}
+
+// creditObsidianUsage records one real Obsidian MCP retrieval against the
+// active project and credits the tokens it avoided (re-reading the vault by
+// hand). It is the write side of the "count only after the MCP is called"
+// ledger; detailObsidian reads it back. Best-effort: any missing piece (no
+// store, no active project, no vault) simply skips crediting.
+func (ds *DashboardServer) creditObsidianUsage() {
+	if ds.Store == nil {
+		return
+	}
+	ds.projectMu.RLock()
+	project := ds.DefaultProject
+	ds.projectMu.RUnlock()
+	if project == "" {
+		return
+	}
+	pb := ds.projectObsidian()
+	if pb == nil {
+		return
+	}
+	files := 0
+	var totalBytes int64
+	stats := pb.Stats()
+	if f, ok := stats["total_files"].(int); ok {
+		files = f
+	}
+	if b, ok := stats["total_bytes"].(int64); ok {
+		totalBytes = b
+	}
+	saved, used := estimateObsidianTokenSavings(files, totalBytes)
+	without := int64(0)
+	if saved > 0 {
+		without = saved + used
+	}
+	_ = ds.Store.AddMCPUsage(db.HashPath(project), "obsidian", 1, saved, without)
 }

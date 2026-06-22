@@ -81,6 +81,14 @@ func (s *Store) migrate() error {
 			cumulative INTEGER NOT NULL,
 			PRIMARY KEY (project_id, tool, metric)
 		);
+		CREATE TABLE IF NOT EXISTS mcp_usage (
+			project_id     TEXT NOT NULL,
+			tool           TEXT NOT NULL,
+			calls          INTEGER NOT NULL DEFAULT 0,
+			tokens_saved   INTEGER NOT NULL DEFAULT 0,
+			tokens_without INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (project_id, tool)
+		);
 	`); err != nil {
 		return err
 	}
@@ -191,6 +199,45 @@ func (s *Store) GetHeadroomSavings(projectID string) (int64, error) {
 		return 0, nil
 	}
 	return v, err
+}
+
+// AddMCPUsage credits one (or more) real MCP tool invocations to a project,
+// together with the token savings that invocation avoided. This is the ledger
+// behind "count savings only after the MCP is actually called": tools that are
+// merely installed/indexed but never used stay at zero. Negative deltas are
+// ignored; a zero-saving call still bumps the call counter.
+func (s *Store) AddMCPUsage(projectID, tool string, calls, saved, without int64) error {
+	if calls <= 0 {
+		calls = 1
+	}
+	if saved < 0 {
+		saved = 0
+	}
+	if without < saved {
+		without = saved
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO mcp_usage (project_id, tool, calls, tokens_saved, tokens_without)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(project_id, tool) DO UPDATE SET
+			calls          = calls + ?,
+			tokens_saved   = tokens_saved + ?,
+			tokens_without = tokens_without + ?
+	`, projectID, tool, calls, saved, without, calls, saved, without)
+	return err
+}
+
+// GetMCPUsage returns the accumulated call count and token savings credited to
+// a project/tool pair. Missing rows read as zero (never called yet).
+func (s *Store) GetMCPUsage(projectID, tool string) (calls, saved, without int64, err error) {
+	err = s.db.QueryRow(
+		`SELECT calls, tokens_saved, tokens_without FROM mcp_usage WHERE project_id = ? AND tool = ?`,
+		projectID, tool,
+	).Scan(&calls, &saved, &without)
+	if err == sql.ErrNoRows {
+		return 0, 0, 0, nil
+	}
+	return calls, saved, without, err
 }
 
 // RecordMetricDeltas tracks the growth of a tool's cumulative metrics for a
