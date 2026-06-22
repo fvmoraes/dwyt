@@ -237,7 +237,7 @@ func (ds *DashboardServer) creditObsidianUsage() {
 	if b, ok := stats["total_bytes"].(int64); ok {
 		totalBytes = b
 	}
-	saved, used := estimateObsidianTokenSavings(files, totalBytes)
+	saved, used := obsidianCallEstimate(files, totalBytes)
 	without := int64(0)
 	if saved > 0 {
 		without = saved + used

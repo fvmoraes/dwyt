@@ -12,11 +12,15 @@ import (
 )
 
 type MCPServerEntry struct {
-	Command   string   `json:"command"`
-	Args      []string `json:"args,omitempty"`
-	Port      int      `json:"port,omitempty"`
-	HealthURL string   `json:"healthURL,omitempty"`
-	Enabled   bool     `json:"enabled"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	// Target is the real MCP server binary when Command is the DWYT stdio shim
+	// (dwyt mcp-proxy). It is the path whose presence decides "installed", and
+	// the binary the shim actually spawns. Empty for servers run directly.
+	Target    string `json:"target,omitempty"`
+	Port      int    `json:"port,omitempty"`
+	HealthURL string `json:"healthURL,omitempty"`
+	Enabled   bool   `json:"enabled"`
 }
 
 type Registry struct {
@@ -92,37 +96,43 @@ func Load() (*Registry, error) {
 
 	// Ensure default entries
 	binDir := filepath.Join(dwytHome(), "bin")
-	canonicalCommand := map[string]string{
-		"codebase": filepath.Join(binDir, exeName("codebase-memory-mcp")),
-		"obsidian": filepath.Join(binDir, exeName("dwyt-obsidian-mcp")),
-	}
-	defaults := map[string]MCPServerEntry{
+	dwytShim := filepath.Join(binDir, exeName("dwyt"))
+	codebaseTarget := filepath.Join(binDir, exeName("codebase-memory-mcp"))
+
+	// Codebase runs through the DWYT stdio shim so its tool calls are countable
+	// by the dashboard regardless of the IDE/harness; Obsidian is DWYT's own MCP
+	// server (already dashboard-aware) and runs directly.
+	canonical := map[string]MCPServerEntry{
 		"codebase": {
-			Command:   canonicalCommand["codebase"],
+			Command:   dwytShim,
+			Args:      []string{"mcp-proxy", "--target", codebaseTarget, "--name", "codebase"},
+			Target:    codebaseTarget,
 			Port:      9749,
 			HealthURL: "/health",
 			Enabled:   true,
 		},
 		"obsidian": {
-			Command: canonicalCommand["obsidian"],
+			Command: filepath.Join(binDir, exeName("dwyt-obsidian-mcp")),
 			Enabled: true,
 		},
 	}
 
-	for name, entry := range defaults {
+	for name, want := range canonical {
 		existing, exists := r.MCPServers[name]
 		if !exists {
-			r.MCPServers[name] = entry
+			r.MCPServers[name] = want
 			migrated = true
 			continue
 		}
-		// Heal a stale command path on an existing entry — e.g. a registry
-		// written by an older build that stored the Unix name without ".exe"
-		// on Windows, or that used the wrong home directory. Preserve the
-		// user-tunable fields and only correct the command path.
-		if existing.Command != canonicalCommand[name] {
-			existing.Command = canonicalCommand[name]
-			r.MCPServers[name] = existing
+		// Heal stale wiring written by older builds (e.g. codebase stored as the
+		// raw binary with no shim, or a wrong home/extension). Only the command
+		// wiring is corrected; the user-tunable Enabled flag is preserved.
+		if existing.Command != want.Command ||
+			existing.Target != want.Target ||
+			!equalArgs(existing.Args, want.Args) {
+			healed := want
+			healed.Enabled = existing.Enabled
+			r.MCPServers[name] = healed
 			migrated = true
 		}
 	}
@@ -159,17 +169,37 @@ func (r *Registry) IsBinaryInstalled(name string) bool {
 	if !ok {
 		return false
 	}
-	if _, err := os.Stat(entry.Command); err == nil {
+	// For shimmed servers the real binary is Target (Command is the dwyt shim,
+	// which always exists). "Installed" must reflect the real server's presence
+	// so a config is never written pointing the shim at a missing target.
+	path := entry.Command
+	if entry.Target != "" {
+		path = entry.Target
+	}
+	if _, err := os.Stat(path); err == nil {
 		return true
 	}
 	// On Windows tolerate an entry whose command lacks the ".exe" suffix, so a
 	// legacy registry still resolves the real binary on disk.
-	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(entry.Command), ".exe") {
-		if _, err := os.Stat(entry.Command + ".exe"); err == nil {
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
+		if _, err := os.Stat(path + ".exe"); err == nil {
 			return true
 		}
 	}
 	return false
+}
+
+// equalArgs reports whether two argument slices are element-wise equal.
+func equalArgs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // SyncClaudeDesktop writes the Claude Desktop MCP config.
@@ -372,7 +402,14 @@ func mcpServerEnv(name string, entry MCPServerEntry) map[string]interface{} {
 }
 
 func isCodebaseEntry(name string, entry MCPServerEntry) bool {
-	return name == "codebase" || strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp")
+	if name == "codebase" {
+		return true
+	}
+	// With the stdio shim the codebase binary appears as Target, not Command.
+	if strings.Contains(filepath.Base(entry.Target), "codebase-memory-mcp") {
+		return true
+	}
+	return strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp")
 }
 
 func isObsidianEntry(name string, entry MCPServerEntry) bool {

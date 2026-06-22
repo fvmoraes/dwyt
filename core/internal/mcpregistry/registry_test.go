@@ -271,3 +271,72 @@ func assertRegistryServerMap(t *testing.T, path string, config map[string]interf
 		}
 	}
 }
+
+func TestCodebaseRoutedThroughShim(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := reg.MCPServers["codebase"]
+	if !ok {
+		t.Fatal("expected codebase entry")
+	}
+	if filepath.Base(entry.Command) != "dwyt" && filepath.Base(entry.Command) != "dwyt.exe" {
+		t.Fatalf("expected codebase command to be the dwyt shim, got %q", entry.Command)
+	}
+	if filepath.Base(entry.Target) != "codebase-memory-mcp" && filepath.Base(entry.Target) != "codebase-memory-mcp.exe" {
+		t.Fatalf("expected codebase target to be the real binary, got %q", entry.Target)
+	}
+	if len(entry.Args) < 5 || entry.Args[0] != "mcp-proxy" || entry.Args[1] != "--target" || entry.Args[3] != "--name" || entry.Args[4] != "codebase" {
+		t.Fatalf("expected mcp-proxy args, got %#v", entry.Args)
+	}
+	if entry.Args[2] != entry.Target {
+		t.Fatalf("expected proxy target arg to match Target, got %q vs %q", entry.Args[2], entry.Target)
+	}
+
+	// Not installed until the real target binary exists on disk; the shim path
+	// (dwyt) must not falsely report the server as installed.
+	if reg.IsBinaryInstalled("codebase") {
+		t.Fatal("codebase should be reported missing until the target binary exists")
+	}
+	touchExecutable(t, entry.Target)
+	if !reg.IsBinaryInstalled("codebase") {
+		t.Fatal("codebase should be installed once the target binary exists")
+	}
+}
+
+func TestLoadHealsLegacyRawCodebaseCommand(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an older registry that ran the raw codebase binary directly,
+	// with the server disabled by the user.
+	legacy := Registry{MCPServers: map[string]MCPServerEntry{
+		"codebase": {Command: filepath.Join(dwytHome, "bin", "codebase-memory-mcp"), Enabled: false},
+	}}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := reg.MCPServers["codebase"]
+	if len(entry.Args) == 0 || entry.Args[0] != "mcp-proxy" {
+		t.Fatalf("expected legacy codebase entry healed to shim, got %#v", entry)
+	}
+	if entry.Target == "" {
+		t.Fatalf("expected healed entry to carry a Target, got %#v", entry)
+	}
+	if entry.Enabled {
+		t.Fatal("healing must preserve the user's disabled flag")
+	}
+}
