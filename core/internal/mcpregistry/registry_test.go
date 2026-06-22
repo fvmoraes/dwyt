@@ -49,6 +49,7 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
 	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
 	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
 
@@ -275,6 +276,8 @@ func assertRegistryServerMap(t *testing.T, path string, config map[string]interf
 func TestCodebaseRoutedThroughShim(t *testing.T) {
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
+	// The shim must exist on disk for codebase to route through the proxy.
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
 
 	reg, err := Load()
 	if err != nil {
@@ -308,9 +311,29 @@ func TestCodebaseRoutedThroughShim(t *testing.T) {
 	}
 }
 
+func TestCodebaseFallsBackToDirectWhenShimMissing(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	// No dwyt shim on disk → codebase must run the real binary directly so the
+	// MCP keeps working even on a partial install (no counting in this case).
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := reg.MCPServers["codebase"]
+	if filepath.Base(entry.Command) != "codebase-memory-mcp" && filepath.Base(entry.Command) != "codebase-memory-mcp.exe" {
+		t.Fatalf("expected direct codebase command without shim, got %q", entry.Command)
+	}
+	if len(entry.Args) != 0 || entry.Target != "" {
+		t.Fatalf("expected no proxy wiring in fallback, got args=%#v target=%q", entry.Args, entry.Target)
+	}
+}
+
 func TestLoadHealsLegacyRawCodebaseCommand(t *testing.T) {
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
+	// Shim present so healing upgrades the legacy direct entry to the proxy.
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
 	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		t.Fatal(err)

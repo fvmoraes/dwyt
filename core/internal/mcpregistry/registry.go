@@ -102,15 +102,30 @@ func Load() (*Registry, error) {
 	// Codebase runs through the DWYT stdio shim so its tool calls are countable
 	// by the dashboard regardless of the IDE/harness; Obsidian is DWYT's own MCP
 	// server (already dashboard-aware) and runs directly.
-	canonical := map[string]MCPServerEntry{
-		"codebase": {
+	//
+	// Safety net: the shim only routes when the dwyt binary actually exists in
+	// the bin dir. If it does not (an unusual partial install), codebase falls
+	// back to running the real binary directly — no counting, but it still
+	// works. This is self-correcting: once the shim appears, the next Load heals
+	// the entry to the proxied form (and vice-versa).
+	codebaseEntry := MCPServerEntry{
+		Command:   codebaseTarget,
+		Port:      9749,
+		HealthURL: "/health",
+		Enabled:   true,
+	}
+	if fileExists(dwytShim) {
+		codebaseEntry = MCPServerEntry{
 			Command:   dwytShim,
 			Args:      []string{"mcp-proxy", "--target", codebaseTarget, "--name", "codebase"},
 			Target:    codebaseTarget,
 			Port:      9749,
 			HealthURL: "/health",
 			Enabled:   true,
-		},
+		}
+	}
+	canonical := map[string]MCPServerEntry{
+		"codebase": codebaseEntry,
 		"obsidian": {
 			Command: filepath.Join(binDir, exeName("dwyt-obsidian-mcp")),
 			Enabled: true,
@@ -200,6 +215,20 @@ func equalArgs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// fileExists reports whether path exists on disk, tolerating a missing ".exe"
+// suffix on Windows so a shim recorded without the extension still resolves.
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
+		if _, err := os.Stat(path + ".exe"); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // SyncClaudeDesktop writes the Claude Desktop MCP config.

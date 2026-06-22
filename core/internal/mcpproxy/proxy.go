@@ -92,19 +92,39 @@ func Run(cfg Config) (int, error) {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	// Observe the client→server stream without altering it: the child reads
-	// from the tee, so it gets the exact bytes while the counter gets a copy.
 	counter := &callCounter{server: cfg.Name, reporter: cfg.Reporter}
-	cmd.Stdin = io.TeeReader(stdin, counter)
 
-	if err := cmd.Start(); err != nil {
+	// Bridge stdin through our own OS pipe and hand the child a real *os.File.
+	// This is deliberate: if we set cmd.Stdin to a non-*os.File reader, os/exec
+	// spawns an internal copy goroutine that cmd.Wait blocks on — so a child
+	// that exits while the client keeps stdin open would hang Wait (and thus the
+	// MCP server) on every platform. Owning the pipe means exec waits on nothing
+	// but the process, and our copy goroutine is fire-and-forget.
+	pr, pw, err := os.Pipe()
+	if err != nil {
 		return 1, err
 	}
+	cmd.Stdin = pr
+
+	if err := cmd.Start(); err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		return 1, err
+	}
+
+	// Feed the child: copy client stdin into the pipe while teeing a copy to the
+	// call counter. Closing pw on EOF propagates EOF to the child for a clean
+	// shutdown. Not awaited — if the child exits first, this goroutine may stay
+	// blocked reading stdin, but the process exit reaps it.
+	go func() {
+		_, _ = io.Copy(pw, io.TeeReader(stdin, counter))
+		_ = pw.Close()
+	}()
 
 	// Forward termination signals to the child so closing the client tears the
 	// whole tree down cleanly.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -116,20 +136,21 @@ func Run(cfg Config) (int, error) {
 		}
 	}()
 
-	err := cmd.Wait()
+	waitErr := cmd.Wait()
 	close(done)
 	signal.Stop(sigCh)
+	_ = pr.Close()
 	if cfg.Reporter != nil {
 		cfg.Reporter.Close()
 	}
 
-	if err == nil {
+	if waitErr == nil {
 		return 0, nil
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	if exitErr, ok := waitErr.(*exec.ExitError); ok {
 		return exitErr.ExitCode(), nil
 	}
-	return 1, err
+	return 1, waitErr
 }
 
 // callCounter is an io.Writer that scans a JSON-RPC stream for tools/call
