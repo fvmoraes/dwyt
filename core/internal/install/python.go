@@ -29,7 +29,35 @@ func isWindowsStorePythonStub(path string) bool {
 // Antes de retornar, valida que o interpretador tem `ensurepip` funcional e
 // que `xml.parsers.expat` carrega — em macOS+Homebrew o pyexpat às vezes
 // fica linkado ao libexpat do sistema e quebra o pip silenciosamente.
+//
+// Quando NENHUM Python é encontrado, tenta uma instalação automática
+// best-effort (winget/brew/gerenciador de pacotes) e refaz a busca. Se a
+// instalação não for possível, retorna o erro original com a dica de
+// remediação manual — nunca trava em prompts.
 func findCompatiblePython() (string, error) {
+	path, anyFound, err := lookupCompatiblePython()
+	if err == nil {
+		return path, nil
+	}
+	// Só tenta instalar quando nada foi achado. Se um Python existe mas falhou
+	// no pre-flight (ex.: pyexpat quebrado), instalar outro provavelmente não
+	// resolve e a dica de remediação é mais útil que uma reinstalação.
+	if !anyFound {
+		if instErr := tryInstallPython(); instErr != nil {
+			fmt.Printf("  ⚠ headroom: instalação automática do Python falhou (%v)\n", instErr)
+		} else if path, _, reErr := lookupCompatiblePython(); reErr == nil {
+			return path, nil
+		}
+	}
+	return "", err
+}
+
+// lookupCompatiblePython percorre os candidatos e devolve o primeiro
+// interpretador que passa no pre-flight. anyFound indica se ao menos um Python
+// real (não stub da Store) foi localizado, mesmo que tenha reprovado — isso
+// permite ao chamador decidir entre tentar instalar (nada achado) ou apenas
+// orientar o usuário (achado mas inválido).
+func lookupCompatiblePython() (string, bool, error) {
 	candidates := []string{"python3.12", "python3.11", "python3.10", "python3", "python"}
 	if runtime.GOOS == "windows" {
 		// Windows rarely has versioned python3.x on PATH; the "py" launcher is
@@ -57,13 +85,13 @@ func findCompatiblePython() (string, error) {
 			fmt.Printf("  ⚠ headroom: pulando %s (%v)\n", path, err)
 			continue
 		}
-		return path, nil
+		return path, true, nil
 	}
 	if anyFound && lastErr != nil {
-		return "", fmt.Errorf("nenhum Python encontrado passou no pre-flight: %w\n%s",
+		return "", true, fmt.Errorf("nenhum Python encontrado passou no pre-flight: %w\n%s",
 			lastErr, pythonRemediationHint())
 	}
-	return "", fmt.Errorf("python não encontrado no PATH (instale Python 3.10–3.12)\n%s", pythonRemediationHint())
+	return "", false, fmt.Errorf("python não encontrado no PATH (instale Python 3.10–3.12)\n%s", pythonRemediationHint())
 }
 
 // warnIfNewerPython emite um aviso para Python 3.13+, mas segue tentando —
