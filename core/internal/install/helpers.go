@@ -37,6 +37,12 @@ func fetch(url string) string {
 
 // copyExecutable copia src para dst preservando permissão executável e
 // criando os diretórios pai necessários.
+//
+// A escrita é atômica: o conteúdo vai primeiro para um arquivo temporário no
+// mesmo diretório e só então é renomeado por cima do destino. Isso evita o
+// ETXTBSY ("text file busy") do Linux ao reinstalar um binário que está em
+// execução (ex.: o dwyt-obsidian-mcp rodando) — o rename troca a entrada do
+// diretório sem abrir/truncar o inode em uso pelo processo ativo.
 func copyExecutable(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -47,15 +53,28 @@ func copyExecutable(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".dwyt-"+filepath.Base(dst)+"-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	tmpName := tmp.Name()
+	// Em qualquer caminho de erro, não deixa o temporário órfão.
+	defer os.Remove(tmpName)
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
 		return err
 	}
-	return out.Close()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0755); err != nil {
+		return err
+	}
+	// Rename atômico no mesmo diretório: substitui o destino sem tocar no inode
+	// que um processo em execução possa estar mapeando.
+	return os.Rename(tmpName, dst)
 }
 
 // sameFile retorna true quando dois paths apontam para o mesmo arquivo após
