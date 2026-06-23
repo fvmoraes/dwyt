@@ -1,23 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --bg:     #1a1024;
-  --card:   rgba(40, 28, 56, 0.95);
-  --inner:  rgba(255, 255, 255, 0.04);
-  --border: rgba(255, 206, 84, 0.10);
-  --text:   #f3efe6;
-  --muted:  #9b9488;
-  --green:  #4ade80;
-  --yellow: #f5b301;
-  --red:    #f87171;
-  --blue:   #f5b301;
-  --cyan:   #ffd43b;
+  /* Catppuccin Mocha — shades of purple, super dark */
+  --bg:     #060410;
+  --card:   rgba(34, 20, 60, 0.52);
+  --card-2: rgba(16, 10, 30, 0.80);
+  --inner:  rgba(203, 166, 247, 0.05);
+  --border: rgba(203, 166, 247, 0.16);
+  --text:   #cdd6f4;
+  --muted:  #8b85a8;
+  --green:  #a6e3a1;
+  --yellow: #f9e2af;
+  --red:    #f38ba8;
+  --blue:   #cba6f7;
+  --cyan:   #89dceb;
+  --mauve:  #cba6f7;
 }
 
 * { box-sizing: border-box; }
 
 body {
-  background: linear-gradient(135deg, #141210 0%, #211d15 50%, #141210 100%);
+  background: linear-gradient(135deg, #050308 0%, #0c0719 50%, #050308 100%);
   background-attachment: fixed;
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
@@ -32,15 +35,15 @@ body * {
 
 /* ── Card ── */
 .card {
-  background: var(--card);
+  background: linear-gradient(150deg, var(--card) 0%, var(--card-2) 100%);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 4px 24px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(203, 166, 247, 0.06);
 }
 
 /* ── Status dots ── */
@@ -108,8 +111,8 @@ button {
 button:hover   { background: rgba(255, 255, 255, 0.12); }
 button:disabled { opacity: 0.38; cursor: default; }
 
-button.primary       { background: rgba(245, 179, 1, 0.9); color: #1a1205; border: 1px solid rgba(245, 179, 1, 0.45); font-weight: 700; }
-button.primary:hover { background: rgba(245, 179, 1, 1); }
+button.primary       { background: var(--mauve); color: #11071f; border: 1px solid rgba(203, 166, 247, 0.45); font-weight: 700; }
+button.primary:hover { background: #d9bdff; }
 button.danger        { background: var(--red);  color: #fff; border: none; }
 button.danger:hover  { background: #c92a2a; }
 
@@ -159,7 +162,7 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
   background: var(--muted); border-radius: 50%; transition: 0.25s;
 }
 .toggle input:checked + .slider { background: var(--blue); }
-.toggle input:checked + .slider::before { transform: translateX(16px); background: #1a1205; }
+.toggle input:checked + .slider::before { transform: translateX(16px); background: #11071f; }
 
 /* ── Accordion ── */
 .accordion-header {
