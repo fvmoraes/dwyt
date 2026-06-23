@@ -112,13 +112,13 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
         transition: 'transform 0.2s ease',
         padding: '40px 12px 12px', overflowY: 'auto',
       }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: '#ffd43b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
           Projects ({projects.length})
         </div>
 
         {projects.length === 0 && (
           <div style={{ fontSize: 10, color: 'var(--muted)', padding: '6px 0' }}>
-            No projects yet. Run <code style={{ color: '#f5b301' }}>dwyt .</code> in a directory.
+            No projects yet. Run <code style={{ color: 'var(--accent)' }}>dwyt .</code> in a directory.
           </div>
         )}
 
@@ -131,8 +131,8 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
           <div key={p.id}
             style={{
               padding: '6px 8px', borderRadius: 5, marginBottom: 3,
-              background: isActive ? 'rgba(245,179,1,0.13)' : 'transparent',
-              border: isActive ? '1px solid rgba(245,179,1,0.25)' : '1px solid transparent',
+              background: isActive ? 'rgba(203,166,247,0.13)' : 'transparent',
+              border: isActive ? '1px solid rgba(203,166,247,0.25)' : '1px solid transparent',
               opacity: isSwitching || isRemoving ? 0.6 : 1,
               position: 'relative',
             }}
@@ -143,7 +143,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                 style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, cursor: isSwitching || isRemoving ? 'wait' : 'pointer' }}
               >
                 <span style={{ fontSize: 12 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
-                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? '#f5b301' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--mauve)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.name}
                 </span>
               </div>
@@ -165,7 +165,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                   position: 'absolute', right: 6, top: 28, zIndex: 1002,
                   background: 'var(--card)', border: '1px solid var(--border)',
                   borderRadius: 6, padding: 3, minWidth: 150,
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
                 }}
               >
                 <button
@@ -173,9 +173,9 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6, width: '100%',
                     padding: '6px 8px', background: 'transparent', border: 'none',
-                    cursor: 'pointer', color: '#f03e3e', fontSize: 11, textAlign: 'left', borderRadius: 4,
+                    cursor: 'pointer', color: 'var(--red)', fontSize: 11, textAlign: 'left', borderRadius: 4,
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,62,62,0.12)' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(243,139,168,0.12)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
                 >
                   🗑️ {t.removeProject}
@@ -187,7 +187,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
               {p.path}
             </div>
             {p.indexed_at && (
-              <div style={{ fontSize: 8, color: '#2f9e44', marginTop: 1, paddingLeft: 17 }}>
+              <div style={{ fontSize: 8, color: 'var(--green)', marginTop: 1, paddingLeft: 17 }}>
                 ✓ {new Date(p.indexed_at).toLocaleDateString()}{p.nodes ? ` · ${p.nodes} nodes` : ''}
               </div>
             )}

@@ -28,9 +28,9 @@ export default function Logo({ size = 32, showText = true }: Props) {
         <rect x="13" y="23" width="6" height="4" rx="1" fill="#c8a882"/>
 
         {/* Shirt + tie */}
-        <path d="M10 27 Q13 24 16 26 Q19 24 22 27 L24 34 H8 Z" fill="#e9ecef"/>
-        <path d="M15 25 L16 24 L17 25 L16.5 31 Z" fill="#f08d49"/>
-        <polygon points="15,25 17,25 16.5,26.5" fill="#e67700"/>
+        <path d="M10 27 Q13 24 16 26 Q19 24 22 27 L24 34 H8 Z" fill="#bac2de"/>
+        <path d="M15 25 L16 24 L17 25 L16.5 31 Z" fill="#fab387"/>
+        <polygon points="15,25 17,25 16.5,26.5" fill="#eba0ac"/>
 
         {/* Head */}
         <ellipse cx="16" cy="16" rx="8" ry="9" fill="#c8a882"/>
@@ -48,19 +48,19 @@ export default function Logo({ size = 32, showText = true }: Props) {
         <ellipse cx="19" cy="16" rx="2.2" ry="2" fill="white"/>
         <circle cx="13.3" cy="16.2" r="1.3" fill="#3d2b1f"/>
         <circle cx="19.3" cy="16.2" r="1.3" fill="#3d2b1f"/>
-        <circle cx="13.5" cy="16.3" r="0.5" fill="#1a1b1e"/>
-        <circle cx="19.5" cy="16.3" r="0.5" fill="#1a1b1e"/>
+        <circle cx="13.5" cy="16.3" r="0.5" fill="#11111b"/>
+        <circle cx="19.5" cy="16.3" r="0.5" fill="#11111b"/>
         <circle cx="13.8" cy="15.7" r="0.35" fill="white"/>
         <circle cx="19.8" cy="15.7" r="0.35" fill="white"/>
 
         {/* Glasses */}
         <rect x="10.5" y="14" width="5" height="4" rx="1.2"
-          fill="none" stroke="#1a1b1e" strokeWidth="1.1"/>
+          fill="none" stroke="#11111b" strokeWidth="1.1"/>
         <rect x="16.5" y="14" width="5" height="4" rx="1.2"
-          fill="none" stroke="#1a1b1e" strokeWidth="1.1"/>
-        <line x1="15.5" y1="16" x2="16.5" y2="16" stroke="#1a1b1e" strokeWidth="1"/>
-        <line x1="10.5" y1="15.5" x2="8.5"  y2="15" stroke="#1a1b1e" strokeWidth="1"/>
-        <line x1="21.5" y1="15.5" x2="23.5" y2="15" stroke="#1a1b1e" strokeWidth="1"/>
+          fill="none" stroke="#11111b" strokeWidth="1.1"/>
+        <line x1="15.5" y1="16" x2="16.5" y2="16" stroke="#11111b" strokeWidth="1"/>
+        <line x1="10.5" y1="15.5" x2="8.5"  y2="15" stroke="#11111b" strokeWidth="1"/>
+        <line x1="21.5" y1="15.5" x2="23.5" y2="15" stroke="#11111b" strokeWidth="1"/>
 
         {/* Eyebrows */}
         <line x1="11"   y1="13.5" x2="15.5" y2="13.2"
@@ -82,9 +82,9 @@ export default function Logo({ size = 32, showText = true }: Props) {
         <text x="30" y="28"
           fontFamily="'SF Mono','Fira Code','Cascadia Code',monospace"
           fontSize="22" fontWeight="700" letterSpacing="1"
-          fill="#c1c2c5"
+          fill="#cdd6f4"
         >
-          DW<tspan fill="#ffd43b">YT</tspan>
+          DW<tspan fill="#f9e2af">YT</tspan>
         </text>
       )}
     </svg>

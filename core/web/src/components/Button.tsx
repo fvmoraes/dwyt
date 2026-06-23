@@ -14,13 +14,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<Variant, { bg: string; color: string; border: string; hoverBg: string }> = {
-  // Primary actions carry the Docling brand amber with dark, high-contrast text.
-  primary:   { bg: '#f5b301', color: '#1a1205', border: 'rgba(245, 179, 1, 0.55)', hoverBg: '#ffd43b' },
-  secondary: { bg: 'rgba(255, 255, 255, 0.06)', color: 'var(--text)', border: 'rgba(255, 255, 255, 0.12)', hoverBg: 'rgba(255, 255, 255, 0.12)' },
-  success:   { bg: 'rgba(74, 222, 128, 0.12)', color: 'var(--green)', border: 'rgba(74, 222, 128, 0.35)', hoverBg: 'rgba(74, 222, 128, 0.18)' },
-  danger:    { bg: 'rgba(248, 113, 113, 0.12)', color: 'var(--red)', border: 'rgba(248, 113, 113, 0.35)', hoverBg: 'rgba(248, 113, 113, 0.18)' },
-  ghost:     { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
-  icon:      { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(255, 255, 255, 0.06)' },
+  // Primary actions carry the Catppuccin Yellow accent with dark, high-contrast text.
+  primary:   { bg: 'var(--accent)', color: 'var(--on-accent)', border: 'rgba(249, 226, 175, 0.55)', hoverBg: 'var(--ctp-rosewater)' },
+  secondary: { bg: 'rgba(69, 71, 90, 0.45)', color: 'var(--text)', border: 'rgba(203, 166, 247, 0.14)', hoverBg: 'rgba(88, 91, 112, 0.55)' },
+  success:   { bg: 'rgba(166, 227, 161, 0.12)', color: 'var(--green)', border: 'rgba(166, 227, 161, 0.35)', hoverBg: 'rgba(166, 227, 161, 0.18)' },
+  danger:    { bg: 'rgba(243, 139, 168, 0.12)', color: 'var(--red)', border: 'rgba(243, 139, 168, 0.35)', hoverBg: 'rgba(243, 139, 168, 0.18)' },
+  ghost:     { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(203, 166, 247, 0.08)' },
+  icon:      { bg: 'transparent', color: 'var(--muted)', border: 'transparent', hoverBg: 'rgba(203, 166, 247, 0.08)' },
 }
 
 const sizeStyles = {

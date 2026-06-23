@@ -33,7 +33,7 @@ function Boot() {
   if (screen === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <span className="text-sm text-[#5c5f66]">Iniciando DWYT...</span>
+        <span className="text-sm text-[#7f849c]">Iniciando DWYT...</span>
       </div>
     )
   }

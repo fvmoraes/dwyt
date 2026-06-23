@@ -275,9 +275,9 @@ export default function SetupWizard() {
         <div role="alert" style={{
           marginBottom: 10, padding: '8px 10px', borderRadius: 6,
           fontSize: 11, fontWeight: 600,
-          color: 'var(--danger, #ff6b6b)',
-          background: 'rgba(255, 107, 107, 0.08)',
-          border: '1px solid var(--danger, #ff6b6b)',
+          color: 'var(--danger)',
+          background: 'rgba(243, 139, 168, 0.08)',
+          border: '1px solid var(--danger)',
         }}>
           {t.selectAtLeastOneClient}
         </div>
