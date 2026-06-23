@@ -36,7 +36,7 @@ export default function FileBrowser({ onSelect, selected, initialPath }: Props) 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', fontSize: 11 }}>
       {/* Breadcrumb */}
-      <div style={{ background: '#1e1f23', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ background: 'var(--ctp-mantle)', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
         <button onClick={() => navigateTo('/')} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 11, cursor: 'pointer' }}>/</button>
         {crumbs.map((part, i) => {
           const path = '/' + crumbs.slice(0, i + 1).join('/')
@@ -69,8 +69,8 @@ export default function FileBrowser({ onSelect, selected, initialPath }: Props) 
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '4px 8px', cursor: 'pointer', fontSize: 11,
-              borderBottom: '1px solid #2c2e33',
-              background: selected === entry.path ? '#1a3a5c' : 'transparent',
+              borderBottom: '1px solid var(--ctp-surface0)',
+              background: selected === entry.path ? 'var(--ctp-surface1)' : 'transparent',
               color: selected === entry.path ? 'var(--blue)' : 'var(--text)',
             }}
           >

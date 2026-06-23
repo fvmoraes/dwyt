@@ -51,9 +51,9 @@ function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): Too
 }
 
 function badge(s: ToolState, t: Record<string, string>): BadgeText {
-  if (s === 'not_installed') return { icon: '\uD83D\uDD34', text: t.notInstalled, color: '#f03e3e' }
-  if (s === 'inactive') return { icon: '\uD83D\uDFE1', text: t.inactive, color: '#f08d49' }
-  return { icon: '\uD83D\uDFE2', text: t.active, color: '#2f9e44' }
+  if (s === 'not_installed') return { icon: '\uD83D\uDD34', text: t.notInstalled, color: 'var(--red)' }
+  if (s === 'inactive') return { icon: '\uD83D\uDFE1', text: t.inactive, color: 'var(--peach)' }
+  return { icon: '\uD83D\uDFE2', text: t.active, color: 'var(--green)' }
 }
 
 function calculateGlobalTokenSavings(details: Details) {
@@ -305,7 +305,7 @@ export default function Dashboard() {
             {RELOAD_OPTIONS.map(o => (
               <button key={o.value} onClick={() => setReload(o.value)}
                 style={reloadSecs === o.value
-                  ? { background: '#f5b301', color: '#1a1205', fontWeight: 700, boxShadow: '0 0 5px rgba(245,179,1,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
+                  ? { background: 'var(--accent)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
                   : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
                 }
               >{o.label}</button>
@@ -324,30 +324,30 @@ export default function Dashboard() {
       </div>
 
       {indexPath && (
-        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #2f9e44', background: 'linear-gradient(135deg, #1a2a1a 0%, #1e1f23 100%)', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
-          <span style={{ fontSize: 10, color: '#51cf66', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
-          <span style={{ fontSize: 9, color: '#2f9e44', fontWeight: 600 }}>{t.protecting}</span>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--green)', background: 'linear-gradient(135deg, rgba(166,227,161,0.08) 0%, var(--ctp-mantle) 100%)', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
+          <span style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
+          <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 600 }}>{t.protecting}</span>
           {obsidianCount > 0 && (
-            <span style={{ fontSize: 9, color: '#f08d49', fontWeight: 600, marginLeft: 4 }}>
+            <span style={{ fontSize: 9, color: 'var(--peach)', fontWeight: 600, marginLeft: 4 }}>
               {'\uD83E\uDDE0'} {obsidianCount} {t.memories}
             </span>
           )}
           {releaseVersion && (
-            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 8, color: '#8ce99a', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
+            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 8, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
               {t.releaseLabel} {releaseVersion}
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: '#f5b301', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
+            <span style={{ fontSize: 9, color: 'var(--accent)', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
         </div>
       )}
 
       {versionCheck?.update_available && (
-        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid #ffd43b', background: '#2a2310', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--yellow)', background: 'var(--ctp-mantle)', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: '#ffd66b', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
+            <div style={{ fontSize: 10, color: 'var(--yellow)', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
             <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>
               {t.currentVersion}: {versionCheck.current || releaseVersion || 'dev'} · {t.latestVersion}: {versionCheck.latest}
             </div>
@@ -362,10 +362,10 @@ export default function Dashboard() {
       )}
 
       {versionCheck?.update_available && showUpdateInstructions && (
-        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', background: '#1e1f23', padding: '6px 10px' }}>
+        <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--ctp-mantle)', padding: '6px 10px' }}>
           <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>{t.updateCommandTitle}</div>
-          <div style={{ overflowX: 'auto', background: '#111318', border: '1px solid var(--border)', borderRadius: 4, padding: '5px 7px' }}>
-            <code style={{ color: '#e8eaf0', fontSize: 10, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
+          <div style={{ overflowX: 'auto', background: 'var(--ctp-crust)', border: '1px solid var(--border)', borderRadius: 4, padding: '5px 7px' }}>
+            <code style={{ color: 'var(--text)', fontSize: 10, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
           </div>
           <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>{t.updateCommandHelp}</div>
         </div>
@@ -373,8 +373,8 @@ export default function Dashboard() {
 
       {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
         <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
-          <div style={{ padding: '6px 12px', background: '#1e1f23', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#f5b301', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
+          <div style={{ padding: '6px 12px', background: 'var(--ctp-mantle)', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
           </div>
           <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
             {projectCtx.projects.map((p) => (
@@ -389,8 +389,8 @@ export default function Dashboard() {
                   <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'monospace' }}>{p.path}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {p.nodes && p.nodes > 0 && <span style={{ fontSize: 9, color: '#f08d49' }}>{'\uD83E\uDDE0'} {p.nodes}</span>}
-                  {p.indexed_at && <span style={{ fontSize: 9, color: '#f5b301' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
+                  {p.nodes && p.nodes > 0 && <span style={{ fontSize: 9, color: 'var(--peach)' }}>{'\uD83E\uDDE0'} {p.nodes}</span>}
+                  {p.indexed_at && <span style={{ fontSize: 9, color: 'var(--accent)' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
                   <span style={{ fontSize: 9, color: 'var(--muted)' }}>{'\u2192'}</span>
                 </div>
               </button>
@@ -412,7 +412,7 @@ export default function Dashboard() {
           ].map(o => (
             <button key={o.value} onClick={() => setSavingsWindow(o.value)}
               style={savingsWindow === o.value
-                ? { background: 'var(--blue)', color: '#1a1205', fontWeight: 700, boxShadow: '0 0 5px rgba(245,179,1,0.45)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
+                ? { background: 'var(--blue)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
                 : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
               }
             >{o.label}</button>
@@ -428,35 +428,35 @@ export default function Dashboard() {
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
               {[
-                { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: '#f03e3e' },
-                { label: t.withDwyt, value: fmtN(withDwyt), sub: t.tokensSpent, color: '#2f9e44' },
+                { label: t.withoutDwyt, value: fmtN(withoutDwyt), sub: t.wouldBeSpent, color: 'var(--red)' },
+                { label: t.withDwyt, value: fmtN(withDwyt), sub: t.tokensSpent, color: 'var(--green)' },
               ].map((col, i) => (
-                <div key={i} style={{ padding: '5px 10px', background: '#1e1f23', borderRight: '1px solid var(--border)' }}>
+                <div key={i} style={{ padding: '5px 10px', background: 'var(--ctp-mantle)', borderRight: '1px solid var(--border)' }}>
                   <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
                   <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.05 }}>{col.value}</div>
                   <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
                 </div>
               ))}
-              <div style={{ padding: '5px 10px', background: '#1a2a1a' }}>
+              <div style={{ padding: '5px 10px', background: 'linear-gradient(135deg, rgba(166,227,161,0.07) 0%, var(--ctp-mantle) 100%)' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: '#ffd43b', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
-                  {savingsPct > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#2f9e44' }}>{'\u2193'} {savingsPct}%</span>}
+                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: 'var(--yellow)', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
+                  {savingsPct > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>{'\u2193'} {savingsPct}%</span>}
                 </div>
                 <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
                 {savingsPct > 0 && (
                   <div className="progress-bar" style={{ marginTop: 4 }}>
-                    <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: '#ffd43b' }} />
+                    <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: 'var(--yellow)' }} />
                   </div>
                 )}
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '3px 8px', background: '#1a1b1f', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', borderTop: '1px solid var(--border)', padding: '3px 8px', background: 'var(--ctp-mantle)', gap: 6 }}>
               {[
-                { label: t.terminalOptimized, saved: rtkSaved, color: '#845ef7' },
-                { label: t.compressionActive, saved: headroomSaved, color: '#ffd43b' },
-                { label: t.obsidianActive, saved: obsidianSaved, color: '#f08d49' },
-                { label: t.codeMap, saved: codebaseSaved, color: '#f5b301' },
+                { label: t.terminalOptimized, saved: rtkSaved, color: 'var(--sky)' },
+                { label: t.compressionActive, saved: headroomSaved, color: 'var(--peach)' },
+                { label: t.obsidianActive, saved: obsidianSaved, color: 'var(--mauve)' },
+                { label: t.codeMap, saved: codebaseSaved, color: 'var(--green)' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ fontSize: 9, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
