@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/platform"
@@ -93,6 +94,7 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 				nodes, edges := countCodebaseGraph(ds.DwytHome, body.Path)
 				ds.Store.MarkIndexed(body.Path, nodes, edges)
 			}
+			ds.creditCodebaseUsage(body.Path)
 		}
 		ds.broadcastSSE("index_update", ds.codebaseProgress.progress)
 	}()
@@ -140,6 +142,24 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		ds.ProcMan.Start("codebase")
 	}()
 	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "starting": true})
+}
+
+// creditCodebaseUsage records one real codebase MCP interaction (a (re)index
+// completed via the dashboard) against a project and credits a bounded
+// per-call saving. Agent tool calls (search_graph, trace_path, ...) are
+// counted separately and harness-independently by the dwyt stdio shim, which
+// reports them to /api/mcp/usage.
+func (ds *DashboardServer) creditCodebaseUsage(projectPath string) {
+	if ds.Store == nil || projectPath == "" {
+		return
+	}
+	nodes, edges := ds.codebaseGraphStats(projectPath)
+	saved, used := codebaseCallEstimate(nodes, edges)
+	without := int64(0)
+	if saved > 0 {
+		without = saved + used
+	}
+	_ = ds.Store.AddMCPUsage(db.HashPath(projectPath), "codebase", 1, saved, without)
 }
 
 func (ds *DashboardServer) apiCodebaseStart(c *gin.Context) {

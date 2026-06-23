@@ -180,3 +180,21 @@ func mcpProcessName(name string) string {
 		return name
 	}
 }
+
+// apiMCPUsage records one MCP tool call observed by the DWYT stdio shim
+// (dwyt mcp-proxy). This is how codebase MCP calls become countable on the
+// dashboard regardless of the IDE/harness that issued them. It is best-effort:
+// a malformed or unknown payload is ignored without error so the proxy never
+// treats reporting failures as a problem.
+func (ds *DashboardServer) apiMCPUsage(c *gin.Context) {
+	var body struct {
+		Server string `json:"server"`
+		Tool   string `json:"tool"`
+	}
+	if err := c.BindJSON(&body); err != nil || strings.TrimSpace(body.Server) == "" {
+		c.JSON(400, gin.H{"error": "server is required"})
+		return
+	}
+	ds.recordMCPCall(body.Server, body.Tool)
+	c.JSON(200, gin.H{"status": "ok"})
+}

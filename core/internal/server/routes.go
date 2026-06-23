@@ -92,6 +92,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.POST("/mcp/services/restart", ds.apiMCPRestart)
 		api.GET("/mcp/services/status", ds.apiMCPStatus)
 		api.GET("/mcp/services/logs", ds.apiMCPLogs)
+		api.POST("/mcp/usage", ds.apiMCPUsage)
 		api.GET("/kiro/power/status", ds.apiKiroPowerStatus)
 		api.POST("/kiro/power/refresh", ds.apiKiroPowerRefresh)
 	}

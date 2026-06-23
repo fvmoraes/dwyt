@@ -40,7 +40,7 @@ export default function CardCodebase(props: Props) {
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.codeMap} color="#f5b301" state={state} badgeText={b} />
+      <CardHeader label={t.codeMap} color="#00c774" state={state} badgeText={b} />
       <Hr />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
@@ -61,7 +61,7 @@ export default function CardCodebase(props: Props) {
           {indexing && (
             <div style={{ marginTop: 2 }}>
               <div className="progress-bar">
-                <div className="progress-fill" style={{ width: '60%', background: '#f5b301', animation: 'pulse 1.5s infinite' }} />
+                <div className="progress-fill" style={{ width: '60%', background: '#00c774', animation: 'pulse 1.5s infinite' }} />
               </div>
               <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.indexingInBg}</span>
             </div>

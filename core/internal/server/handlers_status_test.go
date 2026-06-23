@@ -41,6 +41,63 @@ func TestEstimateObsidianTokenSavings(t *testing.T) {
 	}
 }
 
+func TestCodebaseCallEstimateIsBoundedPerCall(t *testing.T) {
+	// Empty graph yields nothing.
+	if saved, _ := codebaseCallEstimate(0, 0); saved != 0 {
+		t.Fatalf("expected 0 savings for empty graph, got %d", saved)
+	}
+	// A single lookup must not claim the whole graph; it is capped.
+	small, _ := codebaseCallEstimate(10, 30)
+	big, _ := codebaseCallEstimate(100000, 300000)
+	if small <= 0 || big <= 0 {
+		t.Fatalf("expected positive per-call savings, got small=%d big=%d", small, big)
+	}
+	if big != small && big < small {
+		t.Fatalf("larger graph should not reduce per-call savings: small=%d big=%d", small, big)
+	}
+	if big > 25*72 {
+		t.Fatalf("per-call savings must stay bounded, got %d", big)
+	}
+}
+
+func TestRecordMCPCallCreditsCodebaseLedger(t *testing.T) {
+	dwytHome := t.TempDir()
+	projectPath := t.TempDir()
+	store, err := db.New(filepath.Join(dwytHome, "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.TouchProject(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	writeCodebaseGraphDB(t, dwytHome, projectPath, 100, 300)
+
+	ds := &DashboardServer{
+		DwytHome:       dwytHome,
+		DefaultProject: projectPath,
+		Store:          store,
+		ProcMan:        procman.New(dwytHome),
+	}
+
+	// No calls yet → ledger empty.
+	calls, saved, _, _ := store.GetMCPUsage(db.HashPath(projectPath), "codebase")
+	if calls != 0 || saved != 0 {
+		t.Fatalf("expected empty ledger before any call, got calls=%d saved=%d", calls, saved)
+	}
+
+	ds.recordMCPCall("codebase", "search_graph")
+	ds.recordMCPCall("codebase", "trace_path")
+
+	calls, saved, without, _ := store.GetMCPUsage(db.HashPath(projectPath), "codebase")
+	if calls != 2 {
+		t.Fatalf("expected 2 recorded calls, got %d", calls)
+	}
+	if saved <= 0 || without < saved {
+		t.Fatalf("expected positive savings after calls, got saved=%d without=%d", saved, without)
+	}
+}
+
 func TestCalculateGlobalTokenSavingsUsesLocalEstimates(t *testing.T) {
 	details := map[string]*ToolDetail{
 		"codebase-memory-mcp": {
@@ -95,12 +152,20 @@ func TestDetailCBMCPUsesCodebaseSQLiteGraphWhenStoreHasNoCounts(t *testing.T) {
 		Store:          store,
 		ProcMan:        procman.New(dwytHome),
 	}
+	// Before any MCP call, an indexed-but-unused graph reports no savings.
 	detail := ds.detailCBMCP(projectPath)
-	if detail.TokensSaved <= 0 {
-		t.Fatalf("expected codebase token savings from graph DB, got %#v", detail)
+	if detail.TokensSaved != 0 {
+		t.Fatalf("expected no savings before any MCP call, got %#v", detail)
 	}
 	if detail.IndexedNodes != 100 || detail.IndexedEdges != 300 {
 		t.Fatalf("expected graph counts to be surfaced, got nodes=%d edges=%d", detail.IndexedNodes, detail.IndexedEdges)
+	}
+
+	// After a real codebase MCP interaction, savings accrue from the ledger.
+	ds.creditCodebaseUsage(projectPath)
+	detail = ds.detailCBMCP(projectPath)
+	if detail.TokensSaved <= 0 {
+		t.Fatalf("expected codebase token savings after a call, got %#v", detail)
 	}
 	pj, err := store.GetProjectByPath(projectPath)
 	if err != nil {
