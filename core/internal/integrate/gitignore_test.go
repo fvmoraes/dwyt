@@ -226,6 +226,23 @@ func TestEnsureGitignoreBlock_BlockOnly(t *testing.T) {
 	}
 }
 
+func TestEnsureGitignoreBlock_CRLFDoesNotAccumulateBlankLines(t *testing.T) {
+	projectPath := t.TempDir()
+	original := ".DS_Store\r\n\r\n# dwyt start\r\n*mcp.json\r\n*opencode.json\r\n# dwyt end\r\n"
+	writeTestFile(t, filepath.Join(projectPath, ".gitignore"), original)
+
+	var content string
+	for i := 0; i < 3; i++ {
+		if err := EnsureGitignoreBlock(projectPath); err != nil {
+			t.Fatalf("attempt %d failed: %v", i, err)
+		}
+		content = readTestFile(t, filepath.Join(projectPath, ".gitignore"))
+		if strings.Contains(content, "end\n\r\n") || strings.Contains(content, "end\r\n\r\n") {
+			t.Fatalf("attempt %d: orphaned blank line after end marker:\n%q", i, content)
+		}
+	}
+}
+
 func writeTestFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
