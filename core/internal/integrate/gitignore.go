@@ -64,7 +64,9 @@ func updateGitignoreBlock(content string) string {
 			break
 		}
 		endIdx = startIdx + endIdx + len(gitignoreEndMarker)
-		if endIdx < len(content) && content[endIdx] == '\n' {
+		if endIdx+1 < len(content) && content[endIdx] == '\r' && content[endIdx+1] == '\n' {
+			endIdx += 2
+		} else if endIdx < len(content) && content[endIdx] == '\n' {
 			endIdx++
 		}
 
