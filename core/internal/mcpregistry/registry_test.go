@@ -43,10 +43,18 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 	}
 }
 
+// setTestHome routes every global-config lookup (os.UserHomeDir reads
+// USERPROFILE on Windows, HOME on Unix) into a temp directory.
+func setTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+}
+
 func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 	home := t.TempDir()
 	dwytHome := filepath.Join(home, ".dwyt")
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
@@ -102,7 +110,7 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 func TestConfigureMCPRespectsClientSelection(t *testing.T) {
 	home := t.TempDir()
 	dwytHome := filepath.Join(home, ".dwyt")
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
@@ -150,7 +158,7 @@ func TestConfigureMCPRespectsClientSelection(t *testing.T) {
 func TestConfigureMCPEmptySelectionWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	dwytHome := filepath.Join(home, ".dwyt")
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
@@ -178,7 +186,7 @@ func TestConfigureMCPEmptySelectionWritesNothing(t *testing.T) {
 func TestSyncKiroPreservesExistingServers(t *testing.T) {
 	home := t.TempDir()
 	dwytHome := filepath.Join(home, ".dwyt")
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
