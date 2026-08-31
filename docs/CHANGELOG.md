@@ -13,6 +13,7 @@ All notable changes to DWYT are documented here.
 
 ### Bug Fixes
 
+- **Cross-platform test suite** — added a CI workflow (ubuntu/windows/macos) and fixed the tests it exposed on Windows: procman tests now use platform-appropriate commands (`ping`/`cmd` instead of `/bin/sleep`), fake MCP binaries are created with the `.exe` suffix where the launcher resolves it, and test SQLite stores are closed so Windows can delete the temp dirs.
 - **Obsidian MCP install on Windows** — the canonical Obsidian MCP command is now `dwyt obsidian-mcp` (subcommand of the main binary). The installer no longer needs to copy `dwyt.exe` to `dwyt-obsidian-mcp.exe`, so the failure mode reported by Windows users (binary locked, AV, partial permissions) is gone. Legacy registries pointing at the renamed copy are auto-rewritten on the next `dwyt .` / configure cycle. Any leftover `dwyt-obsidian-mcp` file is removed best-effort.
 - **Configure MCP feedback** — the dashboard "Reconfigure MCP" button now always surfaces success or a structured error from the backend. Invalid JSON bodies, missing `dwyt` binary, and partial client failures are all reported with an actionable message and the failing stage (`validation`, `registry`, `client-config`). Empty client selections (no AI client enabled in setup) are reported as "no clients configured" instead of silently succeeding.
 

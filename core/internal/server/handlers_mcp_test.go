@@ -34,6 +34,10 @@ func TestAPIMCPConfigureReturnsStructuredPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before t.TempDir cleanup: on Windows an open SQLite handle
+	// (WAL files included) makes the directory undeletable and fails the
+	// test with "file is being used by another process".
+	defer store.Close()
 	ds := &DashboardServer{
 		DwytBin:        dwytBin,
 		DwytHome:       dwytHome,
@@ -94,6 +98,10 @@ func TestAPIMCPConfigureInvalidBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before t.TempDir cleanup: on Windows an open SQLite handle
+	// (WAL files included) makes the directory undeletable and fails the
+	// test with "file is being used by another process".
+	defer store.Close()
 	ds := &DashboardServer{
 		DwytBin:        filepath.Join(dwytHome, "bin"),
 		DwytHome:       dwytHome,
@@ -149,6 +157,10 @@ func TestAPIMCPConfigureMissingDwytBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before t.TempDir cleanup: on Windows an open SQLite handle
+	// (WAL files included) makes the directory undeletable and fails the
+	// test with "file is being used by another process".
+	defer store.Close()
 	ds := &DashboardServer{
 		DwytBin:        dwytBin,
 		DwytHome:       dwytHome,
@@ -196,6 +208,10 @@ func TestAPIMCPConfigureIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Close before t.TempDir cleanup: on Windows an open SQLite handle
+	// (WAL files included) makes the directory undeletable and fails the
+	// test with "file is being used by another process".
+	defer store.Close()
 	projectPath := t.TempDir()
 	ds := &DashboardServer{
 		DwytBin:        dwytBin,
