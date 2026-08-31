@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/gin-gonic/gin"
 )
@@ -141,7 +142,10 @@ func TestDetailCBMCPUsesCodebaseSQLiteGraphWhenStoreHasNoCounts(t *testing.T) {
 	if err := os.MkdirAll(dwytBin, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dwytBin, "codebase-memory-mcp"), []byte("#!/bin/sh\n"), 0755); err != nil {
+	// Use the platform-correct launcher name: on Windows DWYTLauncherPath
+	// resolves to "codebase-memory-mcp.exe" and detailCBMCP bails out early
+	// when the file is missing, which zeroes the graph counts.
+	if err := os.WriteFile(filepath.Join(dwytBin, platform.DWYTLauncherName("codebase-memory-mcp")), []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 

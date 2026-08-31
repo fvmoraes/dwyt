@@ -9,6 +9,7 @@ import CardCodebase from '../components/CardCodebase'
 import CardRTK from '../components/CardRTK'
 import CardHeadroom from '../components/CardHeadroom'
 import CardObsidian from '../components/CardObsidian'
+import VaultMigrationCard from '../components/VaultMigrationCard'
 import { logColor } from '../utils'
 import { useLang } from '../LangContext'
 import type { ToolInfo, ToolDetail, Details, ToolState, MCPRegistry, ProjectContext, BadgeText } from '../types'
@@ -105,6 +106,7 @@ export default function Dashboard() {
   const [saveContent, setSaveContent] = useState('')
   const [mcpRegistry, setMCPRegistry] = useState<MCPRegistry>({})
   const [configuringMCP, setConfiguringMCP] = useState('')
+  const [configureFeedback, setConfigureFeedback] = useState<{ kind: 'success' | 'error'; message: string; name: string } | null>(null)
   const [kiroPower, setKiroPower] = useState<api.KiroPowerStatus | null>(null)
   const [refreshingKiroPower, setRefreshingKiroPower] = useState(false)
   const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
@@ -266,8 +268,33 @@ export default function Dashboard() {
 
   async function handleConfigureMCP(name: string) {
     setConfiguringMCP(name)
-    try { await api.configureMCP(indexPath, name); pollAll() } catch { /* */ }
-    setConfiguringMCP('')
+    setConfigureFeedback(null)
+    // Feedback messages are name-aware: the Codebase card must not claim
+    // something about the Obsidian MCP (and vice versa).
+    const successMsg = name === 'obsidian'
+      ? t.mcpConfigureSuccess
+      : (t.mcpConfigureSuccessGeneric || t.mcpConfigureSuccess)
+    const failedTpl = name === 'obsidian'
+      ? t.mcpConfigureFailed
+      : (t.mcpConfigureFailedGeneric || t.mcpConfigureFailed)
+    try {
+      const r = await api.configureMCP(indexPath, name)
+      // Only surface success when at least one AI client was actually
+      // configured — an empty selection means the user enabled no clients
+      // and DWYT intentionally touches nothing.
+      const configuredClients = Array.isArray(r.clients) ? r.clients.length : 0
+      if (configuredClients === 0) {
+        setConfigureFeedback({ kind: 'error', message: failedTpl.replace('{cause}', t.mcpConfigureNoClients), name })
+      } else {
+        setConfigureFeedback({ kind: 'success', message: successMsg, name })
+      }
+      pollAll()
+    } catch (e) {
+      const cause = e instanceof Error ? e.message : String(e)
+      setConfigureFeedback({ kind: 'error', message: failedTpl.replace('{cause}', cause), name })
+    } finally {
+      setConfiguringMCP('')
+    }
   }
 
   // ── totals ───────────────────────────────────────────────────────────────
@@ -326,7 +353,17 @@ export default function Dashboard() {
       {indexPath && (
         <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--green)', background: 'linear-gradient(135deg, rgba(166,227,161,0.08) 0%, var(--ctp-mantle) 100%)', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
-          <span style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 600 }}>{indexPath.split('/').pop()}</span>
+          <span
+            data-testid="active-project-name"
+            style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 600 }}
+          >{repoName}</span>
+          {projectCtx.project_state?.id && (
+            <span
+              data-testid="active-project-hash"
+              title={projectCtx.project_state.id}
+              style={{ fontSize: 8, color: 'var(--green)', fontFamily: 'monospace', opacity: 0.7 }}
+            >{projectCtx.project_state.id}</span>
+          )}
           <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 600 }}>{t.protecting}</span>
           {obsidianCount > 0 && (
             <span style={{ fontSize: 9, color: 'var(--peach)', fontWeight: 600, marginLeft: 4 }}>
@@ -370,6 +407,8 @@ export default function Dashboard() {
           <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>{t.updateCommandHelp}</div>
         </div>
       )}
+
+      <VaultMigrationCard t={t} />
 
       {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
         <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
@@ -524,12 +563,14 @@ export default function Dashboard() {
           indexPath={indexPath} repoName={repoName}
           isIndexed={isIndexed} indexing={indexing} openingGraph={openingGraph}
           configuringMCP={configuringMCP} mcpRegistry={mcpRegistry} indexError={indexError}
+          configureFeedback={configureFeedback}
           t={t} cbmcp={cbmcp}
           getDetail={getDetail} toolState={toolState} badge={s => badge(s, t)}
           fmtN={fmtN}
           setIndexPath={setIndexPath} onIndex={handleIndex}
           onOpenGraph={handleOpenGraph}
           onConfigure={() => handleConfigureMCP('codebase')}
+          onDismissFeedback={() => setConfigureFeedback(null)}
         />
         <CardRTK
           indexPath={indexPath} repoName={repoName}
@@ -559,6 +600,7 @@ export default function Dashboard() {
           summarizing={summarizing} configuringMCP={configuringMCP}
           mcpRegistry={mcpRegistry} searchQuery={searchQuery}
           saveType={saveType} saveContent={saveContent} searchResult={searchResult}
+          configureFeedback={configureFeedback}
           t={t} fmtN={fmtN}
           setSaveType={setSaveType} setSaveContent={setSaveContent} setSearchQuery={setSearchQuery}
           onSave={async () => {
@@ -579,6 +621,7 @@ export default function Dashboard() {
           onOpenVault={async () => { setOpeningBrain(true); try { await api.openBrain() } catch { /* */ }; setOpeningBrain(false) }}
           onOpenDir={async () => { setOpeningDir(true); try { await api.openBrainDir() } catch { /* */ }; setOpeningDir(false) }}
           onConfigure={() => handleConfigureMCP('obsidian')}
+          onDismissFeedback={() => setConfigureFeedback(null)}
         />
       </div>
     </div>

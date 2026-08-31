@@ -4,15 +4,54 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
 )
 
+// longRunningCmd returns a process that stays alive for ~10 seconds on any
+// platform. /bin/sleep does not exist on Windows; one ping per second is
+// the portable stand-in. On Windows the FULL cmd.exe path is required:
+// procman.Start stats the binary literally, and os.Stat("cmd") does not
+// resolve extensions the way CreateProcess would.
+func longRunningCmd() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return windowsCmd(), []string{"/c", "ping -n 11 127.0.0.1"}
+	}
+	return "/bin/sleep", []string{"10"}
+}
+
+// echoCmd returns a short-lived process that writes to stdout.
+func echoCmd() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return windowsCmd(), []string{"/c", "echo hello world"}
+	}
+	return "/bin/sh", []string{"-c", "echo hello world"}
+}
+
+// failingCmd returns a process that exits immediately with a non-zero code.
+func failingCmd() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return windowsCmd(), []string{"/c", "exit 1"}
+	}
+	return "/bin/false", nil
+}
+
+// windowsCmd returns the absolute path to cmd.exe (ComSpec is always set
+// on Windows) so a literal os.Stat succeeds.
+func windowsCmd() string {
+	if cs := os.Getenv("ComSpec"); cs != "" {
+		return cs
+	}
+	return `C:\Windows\System32\cmd.exe`
+}
+
 func TestProcessManager_StartStop(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test", "/bin/sleep", "", 0, "10")
+	bin, args := longRunningCmd()
+	pm.Register("test", bin, "", 0, args...)
 
 	// Start
 	status, err := pm.Start("test")
@@ -26,13 +65,17 @@ func TestProcessManager_StartStop(t *testing.T) {
 		t.Error("Expected non-zero PID")
 	}
 
-	// Verify process is actually running
-	proc, err := os.FindProcess(status.PID)
-	if err != nil {
-		t.Fatalf("FindProcess failed: %v", err)
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		t.Error("Process not running")
+	// Verify process is actually running. POSIX signal probing has no
+	// Windows equivalent (Signal(0) is unsupported there); the reaper-based
+	// Running status above is the cross-platform source of truth.
+	if runtime.GOOS != "windows" {
+		proc, err := os.FindProcess(status.PID)
+		if err != nil {
+			t.Fatalf("FindProcess failed: %v", err)
+		}
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			t.Error("Process not running")
+		}
 	}
 
 	// Stop
@@ -46,15 +89,21 @@ func TestProcessManager_StartStop(t *testing.T) {
 
 	// Verify process was killed
 	time.Sleep(100 * time.Millisecond)
-	if err := proc.Signal(syscall.Signal(0)); err == nil {
-		t.Error("Process should be dead")
+	if runtime.GOOS != "windows" {
+		proc, err := os.FindProcess(status.PID)
+		if err == nil {
+			if err := proc.Signal(syscall.Signal(0)); err == nil {
+				t.Error("Process should be dead")
+			}
+		}
 	}
 }
 
 func TestProcessManager_HealthcheckFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test", "/bin/false", "http://localhost:9999/health", 9999)
+	bin, args := failingCmd()
+	pm.Register("test", bin, "http://localhost:9999/health", 9999, args...)
 
 	status, err := pm.Start("test")
 	if err == nil {
@@ -78,13 +127,14 @@ func TestProcessManager_PortConflict(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test", "/bin/sleep", "", 9749, "10")
+	bin, args := longRunningCmd()
+	pm.Register("test", bin, "", 9749, args...)
 
 	status, err := pm.Start("test")
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	
+
 	// Port should be different from default since 9749 is occupied
 	// But the actual port used depends on findFreePort implementation
 	// which tries 9749, 9750, 9751, 9752, 9753
@@ -103,7 +153,8 @@ func TestProcessManager_PortConflict(t *testing.T) {
 func TestProcessManager_Logs(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test", "/bin/sh", "", 0, "-c", "echo hello world")
+	bin, args := echoCmd()
+	pm.Register("test", bin, "", 0, args...)
 
 	_, err := pm.Start("test")
 	if err != nil {
@@ -134,7 +185,8 @@ func TestProcessManager_Logs(t *testing.T) {
 func TestProcessManager_Restart(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test", "/bin/sleep", "", 0, "10")
+	bin, args := longRunningCmd()
+	pm.Register("test", bin, "", 0, args...)
 
 	// Start
 	status1, err := pm.Start("test")
@@ -163,8 +215,9 @@ func TestProcessManager_Restart(t *testing.T) {
 func TestProcessManager_AllStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
-	pm.Register("test1", "/bin/sleep", "", 0, "10")
-	pm.Register("test2", "/bin/sleep", "", 0, "10")
+	bin, args := longRunningCmd()
+	pm.Register("test1", bin, "", 0, args...)
+	pm.Register("test2", bin, "", 0, args...)
 
 	pm.Start("test1")
 	pm.Start("test2")

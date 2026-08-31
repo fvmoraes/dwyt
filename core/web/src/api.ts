@@ -120,7 +120,32 @@ export async function getHeadroomStatsURL(): Promise<{ url: string; started: boo
 // List all tracked projects
 export async function getProjects(): Promise<{ projects: Array<{id: string; path: string; name: string; active: boolean; last_open: string; indexed_at?: string; nodes?: number}>; default: string }> {
   const r = await fetch(`${API}/projects`)
-  return r.json()
+  return parseJSON(r) as Promise<{ projects: Array<{id: string; path: string; name: string; active: boolean; last_open: string; indexed_at?: string; nodes?: number}>; default: string }>
+}
+
+// ── Vault migration ──────────────────────────────────────────────────────
+export interface VaultMigrationResult {
+  hash: string
+  legacy_name: string
+  canonical_name: string
+  resolved_name?: string
+  status: 'migrated' | 'already_canonical' | 'unidentifiable' | 'skipped_reserved' | 'metadata_only' | string
+  source?: string
+  reason?: string
+}
+export interface VaultMigrationReport {
+  results: VaultMigrationResult[]
+  migrated: number
+  already_canonical: number
+  unidentifiable: number
+}
+export async function getVaultMigrationReport(): Promise<{ status: string; report: VaultMigrationReport }> {
+  const r = await fetch(`${API}/vault/migration-report`)
+  return parseJSON(r) as Promise<{ status: string; report: VaultMigrationReport }>
+}
+export async function runVaultMigration(): Promise<{ status: string; report: VaultMigrationReport }> {
+  const r = await fetch(`${API}/vault/migrate`, { method: 'POST' })
+  return parseJSON(r) as Promise<{ status: string; report: VaultMigrationReport }>
 }
 
 // Soft-remove a project from the active list (files under ~/.dwyt are kept)
@@ -180,14 +205,72 @@ export async function getObsidianInstallStatus(): Promise<{ status: string; path
 // ── MCP endpoints ────────────────────────────────────────────────────────
 export async function getMCPRegistry(): Promise<{ mcpServers: Record<string, { command: string; port: number; healthURL: string; enabled: boolean; installed: boolean; status: string; pid: number }> }> {
   const r = await fetch(`${API}/mcp/registry`)
-  return r.json()
+  return parseJSON(r) as Promise<{ mcpServers: Record<string, { command: string; port: number; healthURL: string; enabled: boolean; installed: boolean; status: string; pid: number }> }>
 }
-export async function configureMCP(projectPath?: string, name?: string): Promise<{ status: string; note: string }> {
+export interface ConfigureMCPResult {
+  status: string
+  name?: string
+  project_path?: string
+  command?: string
+  args?: string[]
+  clients?: string[]
+  migrated?: boolean
+  note?: string
+  error?: string
+  stage?: string
+}
+export async function configureMCP(projectPath?: string, name?: string): Promise<ConfigureMCPResult> {
   const r = await fetch(`${API}/mcp/configure`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_path: projectPath || '', name: name || '' }),
   })
-  return r.json()
+  return parseJSON(r) as Promise<ConfigureMCPResult>
+}
+
+// parseJSON reads a Response body as JSON, validates `response.ok`, and
+// throws an Error with the server-provided message when the request fails.
+// Without this wrapper every `await fetch(...).json()` swallowed HTTP errors
+// silently — the dashboard "Configure MCP" button could fail without any
+// user-visible feedback, which is exactly the bug we are fixing.
+async function parseJSON(r: Response): Promise<unknown> {
+  let data: unknown = null
+  const text = await r.text()
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`.trim())
+      throw new Error(t('mcpInvalidJSON'))
+    }
+  }
+  if (!r.ok) {
+    const err = (data && typeof data === 'object' && (data as { error?: string }).error) || `HTTP ${r.status}`
+    throw new Error(String(err))
+  }
+  return data
+}
+
+// Lazy i18n lookup that avoids a circular import — `api.ts` is imported
+// long before LangProvider mounts in some tests, so we resolve the active
+// language on demand.
+function t(key: string): string {
+  try {
+    const lang = (typeof window !== 'undefined' && (window as unknown as { __dwytLang?: string }).__dwytLang) || localStorage.getItem('dwyt-lang') || 'en'
+    const dict = lang === 'pt' ? ptStrings : enStrings
+    return dict[key] || key
+  } catch {
+    return key
+  }
+}
+
+// Inline copies of the fallback strings used when the JSON parse fails on a
+// non-OK response. Kept here (rather than imported from i18n.ts) to avoid a
+// hard import cycle between api.ts and LangProvider.
+const enStrings: Record<string, string> = {
+  mcpInvalidJSON: 'The server returned an invalid response.',
+}
+const ptStrings: Record<string, string> = {
+  mcpInvalidJSON: 'O servidor retornou uma resposta inválida.',
 }
 export async function mcpStart(name: string): Promise<unknown> {
   const r = await fetch(`${API}/mcp/services/start`, {

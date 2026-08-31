@@ -218,7 +218,7 @@ When you need to understand, validate, diagnose, or change the real code structu
 
 ## Obsidian Law
 
-The Obsidian vault at ` + "`~/.dwyt/projects/<id>/`" + ` is the official durable memory for the project. Keep notes with internal links such as ` + "`[[index]]`" + `, ` + "`[[maps/project-map]]`" + `, ` + "`[[instructions/obsidian-law]]`" + `, and ` + "`[[instructions/codebase-law]]`" + `. Never delete vaults, projects, notes, or history as an automatic repair step.
+The Obsidian vault at ` + "`~/.dwyt/projects/<id>_<project-name>/`" + ` (e.g. 1597b5fc9bfb_dwyt) is the official durable memory for the project. Keep notes with internal links such as ` + "`[[index]]`" + `, ` + "`[[maps/project-map]]`" + `, ` + "`[[instructions/obsidian-law]]`" + `, and ` + "`[[instructions/codebase-law]]`" + `. Never delete vaults, projects, notes, or history as an automatic repair step.
 
 Minimum payload for saving context:
 

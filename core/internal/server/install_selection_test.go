@@ -32,7 +32,7 @@ func TestInstallFlowSingleClient(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("DWYT_HOME", dwytHome)
 	touchExec(t, filepath.Join(dwytBin, "codebase-memory-mcp"))
-	touchExec(t, filepath.Join(dwytBin, "dwyt-obsidian-mcp"))
+	touchExec(t, filepath.Join(dwytBin, "dwyt"))
 
 	projectPath := t.TempDir()
 	clients := "kiro"

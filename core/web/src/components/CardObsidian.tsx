@@ -2,6 +2,7 @@ import { type ChangeEvent } from 'react'
 import type { ToolDetail, BadgeText, ToolState, MCPRegistry } from '../types'
 import { CardHeader, Row, Hr, RepoRow } from './CardParts'
 import Button from './Button'
+import MCPFeedbackBanner from './MCPFeedbackBanner'
 
 interface Props {
   det: ToolDetail | undefined
@@ -20,6 +21,7 @@ interface Props {
   saveType: string
   saveContent: string
   searchResult: string
+  configureFeedback?: { kind: 'success' | 'error'; message: string; name: string } | null
   t: Record<string, string>
   fmtN: (n: number | undefined) => string
   setSaveType: (v: string) => void
@@ -31,15 +33,18 @@ interface Props {
   onOpenVault: () => Promise<void>
   onOpenDir: () => Promise<void>
   onConfigure: () => Promise<void>
+  onDismissFeedback?: () => void
 }
 
 export default function CardObsidian({
   det, state, badgeText, repoName, indexPath, obsidianCount,
   savingBrain, openingBrain, openingDir, summarizing, configuringMCP,
-  mcpRegistry, searchQuery, saveType, saveContent, searchResult, t,
+  mcpRegistry, searchQuery, saveType, saveContent, searchResult,
+  configureFeedback, t,
   fmtN,
   setSaveType, setSaveContent, setSearchQuery,
   onSave, onSearch, onSummarize, onOpenVault, onOpenDir, onConfigure,
+  onDismissFeedback,
 }: Props) {
   const mcp = mcpRegistry['obsidian']
   const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
@@ -61,6 +66,7 @@ export default function CardObsidian({
       <Row label="MCP" value={mcpValue} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
+      <MCPFeedbackBanner feedback={configureFeedback} name="obsidian" onDismiss={onDismissFeedback} />
       <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
         <select value={saveType} onChange={(e: ChangeEvent<HTMLSelectElement>) => setSaveType(e.target.value)}
           style={{ fontSize: 9, padding: '2px 4px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}>

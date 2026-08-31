@@ -8,6 +8,17 @@ All notable changes to DWYT are documented here.
 
 ### Features
 
+- **Named Obsidian vaults** — vault directories are now created as `<hash>_<project_name>` (e.g. `1597b5fc9bfb_dwyt`) so the Obsidian vault picker shows which project each vault belongs to instead of a bare hash. The 12-char hash stays the only internal identifier: DB keys, MCP resolution, API calls, and cross-project isolation are unchanged. Each vault carries a DWYT-managed `.dwyt/vault.json` metadata file (version, project hash, project name, directory name, optional local project path) used to recover identity after renames and to support future migrations.
+- **Automatic legacy vault migration** — at startup DWYT scans `~/.dwyt/projects/` for old hash-only directories and renames them to the canonical layout when a reliable project name is found (DB registry first, then the vault's own `vault.json`). Vaults that cannot be associated with confidence are left untouched, flagged as pending, and surfaced in the dashboard ("Vault migration" card) where the user can trigger a manual pass. Directory renames update the Obsidian vault registry in place (with a `.dwyt-backup` of `obsidian.json`), preserving all other entries and never touching vaults created outside DWYT.
+
+### Bug Fixes
+
+- **Cross-platform test suite** — added a CI workflow (ubuntu/windows/macos) and fixed the tests it exposed on Windows: procman tests now use platform-appropriate commands (`ping`/`cmd` instead of `/bin/sleep`), fake MCP binaries are created with the `.exe` suffix where the launcher resolves it, and test SQLite stores are closed so Windows can delete the temp dirs.
+- **Obsidian MCP install on Windows** — the canonical Obsidian MCP command is now `dwyt obsidian-mcp` (subcommand of the main binary). The installer no longer needs to copy `dwyt.exe` to `dwyt-obsidian-mcp.exe`, so the failure mode reported by Windows users (binary locked, AV, partial permissions) is gone. Legacy registries pointing at the renamed copy are auto-rewritten on the next `dwyt .` / configure cycle. Any leftover `dwyt-obsidian-mcp` file is removed best-effort.
+- **Configure MCP feedback** — the dashboard "Reconfigure MCP" button now always surfaces success or a structured error from the backend. Invalid JSON bodies, missing `dwyt` binary, and partial client failures are all reported with an actionable message and the failing stage (`validation`, `registry`, `client-config`). Empty client selections (no AI client enabled in setup) are reported as "no clients configured" instead of silently succeeding.
+
+### Features
+
 - **Windows-first support** — added a native PowerShell installer (`install.ps1`) that downloads the architecture-specific archive, verifies its SHA-256 checksum, installs `dwyt.exe` under `%APPDATA%\dwyt\bin`, configures the user PATH, and runs the tool install. No Git Bash or WSL required.
 - Added an `internal/platform` abstraction layer (user home, DWYT/config dirs, executable discovery, path resolution) plus per-OS process helpers (`proc_unix.go` / `proc_windows.go`) to remove scattered platform conditionals.
 - Added native Go installers for the Codebase MCP and RTK release archives with SHA-256 verification (`download_archive.go`), removing the dependency on shell/curl/tar during tool install.

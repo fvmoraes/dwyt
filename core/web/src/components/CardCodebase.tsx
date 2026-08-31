@@ -1,6 +1,7 @@
 import type { ToolInfo, ToolDetail, MCPRegistry, BadgeText, ToolState } from '../types'
 import { CardHeader, Row, Hr, RepoRow } from './CardParts'
 import Button from './Button'
+import MCPFeedbackBanner from './MCPFeedbackBanner'
 
 interface Props {
   indexPath: string
@@ -11,6 +12,7 @@ interface Props {
   configuringMCP: string
   mcpRegistry: MCPRegistry
   indexError: string
+  configureFeedback?: { kind: 'success' | 'error'; message: string; name: string } | null
   t: Record<string, string>
   cbmcp: ToolInfo | undefined
   getDetail: (n: string) => ToolDetail | undefined
@@ -21,6 +23,7 @@ interface Props {
   onIndex: () => void
   onOpenGraph: () => Promise<void>
   onConfigure: () => Promise<void>
+  onDismissFeedback?: () => void
 }
 
 export default function CardCodebase(props: Props) {
@@ -48,6 +51,7 @@ export default function CardCodebase(props: Props) {
       <Row label="MCP" value={mcpValue} />
       <RepoRow projectName={props.repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
+      <MCPFeedbackBanner feedback={props.configureFeedback} name="codebase" onDismiss={props.onDismissFeedback} />
       {state === 'not_installed' ? (
         <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.notInstalled}</span>
       ) : (

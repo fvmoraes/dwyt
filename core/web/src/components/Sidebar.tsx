@@ -143,9 +143,23 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                 style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, cursor: isSwitching || isRemoving ? 'wait' : 'pointer' }}
               >
                 <span style={{ fontSize: 12 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
-                <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--mauve)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {p.name}
+                <span
+                  data-testid="sidebar-project-name"
+                  data-id={p.id}
+                  style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--mauve)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {p.name || (p.path ? p.path.split('/').pop() : p.id)}
                 </span>
+                {p.id && (
+                  <span
+                    data-testid="sidebar-project-hash"
+                    data-id={p.id}
+                    title={p.id}
+                    style={{ fontSize: 8, color: 'var(--muted)', fontFamily: 'monospace', flexShrink: 0 }}
+                  >
+                    {p.id}
+                  </span>
+                )}
               </div>
               <button
                 title={t.projectMenu}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/platform"
 )
 
@@ -82,17 +83,21 @@ func safePath(dwytHome, target string) error {
 
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
 	id := db.HashPath(projectPath)
-	baseDir := filepath.Join(dwytHome, "projects", id)
+	projectName := filepath.Base(projectPath)
+
+	// Resolve to the canonical "hash_name" layout. Older installs may still
+	// have a "<hash>"-only directory — adoptLegacyVaultLayout migrates it in
+	// place (or coexists with it when migration is unsafe).
+	baseDir, err := adoptLegacyVaultLayout(dwytHome, id, projectName)
+	if err != nil {
+		return nil, err
+	}
 	if err := safePath(dwytHome, baseDir); err != nil {
 		return nil, err
 	}
 
-	// Vault layout: ~/.dwyt/projects/<id>/ IS the Obsidian vault. The
-	// directory basename (the project SHA) is what shows up in Obsidian's
-	// vault picker, so every project gets a unique label instead of all
-	// reading "obsidian". migrateLegacyVaultLayout moves content from any
-	// previous "brain" or "obsidian" subfolder up to baseDir so existing
-	// installs keep their notes.
+	// Flatten any "brain"/"obsidian" subdirectory from even older layouts so
+	// the vault root itself is the Obsidian vault.
 	if err := migrateLegacyVaultLayout(baseDir); err != nil {
 		return nil, err
 	}
@@ -114,6 +119,7 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		"debug",
 		"context",
 		".obsidian",
+		".dwyt",
 	}
 	for _, d := range dirs {
 		os.MkdirAll(filepath.Join(brainDir, d), 0755)
@@ -121,7 +127,7 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 
 	pb := &ProjectObsidian{
 		ProjectID:   id,
-		ProjectName: filepath.Base(projectPath),
+		ProjectName: projectName,
 		ProjectPath: projectPath,
 		UpdatedAt:   time.Now(),
 		baseDir:     baseDir,
@@ -143,8 +149,92 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	}
 
 	ensureBrainJSON(baseDir, projectPath)
+	// vault.json is the durable identity of the vault (project_hash +
+	// project_name + directory_name). It is what allows a future migration to
+	// recover the project name when the registry or runtime state is gone.
+	if err := WriteVaultMeta(brainDir, VaultMeta{
+		Version:     VaultMetaVersion,
+		ProjectHash: id,
+		ProjectName: projectName,
+	}); err != nil {
+		log.Warn("vault: failed to write metadata", log.Fields{"dir": brainDir, "error": err.Error()})
+	}
 	ensureSeedFiles(brainDir)
 	return pb, nil
+}
+
+// adoptLegacyVaultLayout returns the canonical "<hash>_<name>" vault path for
+// a project, migrating an existing "<hash>"-only directory in place when
+// safe. It is idempotent: calling it repeatedly yields the same answer and
+// never deletes content. It is conservative: when the target directory
+// already exists with different content (a collision from a previous rename
+// attempt or a foreign directory with the same name), the legacy directory
+// is preserved untouched so the user can resolve the conflict manually.
+func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, error) {
+	if projectHash == "" {
+		return "", fmt.Errorf("vault: empty project hash")
+	}
+	projectsDir := filepath.Join(dwytHome, "projects")
+	legacyDir := filepath.Join(projectsDir, projectHash)
+	canonicalDir := filepath.Join(projectsDir, VaultDirectoryName(projectHash, projectName))
+
+	// Nothing to migrate: the canonical directory already exists and the
+	// hash-only directory does not. This is the steady state.
+	if samePath(legacyDir, canonicalDir) {
+		return canonicalDir, nil
+	}
+
+	legacyInfo, legacyErr := os.Stat(legacyDir)
+	canonicalInfo, canonicalErr := os.Stat(canonicalDir)
+
+	// No legacy directory → just use the canonical path.
+	if legacyErr != nil || !legacyInfo.IsDir() {
+		return canonicalDir, nil
+	}
+
+	// Canonical path exists but is NOT a directory (a stray file with an
+	// unlucky name). Renaming onto it would fail on every platform, and
+	// failing the whole vault load over it would be worse than limping on
+	// the legacy path — so keep the legacy directory and let the user
+	// clean up the stray file.
+	if canonicalErr == nil && !canonicalInfo.IsDir() {
+		log.Warn("vault: canonical path is a file; keeping legacy layout",
+			log.Fields{"canonical": canonicalDir, "legacy": legacyDir})
+		return legacyDir, nil
+	}
+
+	// Canonical directory already exists. Decide which one wins.
+	switch {
+	case canonicalErr != nil || !canonicalInfo.IsDir():
+		// Canonical doesn't exist yet → rename legacy into place.
+		if err := os.MkdirAll(projectsDir, 0755); err != nil {
+			return "", fmt.Errorf("vault: prepare projects dir: %w", err)
+		}
+		if err := os.Rename(legacyDir, canonicalDir); err != nil {
+			return "", fmt.Errorf("vault: rename legacy %s -> %s: %w", legacyDir, canonicalDir, err)
+		}
+		log.Info("vault: migrated legacy layout", log.Fields{"from": legacyDir, "to": canonicalDir})
+		// Keep the Obsidian app pointed at the renamed directory. A failure
+		// here is non-fatal: the vault on disk is already correct and the
+		// user can re-open it once from Obsidian.
+		if err := UpdateObsidianVaultPath(legacyDir, canonicalDir); err != nil {
+			log.Warn("vault: obsidian registry update failed", log.Fields{"error": err.Error()})
+		}
+		return canonicalDir, nil
+	default:
+		// Both exist. Keep the canonical (newer) directory untouched and
+		// log a warning so the user can decide how to merge.
+		log.Warn("vault: legacy and canonical directories both exist; keeping canonical",
+			log.Fields{"legacy": legacyDir, "canonical": canonicalDir})
+		return canonicalDir, nil
+	}
+}
+
+// samePath returns true when two file paths refer to the same location on
+// disk. It uses lexical comparison after filepath.Clean because the inputs
+// are always absolute (built from dwytHome) and we don't expect symlinks.
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func ensureSeedFiles(brainDir string) {
@@ -912,23 +1002,37 @@ func (pb *ProjectObsidian) GetBrainDir() string {
 // vault WITHOUT creating, seeding, or migrating it. The bool is false when no
 // vault directory exists yet. This is the read-only path used by list/context
 // endpoints, so a GET never mutates the filesystem.
+//
+// It accepts both layouts — "<hash>_<name>" (canonical) and "<hash>" (legacy,
+// still present while a migration is pending) — so list endpoints don't
+// report "no vault" the moment a user upgrades before the migration pass
+// runs.
 func CountVaultFiles(dwytHome, projectPath string) (int, bool) {
-	baseDir := filepath.Join(dwytHome, "projects", db.HashPath(projectPath))
-	if err := safePath(dwytHome, baseDir); err != nil {
-		return 0, false
+	hash := db.HashPath(projectPath)
+	projectName := filepath.Base(projectPath)
+	candidates := []string{
+		filepath.Join(dwytHome, "projects", VaultDirectoryName(hash, projectName)),
+		filepath.Join(dwytHome, "projects", hash),
 	}
-	if info, err := os.Stat(baseDir); err != nil || !info.IsDir() {
-		return 0, false
-	}
-	count := 0
-	filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
-		if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
-			return nil
+	for _, baseDir := range candidates {
+		if err := safePath(dwytHome, baseDir); err != nil {
+			continue
 		}
-		count++
-		return nil
-	})
-	return count, true
+		info, err := os.Stat(baseDir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		count := 0
+		filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
+			if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+				return nil
+			}
+			count++
+			return nil
+		})
+		return count, true
+	}
+	return 0, false
 }
 
 func AutoSaveSession(pb *ProjectObsidian, tag string) error {

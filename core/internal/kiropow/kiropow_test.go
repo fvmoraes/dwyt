@@ -3,6 +3,7 @@ package kiropow
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +130,10 @@ func TestEnsurePower_VaultProtection(t *testing.T) {
 
 func TestRegisterWithKiro_CreatesSymlink(t *testing.T) {
 	home := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows (HOME is ignored there),
+	// so set both to route kiroLinkPath into the temp dir.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	powerDir := filepath.Join(t.TempDir(), "dwyt-power")
 	if err := os.MkdirAll(powerDir, 0755); err != nil {
 		t.Fatal(err)
@@ -149,6 +153,7 @@ func TestRegisterWithKiro_CreatesSymlink(t *testing.T) {
 func TestRegisterWithKiro_Idempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	powerDir := filepath.Join(t.TempDir(), "dwyt-power")
 	if err := os.MkdirAll(powerDir, 0755); err != nil {
 		t.Fatal(err)
@@ -198,8 +203,31 @@ func TestGenerateMCPJSON_OnlyExistingBinaries(t *testing.T) {
 	if !strings.Contains(data, "codebase-memory-mcp") {
 		t.Fatal("expected codebase MCP")
 	}
-	if strings.Contains(data, "dwyt-obsidian-mcp") {
+	if strings.Contains(data, "\"obsidian-mcp\"") {
 		t.Fatal("did not expect obsidian MCP")
+	}
+}
+
+func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
+	dwytBin := "/tmp/bin"
+	data, err := GenerateMCPJSON(dwytBin, map[string]bool{"codebase": true, "obsidian": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Compare with the platform-correct joined path — on Windows
+	// filepath.Join produces backslashes and the .exe suffix.
+	wantCmd := filepath.Join(dwytBin, executableName("dwyt"))
+	if !strings.Contains(data, `"command": `+strconv.Quote(wantCmd)) {
+		t.Fatalf("expected canonical command %s, got: %s", wantCmd, data)
+	}
+	if !strings.Contains(data, `"obsidian-mcp"`) {
+		t.Fatalf("expected obsidian-mcp subcommand arg, got: %s", data)
+	}
+	if !strings.Contains(data, `"DWYT_API_URL"`) {
+		t.Fatalf("expected DWYT_API_URL env, got: %s", data)
+	}
+	if strings.Contains(data, "dwyt-obsidian-mcp") {
+		t.Fatalf("legacy binary name must not appear: %s", data)
 	}
 }
 
@@ -233,7 +261,7 @@ func tempPowerEnv(t *testing.T) (string, string) {
 	dwytBin := filepath.Join(t.TempDir(), "bin")
 	t.Setenv("HOME", t.TempDir())
 	touchBin(t, dwytBin, executableName("codebase-memory-mcp"))
-	touchBin(t, dwytBin, executableName("dwyt-obsidian-mcp"))
+	touchBin(t, dwytBin, executableName("dwyt"))
 	return dwytHome, dwytBin
 }
 

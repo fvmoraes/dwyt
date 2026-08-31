@@ -39,6 +39,8 @@ type ManagedProcess struct {
 	LogDir    string
 	cmd       *exec.Cmd     // handle to the running child, for reaping
 	done      chan struct{} // closed by the reaper when the child exits
+	logFiles  []*os.File    // stdout/stderr handles, closed when the child exits
+	logMu     sync.Mutex    // guards logFiles; separate from mu to avoid deadlock between Stop (holds mu, waits for done) and the reaper
 	mu        sync.Mutex
 }
 
@@ -135,12 +137,24 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	stderrPath := filepath.Join(pm.logDir, name+"-stderr.log")
 	os.MkdirAll(filepath.Dir(stdoutPath), 0755)
 
-	stdout, _ := os.Create(stdoutPath)
-	stderr, _ := os.Create(stderrPath)
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		return &ServiceStatus{Name: name, Status: "error", State: "error", Error: fmt.Sprintf("open stdout log: %v", err)}, err
+	}
+	stderr, err := os.Create(stderrPath)
+	if err != nil {
+		stdout.Close()
+		return &ServiceStatus{Name: name, Status: "error", State: "error", Error: fmt.Sprintf("open stderr log: %v", err)}, err
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	// Track the handles so they can be closed as soon as the child exits —
+	// on Windows an open handle makes the log file (and its directory)
+	// undeletable, which breaks TempDir cleanup in tests and log rotation.
+	mp.logFiles = []*os.File{stdout, stderr}
 
 	if err := cmd.Start(); err != nil {
+		mp.closeLogFiles()
 		return &ServiceStatus{Name: name, Status: "error", State: "error", Error: fmt.Sprintf("failed to start: %v", err)}, err
 	}
 
@@ -149,11 +163,13 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	mp.cmd = cmd
 	procutil.WritePID(pm.dwytHome, name, mp.PID)
 	// Reaper: wait on the child so it never lingers as a zombie when it exits
-	// on its own (crash) or is signalled by Stop(). Clears PID once reaped.
+	// on its own (crash) or is signalled by Stop(). Clears PID once reaped
+	// and releases the log file handles.
 	done := make(chan struct{})
 	mp.done = done
 	go func() {
 		cmd.Wait()
+		mp.closeLogFiles()
 		close(done)
 		mp.mu.Lock()
 		if mp.cmd == cmd {
@@ -188,6 +204,20 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	return pm.statusLocked(mp), nil
 }
 
+// closeLogFiles releases the stdout/stderr handles for the last spawn.
+// Safe to call multiple times and from both the reaper goroutine and Stop;
+// guarded by its own mutex so neither caller can deadlock the other.
+func (mp *ManagedProcess) closeLogFiles() {
+	mp.logMu.Lock()
+	defer mp.logMu.Unlock()
+	for _, f := range mp.logFiles {
+		if f != nil {
+			f.Close()
+		}
+	}
+	mp.logFiles = nil
+}
+
 func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 	mp := pm.get(name)
 	if mp == nil {
@@ -216,6 +246,7 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 			<-done
 		}
 	}
+	mp.closeLogFiles()
 
 	mp.PID = 0
 	mp.cmd = nil

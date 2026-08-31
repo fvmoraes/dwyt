@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/brain"
 )
 
 type ProjectState struct {
@@ -39,9 +42,24 @@ func hashPath(path string) string {
 	return hex.EncodeToString(h[:])[:12]
 }
 
-// ProjectDir returns ~/.dwyt/projects/<id> — never inside the project itself.
+// ProjectDir returns the canonical "<hash>_<name>" vault directory when it
+// exists, falling back to the legacy "<hash>" directory so callers keep
+// working during the migration window. Callers that need to know which
+// layout is in use can compare the result with the canonical path.
+//
+// All name normalization is delegated to brain.VaultDirectoryName — this
+// package must not reimplement it (a divergent copy would compute a
+// different canonical directory than NewProjectObsidian for edge-case
+// names, splitting workspace state away from the vault).
 func ProjectDir(repoPath string) string {
-	return filepath.Join(dwytHome(), "projects", hashPath(repoPath))
+	home := dwytHome()
+	hash := hashPath(repoPath)
+	name := filepath.Base(strings.TrimRight(repoPath, string(os.PathSeparator)))
+	canonical := filepath.Join(home, "projects", brain.VaultDirectoryName(hash, name))
+	if info, err := os.Stat(canonical); err == nil && info.IsDir() {
+		return canonical
+	}
+	return filepath.Join(home, "projects", hash)
 }
 
 func Read(repoPath string) (*ProjectState, error) {

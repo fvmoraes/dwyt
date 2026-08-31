@@ -60,6 +60,105 @@ func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
 	} {
 		assertEnglishInstructionFile(t, filepath.Join(projectPath, path))
 	}
+
+	assertCanonicalObsidianCommand(t, projectPath)
+}
+
+func TestProjectPerClientUsesCanonicalObsidianCommand(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	dwytBin := filepath.Join(dwytHome, "bin")
+
+	cases := []struct {
+		client string
+		paths  []string
+	}{
+		{"claude", []string{".mcp.json", filepath.Join(".claude", "mcp.json")}},
+		{"codex", []string{".mcp.json"}},
+		{"cursor", []string{filepath.Join(".cursor", "mcp.json")}},
+		{"kiro", []string{filepath.Join(".kiro", "settings", "mcp.json"), filepath.Join(".kiro", "mcp.json")}},
+		{"copilot", []string{filepath.Join(".vscode", "mcp.json")}},
+		{"windsurf", []string{filepath.Join(".windsurf", "mcp.json")}},
+		{"continue", []string{filepath.Join(".continue", "mcp.json")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.client, func(t *testing.T) {
+			projectPath := t.TempDir()
+			Project(projectPath, tc.client, dwytBin)
+			for _, p := range tc.paths {
+				data, err := os.ReadFile(filepath.Join(projectPath, p))
+				if err != nil {
+					t.Fatalf("%s: missing config: %v", p, err)
+				}
+				text := string(data)
+				if strings.Contains(text, "dwyt-obsidian-mcp") {
+					t.Fatalf("%s: legacy binary name must not appear: %s", p, text)
+				}
+				if !strings.Contains(text, "obsidian-mcp") {
+					t.Fatalf("%s: expected canonical subcommand arg: %s", p, text)
+				}
+				if !strings.Contains(text, "DWYT_API_URL") {
+					t.Fatalf("%s: expected DWYT_API_URL env: %s", p, text)
+				}
+			}
+		})
+	}
+}
+
+func TestProjectOpenCodeUsesCanonicalObsidianCommand(t *testing.T) {
+	projectPath := t.TempDir()
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	dwytBin := filepath.Join(dwytHome, "bin")
+
+	Project(projectPath, "opencode", dwytBin)
+	data, err := os.ReadFile(filepath.Join(projectPath, "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	mcp, _ := cfg["mcp"].(map[string]interface{})
+	obsidian, _ := mcp["obsidian"].(map[string]interface{})
+	cmd, _ := obsidian["command"].([]interface{})
+	if len(cmd) < 2 {
+		t.Fatalf("expected command array with binary + arg, got %#v", cmd)
+	}
+	base := filepath.Base(cmd[0].(string))
+	if base != "dwyt" && base != "dwyt.exe" {
+		t.Fatalf("expected dwyt binary, got %q", cmd[0])
+	}
+	if cmd[1] != "obsidian-mcp" {
+		t.Fatalf("expected obsidian-mcp arg, got %#v", cmd)
+	}
+	env, _ := obsidian["environment"].(map[string]interface{})
+	if env["DWYT_API_URL"] != "http://localhost:2737/api" {
+		t.Fatalf("expected DWYT_API_URL env, got %#v", env)
+	}
+}
+
+func assertCanonicalObsidianCommand(t *testing.T, projectPath string) {
+	t.Helper()
+	for _, path := range []string{
+		".mcp.json",
+		filepath.Join(".claude", "mcp.json"),
+		filepath.Join(".cursor", "mcp.json"),
+		filepath.Join(".kiro", "settings", "mcp.json"),
+		filepath.Join(".kiro", "mcp.json"),
+		filepath.Join(".windsurf", "mcp.json"),
+		filepath.Join(".continue", "mcp.json"),
+		filepath.Join(".vscode", "mcp.json"),
+	} {
+		data, err := os.ReadFile(filepath.Join(projectPath, path))
+		if err != nil {
+			t.Fatalf("missing %s: %v", path, err)
+		}
+		if strings.Contains(string(data), "dwyt-obsidian-mcp") {
+			t.Fatalf("%s: legacy binary name must not appear", path)
+		}
+	}
 }
 
 func TestProjectUpdatesInstructionBlockWithoutOverwritingUserContent(t *testing.T) {
@@ -178,7 +277,7 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 		"Never rely only on grep/glob",
 		"Keep project context under `~/.dwyt`",
 		"Never hardcode machine-specific absolute paths",
-		"`~/.dwyt/projects/<id>/`",
+		"`~/.dwyt/projects/<id>_<project-name>/`",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("%s: expected generated instructions to contain %q:\n%s", path, want, content)

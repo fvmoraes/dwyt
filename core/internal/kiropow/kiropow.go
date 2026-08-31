@@ -116,15 +116,16 @@ func IsKiroEnabled(setupConfig map[string]interface{}) bool {
 }
 
 func ValidateMCPBinaries(dwytBin string) map[string]bool {
-	codebase := "codebase-memory-mcp"
-	obsidian := "dwyt-obsidian-mcp"
-	if runtime.GOOS == "windows" {
-		codebase += ".exe"
-		obsidian += ".exe"
-	}
+	// The Obsidian MCP is now served by the main `dwyt` binary via the
+	// `obsidian-mcp` subcommand, so presence of the main binary is the
+	// canonical signal. A legacy `dwyt-obsidian-mcp` copy (left over from
+	// older installs) is also accepted so the Kiro Power keeps listing it
+	// during the migration window.
+	dwyt := executableName("dwyt")
+	obsidianLegacy := executableName("dwyt-obsidian-mcp")
 	return map[string]bool{
-		"codebase": fileExists(filepath.Join(dwytBin, codebase)),
-		"obsidian": fileExists(filepath.Join(dwytBin, obsidian)),
+		"codebase": fileExists(filepath.Join(dwytBin, executableName("codebase-memory-mcp"))),
+		"obsidian": fileExists(filepath.Join(dwytBin, dwyt)) || fileExists(filepath.Join(dwytBin, obsidianLegacy)),
 	}
 }
 
@@ -205,8 +206,8 @@ func GenerateMCPJSON(dwytBin string, mcps map[string]bool) (string, error) {
 	}
 	if mcps["obsidian"] {
 		servers["obsidian"] = map[string]interface{}{
-			"command": filepath.Join(dwytBin, executableName("dwyt-obsidian-mcp")),
-			"args":    []string{},
+			"command": filepath.Join(dwytBin, executableName("dwyt")),
+			"args":    []string{"obsidian-mcp"},
 			"env":     map[string]string{"DWYT_API_URL": "http://localhost:2737/api"},
 		}
 	}
@@ -263,8 +264,22 @@ func NeedsUpdate(powerDir, dwytBin string) bool {
 		return true
 	}
 	text := string(data)
+	// The canonical Obsidian MCP command is `dwyt obsidian-mcp` (one shared
+	// binary, two subcommand args). An older `dwyt-obsidian-mcp` reference is
+	// still accepted while a migration is in flight, so we update when both
+	// are missing.
 	return (mcps["codebase"] && !strings.Contains(text, executableName("codebase-memory-mcp"))) ||
-		(mcps["obsidian"] && !strings.Contains(text, executableName("dwyt-obsidian-mcp")))
+		(mcps["obsidian"] && !containsObsidianMCPCommand(text))
+}
+
+// containsObsidianMCPCommand reports whether the generated Kiro Power
+// mcp.json still uses the canonical (`dwyt` + `obsidian-mcp` subcommand) or
+// the legacy `dwyt-obsidian-mcp` filename to launch the Obsidian MCP.
+func containsObsidianMCPCommand(text string) bool {
+	if strings.Contains(text, "\"obsidian-mcp\"") && strings.Contains(text, executableName("dwyt")) {
+		return true
+	}
+	return strings.Contains(text, executableName("dwyt-obsidian-mcp"))
 }
 
 func writeIfChanged(path, content string) (bool, error) {
@@ -346,7 +361,7 @@ inclusion: always
 # Obsidian - Project Memory
 
 Project path: %s
-Vault root: ~/.dwyt/projects/<id>/
+Vault root: ~/.dwyt/projects/<id>_<project-name>/  (e.g. 1597b5fc9bfb_dwyt)
 
 ## API
 - Search: GET http://localhost:2737/api/obsidian/search?q=<query>
