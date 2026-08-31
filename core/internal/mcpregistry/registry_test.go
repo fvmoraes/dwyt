@@ -219,6 +219,11 @@ func TestSyncKiroPreservesExistingServers(t *testing.T) {
 
 func touchExecutable(t *testing.T, path string) {
 	t.Helper()
+	// Production resolves binaries with the platform suffix (dwyt.exe on
+	// Windows); a bare name would make fileExists/IsBinaryInstalled miss it.
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
+		path += ".exe"
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}

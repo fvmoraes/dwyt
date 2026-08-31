@@ -3,6 +3,7 @@ package kiropow
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +130,10 @@ func TestEnsurePower_VaultProtection(t *testing.T) {
 
 func TestRegisterWithKiro_CreatesSymlink(t *testing.T) {
 	home := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows (HOME is ignored there),
+	// so set both to route kiroLinkPath into the temp dir.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	powerDir := filepath.Join(t.TempDir(), "dwyt-power")
 	if err := os.MkdirAll(powerDir, 0755); err != nil {
 		t.Fatal(err)
@@ -149,6 +153,7 @@ func TestRegisterWithKiro_CreatesSymlink(t *testing.T) {
 func TestRegisterWithKiro_Idempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	powerDir := filepath.Join(t.TempDir(), "dwyt-power")
 	if err := os.MkdirAll(powerDir, 0755); err != nil {
 		t.Fatal(err)
@@ -209,8 +214,11 @@ func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(data, `"command": "/tmp/bin/dwyt"`) {
-		t.Fatalf("expected canonical command, got: %s", data)
+	// Compare with the platform-correct joined path — on Windows
+	// filepath.Join produces backslashes and the .exe suffix.
+	wantCmd := filepath.Join(dwytBin, executableName("dwyt"))
+	if !strings.Contains(data, `"command": `+strconv.Quote(wantCmd)) {
+		t.Fatalf("expected canonical command %s, got: %s", wantCmd, data)
 	}
 	if !strings.Contains(data, `"obsidian-mcp"`) {
 		t.Fatalf("expected obsidian-mcp subcommand arg, got: %s", data)

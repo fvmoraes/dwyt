@@ -16,6 +16,15 @@ func TestRTKTargetTriple(t *testing.T) {
 		if !strings.Contains(target, "linux") && !strings.Contains(target, "apple-darwin") {
 			t.Fatalf("unexpected target triple %q", target)
 		}
+	case "windows":
+		// rtk now publishes an official Windows build
+		// (rtk-x86_64-pc-windows-msvc.zip) — see rtk.go.
+		if err != nil {
+			t.Fatalf("expected a target triple on windows, got error: %v", err)
+		}
+		if !strings.Contains(target, "windows") {
+			t.Fatalf("unexpected windows target triple %q", target)
+		}
 	default:
 		if err == nil {
 			t.Fatalf("expected unsupported-platform error on %s, got %q", runtime.GOOS, target)

@@ -54,7 +54,8 @@ func TestObsidianMCPSelfHealsFromRunningBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected canonical dwyt binary after self-heal: %v", err)
 	}
-	if info.Mode()&0111 == 0 {
+	// Windows has no executable bit — os.Chmod there only toggles read-only.
+	if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
 		t.Fatalf("expected executable mode, got %s", info.Mode())
 	}
 }
