@@ -12,10 +12,12 @@ import (
 
 // longRunningCmd returns a process that stays alive for ~10 seconds on any
 // platform. /bin/sleep does not exist on Windows; one ping per second is
-// the portable stand-in.
+// the portable stand-in. On Windows the FULL cmd.exe path is required:
+// procman.Start stats the binary literally, and os.Stat("cmd") does not
+// resolve extensions the way CreateProcess would.
 func longRunningCmd() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c", "ping -n 11 127.0.0.1"}
+		return windowsCmd(), []string{"/c", "ping -n 11 127.0.0.1"}
 	}
 	return "/bin/sleep", []string{"10"}
 }
@@ -23,7 +25,7 @@ func longRunningCmd() (string, []string) {
 // echoCmd returns a short-lived process that writes to stdout.
 func echoCmd() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c", "echo hello world"}
+		return windowsCmd(), []string{"/c", "echo hello world"}
 	}
 	return "/bin/sh", []string{"-c", "echo hello world"}
 }
@@ -31,9 +33,18 @@ func echoCmd() (string, []string) {
 // failingCmd returns a process that exits immediately with a non-zero code.
 func failingCmd() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c", "exit 1"}
+		return windowsCmd(), []string{"/c", "exit 1"}
 	}
 	return "/bin/false", nil
+}
+
+// windowsCmd returns the absolute path to cmd.exe (ComSpec is always set
+// on Windows) so a literal os.Stat succeeds.
+func windowsCmd() string {
+	if cs := os.Getenv("ComSpec"); cs != "" {
+		return cs
+	}
+	return `C:\Windows\System32\cmd.exe`
 }
 
 func TestProcessManager_StartStop(t *testing.T) {

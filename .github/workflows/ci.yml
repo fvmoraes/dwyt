@@ -34,7 +34,30 @@ jobs:
 
       - name: Test
         working-directory: core
-        run: go test ./...
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./... 2>&1 | tee /tmp/go-test-output.txt
+
+      - name: Report failing tests
+        if: failure()
+        shell: bash
+        run: |
+          # Emit failing test names as workflow annotations (readable via the
+          # public check-runs annotations API) and the output tail as a step
+          # summary, so Windows failures are diagnosable without log access.
+          grep -E "^--- FAIL" /tmp/go-test-output.txt | head -10 | while IFS= read -r line; do
+            echo "::error::${line//::/\\::}"
+          done
+          grep -E "^    [A-Za-z_]+\.go:[0-9]+:" /tmp/go-test-output.txt | head -20 | while IFS= read -r line; do
+            echo "::error::${line//::/\\::}"
+          done
+          {
+            echo "### Go test output (tail)"
+            echo '```'
+            tail -n 150 /tmp/go-test-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Vet
         working-directory: core
