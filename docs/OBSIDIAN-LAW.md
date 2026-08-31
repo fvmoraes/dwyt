@@ -23,6 +23,35 @@ Obsidian is memory, not code structure. For code symbols, dependencies, call pat
 
 Never finish a relevant task without saving context to Obsidian. If the MCP or API is unavailable, do not block the task or recreate vaults; report the failure and retry saving context when the service is available.
 
+## MCP Wiring
+
+The Obsidian MCP is embedded in the main `dwyt` binary and is launched by
+AI clients as `dwyt obsidian-mcp` (stdio). It talks to the dashboard at
+`http://localhost:2737/api` via the `DWYT_API_URL` env var. No renamed
+copy of the binary is required anymore — Windows installs that previously
+failed because the installer could not write `%APPDATA%\dwyt\bin\dwyt-obsidian-mcp.exe`
+now work out of the box. Older registries pointing at the legacy
+`dwyt-obsidian-mcp` file are auto-rewritten on the next configure cycle.
+
+## Vault Identity
+
+Every DWYT-managed vault lives at `~/.dwyt/projects/<hash>_<project_name>/`
+(for example `1597b5fc9bfb_dwyt`). The 12-character hash is the only internal
+identifier — the project-name suffix exists purely so humans (and the
+Obsidian vault picker) can tell vaults apart. Inside each vault, DWYT keeps
+a metadata file at `.dwyt/vault.json` recording `version`, `project_hash`,
+`project_name`, and `directory_name`; it is the durable source of truth for
+"who owns this vault" and is what makes legacy-directory renames safe.
+
+Legacy vaults named only with the hash are migrated automatically at startup
+when DWYT can resolve the project name reliably (DB registry, then the
+vault's own metadata). Vaults with no trustworthy association are never
+renamed — they stay functional under the old name and are surfaced in the
+dashboard's "Vault migration" card for the user to resolve manually. Notes,
+plugins, `.obsidian/` settings, and history are always preserved across a
+rename; a backup of Obsidian's `obsidian.json` is written before any
+registry update.
+
 ## Vault Quality Standard
 
 Vault files should be useful inside Obsidian itself:

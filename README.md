@@ -113,10 +113,11 @@ The Codebase card shows a local `Tokens Saved` estimate when an index exists, an
 
 ### Obsidian — mandatory memory
 
-Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>/obsidian/` with structured markdown files:
+Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>_<project-name>/` (e.g. `1597b5fc9bfb_dwyt`) with structured markdown files:
 
 ```txt
-obsidian/
+<id>_<project-name>/
+├── .dwyt/vault.json      # DWYT vault metadata (hash, name)
 ├── index.md
 ├── context.md
 ├── instructions/

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -51,7 +52,6 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 	binDir := filepath.Join(dwytHome, "bin")
 	touchExecutable(t, filepath.Join(binDir, "dwyt"))
 	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
-	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
 
 	reg, err := Load()
 	if err != nil {
@@ -106,8 +106,8 @@ func TestConfigureMCPRespectsClientSelection(t *testing.T) {
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
 	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
-	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
 
 	reg, err := Load()
 	if err != nil {
@@ -154,8 +154,8 @@ func TestConfigureMCPEmptySelectionWritesNothing(t *testing.T) {
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
 	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
-	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
 
 	reg, err := Load()
 	if err != nil {
@@ -182,8 +182,8 @@ func TestSyncKiroPreservesExistingServers(t *testing.T) {
 	t.Setenv("DWYT_HOME", dwytHome)
 
 	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
 	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
-	touchExecutable(t, filepath.Join(binDir, "dwyt-obsidian-mcp"))
 
 	projectPath := t.TempDir()
 	kiroPath := filepath.Join(projectPath, ".kiro", "settings", "mcp.json")
@@ -361,5 +361,136 @@ func TestLoadHealsLegacyRawCodebaseCommand(t *testing.T) {
 	}
 	if entry.Enabled {
 		t.Fatal("healing must preserve the user's disabled flag")
+	}
+}
+
+func TestLoadCanonicalObsidianCommand(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := reg.MCPServers["obsidian"]
+	if !ok {
+		t.Fatal("expected canonical obsidian entry")
+	}
+	if filepath.Base(entry.Command) != "dwyt" && filepath.Base(entry.Command) != "dwyt.exe" {
+		t.Fatalf("expected command to be the main dwyt binary, got %q", entry.Command)
+	}
+	if len(entry.Args) != 1 || entry.Args[0] != "obsidian-mcp" {
+		t.Fatalf("expected args [obsidian-mcp], got %#v", entry.Args)
+	}
+	if !reg.MigrationPerformed() {
+		t.Fatal("first Load from a clean slate should still be flagged migrated because it seeded the canonical entry")
+	}
+}
+
+func TestLoadHealsLegacyObsidianCommand(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Older registry that still pointed at the renamed legacy binary.
+	legacyName := "dwyt-obsidian-mcp"
+	if runtime.GOOS == "windows" {
+		legacyName += ".exe"
+	}
+	legacy := Registry{MCPServers: map[string]MCPServerEntry{
+		"obsidian": {
+			Command: filepath.Join(dwytHome, "bin", legacyName),
+			Enabled: true,
+		},
+	}}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := reg.MCPServers["obsidian"]
+	if filepath.Base(entry.Command) != "dwyt" && filepath.Base(entry.Command) != "dwyt.exe" {
+		t.Fatalf("expected command to be healed to dwyt, got %q", entry.Command)
+	}
+	if len(entry.Args) != 1 || entry.Args[0] != "obsidian-mcp" {
+		t.Fatalf("expected args [obsidian-mcp], got %#v", entry.Args)
+	}
+	if !reg.MigrationPerformed() {
+		t.Fatal("Load must report migration performed when healing a legacy obsidian command")
+	}
+}
+
+func TestLoadRemovesLegacyObsidianKey(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Registry{MCPServers: map[string]MCPServerEntry{
+		"obsidian-mcp":  {Command: "/tmp/legacy", Enabled: true},
+		"dwyt-obsidian": {Command: "/tmp/legacy", Enabled: true},
+	}}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"obsidian-mcp", "dwyt-obsidian"} {
+		if _, ok := reg.MCPServers[key]; ok {
+			t.Fatalf("legacy key %q should be gone", key)
+		}
+	}
+	if _, ok := reg.MCPServers["obsidian"]; !ok {
+		t.Fatal("canonical obsidian key should exist")
+	}
+}
+
+func TestObsidianInstalledViaDwytBinary(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reg.IsBinaryInstalled("obsidian") {
+		t.Fatal("obsidian must be reported installed when the main dwyt binary exists")
+	}
+}
+
+func TestObsidianInstalledViaLegacyCopy(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	// No main dwyt binary, only the legacy copy. The migration window
+	// must still recognize the legacy file so older installs do not flip
+	// back to "not installed" between Load and the rewrite.
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt-obsidian-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After Load the entry is rewritten to the canonical form, but the
+	// canonical command (dwyt) does not exist on disk — so installed must
+	// still report true thanks to the legacy fallback.
+	if !reg.IsBinaryInstalled("obsidian") {
+		t.Fatal("obsidian must be reported installed when the legacy copy exists")
 	}
 }

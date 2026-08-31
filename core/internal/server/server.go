@@ -91,16 +91,26 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	codebaseBin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
+	// The Obsidian MCP runs over stdio and is spawned on demand by each AI
+	// client from the command written into its config. It is intentionally
+	// not registered with ProcessManager: there is no HTTP port to healthcheck,
+	// no persistent process to supervise, and no benefit to a daemon launch —
+	// the AI client is the lifecycle owner. The validator here only ensures
+	// the main `dwyt` binary is present; it never copies a renamed copy.
 	if err := install.ObsidianMCP(dwytBin); err != nil {
-		log.Warn("obsidian MCP self-install failed", log.Fields{"error": err.Error()})
+		log.Warn("obsidian MCP validation failed", log.Fields{"error": err.Error()})
 	}
-	obsidianMCPBin := platform.DWYTLauncherPath(dwytBin, "dwyt-obsidian-mcp")
-	procmanInstance.Register("obsidian", obsidianMCPBin, "", 0)
 
 	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
 
 	security.Load(dwytHome)
 	security.InitObsidianConfig(dwytHome)
+
+	// Adopt the canonical "<hash>_<name>" layout for any pre-existing
+	// "<hash>" vault directories. This runs once at startup and is fully
+	// idempotent — already-canonical directories are no-ops, and
+	// unidentifiable directories are left alone for the user to resolve.
+	runVaultMigration(dwytHome, store)
 
 	headroomPort := 8787
 	if hp := os.Getenv("DWYT_HEADROOM_PORT"); hp != "" {
@@ -146,6 +156,49 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 
 	return ds
+}
+
+// runVaultMigration adopts the canonical "<hash>_<name>" vault layout for
+// every directory in ~/.dwyt/projects/ that is still in the legacy
+// "<hash>" form. It is fully idempotent and never deletes content; a
+// directory whose project name cannot be determined is left untouched and
+// logged so the dashboard can surface it for manual resolution.
+func runVaultMigration(dwytHome string, store *db.Store) {
+	opts := brain.MigrationOptions{
+		ProjectPathResolver: func(hash string) (string, string, bool) {
+			if store == nil {
+				return "", "", false
+			}
+			p, err := store.GetProject(hash)
+			if err != nil || p == nil {
+				return "", "", false
+			}
+			return p.Path, p.Name, true
+		},
+	}
+	report, err := brain.MigrateVaultsToNamedLayout(dwytHome, opts)
+	if err != nil {
+		log.Warn("vault migration: scan failed", log.Fields{"error": err.Error()})
+		return
+	}
+	if report.Migrated > 0 || report.Unidentifiable > 0 {
+		log.Info("vault migration: completed",
+			log.Fields{
+				"migrated":        report.Migrated,
+				"already_canonical": report.AlreadyCanonical,
+				"unidentifiable":  report.Unidentifiable,
+			})
+	}
+	for _, r := range report.Results {
+		switch r.Status {
+		case brain.Migrated:
+			log.Info("vault migration: renamed",
+				log.Fields{"from": r.LegacyName, "to": r.CanonicalName, "source": r.Source})
+		case brain.Unidentifiable, brain.SkippedReserved:
+			log.Warn("vault migration: needs manual resolution",
+				log.Fields{"name": r.LegacyName, "status": string(r.Status), "reason": r.Reason})
+		}
+	}
 }
 
 func (ds *DashboardServer) Start() error {

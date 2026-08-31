@@ -67,6 +67,8 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.POST("/project/remove", ds.apiProjectRemove)
 		api.GET("/projects", ds.apiProjectsList)
 		api.GET("/projects/current", ds.apiProjectsCurrent)
+		api.GET("/vault/migration-report", ds.apiVaultMigrationReport)
+		api.POST("/vault/migrate", ds.apiVaultMigrate)
 		api.GET("/obsidian/status", ds.apiObsidianStatus)
 		api.GET("/obsidian/search", ds.apiObsidianSearch)
 		api.POST("/obsidian/save", ds.apiObsidianSave)

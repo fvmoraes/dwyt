@@ -7,7 +7,7 @@ DWYT (Don't Waste Your Tokens) is a self-contained, single-binary orchestrator t
 ```
 User runs: dwyt .
   → Detects project directory
-  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>/)
+  → Creates/loads Obsidian vault (~/.dwyt/projects/<id>_<name>/)
   → Starts Headroom proxy in background (port 8787)
   → Codebase sits idle (on-demand indexing)
   → RTK is active as CLI tool
@@ -295,7 +295,15 @@ The MCP registry manages MCP server configurations for AI clients (Claude Deskto
 | Server | Binary | Endpoint |
 |--------|--------|----------|
 | `codebase` | `codebase-memory-mcp` | HTTP on port 9749 |
-| `obsidian` | `dwyt-obsidian-mcp` | stdio (launched by AI agents) |
+| `obsidian` | `dwyt` (subcommand `obsidian-mcp`) | stdio (launched by AI agents) |
+
+The Obsidian MCP is embedded in the main `dwyt` binary and is invoked as
+`dwyt obsidian-mcp`. Earlier versions created a sibling `dwyt-obsidian-mcp`
+copy of the binary, which the installer sometimes failed to write on
+Windows (file in use, locked by AV, partial permissions). The canonical
+command no longer requires that copy — only the real `dwyt` binary needs to
+be present, and any leftover `dwyt-obsidian-mcp` file is removed on the
+next configure.
 
 ### Registry Operations
 

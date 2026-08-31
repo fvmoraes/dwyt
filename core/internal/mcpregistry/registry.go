@@ -26,6 +26,17 @@ type MCPServerEntry struct {
 type Registry struct {
 	MCPServers map[string]MCPServerEntry `json:"mcpServers"`
 	path       string
+	// migrated is set by Load when the registry rewrites legacy entries to
+	// their canonical form (legacy keys removed, legacy command rewritten).
+	// Handlers expose it so the UI can tell whether a reconfigure was a no-op
+	// or actually healed an old install.
+	migrated bool
+}
+
+// MigrationPerformed reports whether the most recent Load rewrote any
+// legacy entries to their canonical form.
+func (r *Registry) MigrationPerformed() bool {
+	return r.migrated
 }
 
 func dwytHome() string {
@@ -72,6 +83,7 @@ func Load() (*Registry, error) {
 		MCPServers: make(map[string]MCPServerEntry),
 		path:       path,
 	}
+	r.migrated = false
 
 	if data, err := os.ReadFile(path); err == nil {
 		json.Unmarshal(data, r)
@@ -101,13 +113,17 @@ func Load() (*Registry, error) {
 
 	// Codebase runs through the DWYT stdio shim so its tool calls are countable
 	// by the dashboard regardless of the IDE/harness; Obsidian is DWYT's own MCP
-	// server (already dashboard-aware) and runs directly.
+	// server (already dashboard-aware) and is invoked via the main `dwyt`
+	// binary with the `obsidian-mcp` subcommand. This means a Windows install
+	// no longer needs to copy/rename `dwyt.exe` to `dwyt-obsidian-mcp.exe` —
+	// the canonical command always resolves to the real, installed DWYT.
 	//
-	// Safety net: the shim only routes when the dwyt binary actually exists in
-	// the bin dir. If it does not (an unusual partial install), codebase falls
-	// back to running the real binary directly — no counting, but it still
-	// works. This is self-correcting: once the shim appears, the next Load heals
-	// the entry to the proxied form (and vice-versa).
+	// Safety net for codebase: the shim only routes when the dwyt binary
+	// actually exists in the bin dir. If it does not (an unusual partial
+	// install), codebase falls back to running the real binary directly — no
+	// counting, but it still works. This is self-correcting: once the shim
+	// appears, the next Load heals the entry to the proxied form (and
+	// vice-versa).
 	codebaseEntry := MCPServerEntry{
 		Command:   codebaseTarget,
 		Port:      9749,
@@ -127,7 +143,8 @@ func Load() (*Registry, error) {
 	canonical := map[string]MCPServerEntry{
 		"codebase": codebaseEntry,
 		"obsidian": {
-			Command: filepath.Join(binDir, exeName("dwyt-obsidian-mcp")),
+			Command: dwytShim,
+			Args:    []string{"obsidian-mcp"},
 			Enabled: true,
 		},
 	}
@@ -139,9 +156,16 @@ func Load() (*Registry, error) {
 			migrated = true
 			continue
 		}
-		// Heal stale wiring written by older builds (e.g. codebase stored as the
-		// raw binary with no shim, or a wrong home/extension). Only the command
-		// wiring is corrected; the user-tunable Enabled flag is preserved.
+		// Heal stale wiring written by older builds (e.g. codebase stored as
+		// the raw binary with no shim, or — for obsidian — an entry pointing
+		// at the legacy `dwyt-obsidian-mcp` copy that newer installs no longer
+		// create). Only the command wiring is corrected; the user-tunable
+		// Enabled flag is preserved.
+		existing = migrateObsidianCommand(existing)
+		// Always write the migrated entry back: the migration runs against a
+		// local copy of the struct, so even when the result already matches
+		// the canonical form we still need to persist it (e.g. the
+		// `obsidian-mcp` subcommand args were rewritten by the migrator).
 		if existing.Command != want.Command ||
 			existing.Target != want.Target ||
 			!equalArgs(existing.Args, want.Args) {
@@ -149,16 +173,36 @@ func Load() (*Registry, error) {
 			healed.Enabled = existing.Enabled
 			r.MCPServers[name] = healed
 			migrated = true
+		} else if existing.Command != r.MCPServers[name].Command ||
+			!equalArgs(existing.Args, r.MCPServers[name].Args) {
+			r.MCPServers[name] = existing
+			migrated = true
 		}
 	}
 
 	if migrated {
+		r.migrated = true
 		if err := r.Save(); err != nil {
 			log.Warn("mcp registry migration save failed", log.Fields{"error": err.Error()})
 		}
 	}
 
 	return r, nil
+}
+
+// migrateObsidianCommand rewrites a legacy `dwyt-obsidian-mcp`/`dwyt-obsidian`
+// command to the canonical `dwyt obsidian-mcp` form. It is a no-op when the
+// entry already uses the canonical command or has no command at all.
+func migrateObsidianCommand(entry MCPServerEntry) MCPServerEntry {
+	base := strings.ToLower(filepath.Base(entry.Command))
+	if base != "dwyt-obsidian-mcp" && base != "dwyt-obsidian" && base != "obsidian-mcp" {
+		return entry
+	}
+	binDir := filepath.Join(dwytHome(), "bin")
+	entry.Command = filepath.Join(binDir, exeName("dwyt"))
+	entry.Args = []string{"obsidian-mcp"}
+	entry.Target = ""
+	return entry
 }
 
 func (r *Registry) Save() error {
@@ -198,6 +242,20 @@ func (r *Registry) IsBinaryInstalled(name string) bool {
 	// legacy registry still resolves the real binary on disk.
 	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
 		if _, err := os.Stat(path + ".exe"); err == nil {
+			return true
+		}
+	}
+	// The Obsidian MCP runs through the main `dwyt` binary via the
+	// `obsidian-mcp` subcommand, so the canonical entry always reports as
+	// installed as long as the main `dwyt` binary is present in the bin dir.
+	// A legacy `dwyt-obsidian-mcp` copy (from older installs) also satisfies
+	// the check so the registry does not flip back to "not installed" while a
+	// migration is still in flight.
+	if isObsidianEntry(name, entry) {
+		if fileExists(filepath.Join(dwytHome(), "bin", exeName("dwyt"))) {
+			return true
+		}
+		if fileExists(filepath.Join(dwytHome(), "bin", exeName("dwyt-obsidian-mcp"))) {
 			return true
 		}
 	}
@@ -442,7 +500,23 @@ func isCodebaseEntry(name string, entry MCPServerEntry) bool {
 }
 
 func isObsidianEntry(name string, entry MCPServerEntry) bool {
-	return name == "obsidian" || strings.Contains(filepath.Base(entry.Command), "dwyt-obsidian-mcp")
+	if name == "obsidian" {
+		return true
+	}
+	// Logical name fallback for legacy keys being migrated.
+	if name == "dwyt-obsidian" || name == "obsidian-mcp" {
+		return true
+	}
+	// The canonical command runs `dwyt obsidian-mcp` — match by args.
+	for _, a := range entry.Args {
+		if a == "obsidian-mcp" {
+			return true
+		}
+	}
+	// Tolerate a registry that still points at the legacy `dwyt-obsidian-mcp`
+	// copy while a migration is pending.
+	base := strings.ToLower(filepath.Base(entry.Command))
+	return strings.Contains(base, "dwyt-obsidian-mcp") || base == "dwyt-obsidian"
 }
 
 func writeJSONFile(path string, value interface{}) error {

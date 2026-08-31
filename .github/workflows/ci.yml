@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'fix/**', 'feat/**' ]
+    paths:
+      - "core/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "core/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go + frontend tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Test
+        working-directory: core
+        run: go test ./...
+
+      - name: Vet
+        working-directory: core
+        run: go vet ./...
+
+      - name: Build
+        working-directory: core
+        run: go build ./...
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: core/web/package-lock.json
+
+      - name: Lint frontend
+        working-directory: core/web
+        run: npm ci && npm run lint
+
+      - name: Build frontend
+        working-directory: core/web
+        run: npm run build

@@ -198,8 +198,28 @@ func TestGenerateMCPJSON_OnlyExistingBinaries(t *testing.T) {
 	if !strings.Contains(data, "codebase-memory-mcp") {
 		t.Fatal("expected codebase MCP")
 	}
-	if strings.Contains(data, "dwyt-obsidian-mcp") {
+	if strings.Contains(data, "\"obsidian-mcp\"") {
 		t.Fatal("did not expect obsidian MCP")
+	}
+}
+
+func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
+	dwytBin := "/tmp/bin"
+	data, err := GenerateMCPJSON(dwytBin, map[string]bool{"codebase": true, "obsidian": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(data, `"command": "/tmp/bin/dwyt"`) {
+		t.Fatalf("expected canonical command, got: %s", data)
+	}
+	if !strings.Contains(data, `"obsidian-mcp"`) {
+		t.Fatalf("expected obsidian-mcp subcommand arg, got: %s", data)
+	}
+	if !strings.Contains(data, `"DWYT_API_URL"`) {
+		t.Fatalf("expected DWYT_API_URL env, got: %s", data)
+	}
+	if strings.Contains(data, "dwyt-obsidian-mcp") {
+		t.Fatalf("legacy binary name must not appear: %s", data)
 	}
 }
 
@@ -233,7 +253,7 @@ func tempPowerEnv(t *testing.T) (string, string) {
 	dwytBin := filepath.Join(t.TempDir(), "bin")
 	t.Setenv("HOME", t.TempDir())
 	touchBin(t, dwytBin, executableName("codebase-memory-mcp"))
-	touchBin(t, dwytBin, executableName("dwyt-obsidian-mcp"))
+	touchBin(t, dwytBin, executableName("dwyt"))
 	return dwytHome, dwytBin
 }
 

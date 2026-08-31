@@ -63,6 +63,25 @@ RTK does not ship a Windows binary upstream. Options:
 - Place a `rtk.exe` at `%APPDATA%\rtk\rtk.exe` (or `%LOCALAPPDATA%\rtk\rtk.exe`)
   and run `dwyt install --tools=rtk`; DWYT will pick it up.
 
+## Obsidian MCP missing in the dashboard
+
+Open `dwyt status` and look for `obsidian` in the tool list. The canonical
+Obsidian MCP command is `dwyt.exe obsidian-mcp` — only the main binary
+needs to be present in `%APPDATA%\dwyt\bin`. A leftover
+`%APPDATA%\dwyt\bin\dwyt-obsidian-mcp.exe` from older versions is removed
+automatically the next time you click **Reconfigure MCP** on the dashboard.
+If the dashboard still reports the MCP as offline:
+
+```powershell
+dwyt stop
+Remove-Item "$env:APPDATA\dwyt\bin\dwyt-obsidian-mcp.exe" -ErrorAction SilentlyContinue
+dwyt .
+```
+
+Then click **Reconfigure MCP** on the Obsidian card. The button now shows
+the underlying error if the operation still fails (e.g. no AI client
+selected in setup).
+
 ## Stop everything
 
 ```powershell
