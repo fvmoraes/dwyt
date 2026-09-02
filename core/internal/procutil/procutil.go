@@ -69,12 +69,26 @@ func ListPIDs(dwytHome string) map[string]int {
 // PID files. Returns the names that were signalled.
 func StopAllTracked(dwytHome string) []string {
 	var stopped []string
-	for name, pid := range ListPIDs(dwytHome) {
+	pids := ListPIDs(dwytHome)
+	stop := func(name string, pid int) {
 		if Alive(pid) {
-			_ = Terminate(pid)
+			_ = TerminateTree(pid)
 		}
 		RemovePID(dwytHome, name)
 		stopped = append(stopped, name)
+	}
+
+	// Stop individually tracked services first. The daemon is a session/group
+	// leader on Unix (and a taskkill tree root on Windows), so stopping it last
+	// prevents an already-killed child PID from being acted on again and also
+	// catches any untracked descendants left by an older release.
+	for name, pid := range pids {
+		if name != "daemon" {
+			stop(name, pid)
+		}
+	}
+	if pid, ok := pids["daemon"]; ok {
+		stop("daemon", pid)
 	}
 	return stopped
 }

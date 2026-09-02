@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/install"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
 
@@ -113,6 +115,14 @@ func (ds *DashboardServer) apiObsidianOpen(c *gin.Context) {
 	pb := ds.projectObsidian()
 	if pb == nil {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
+		return
+	}
+	if toolsource.IsExternal(ds.configuredToolSources()[toolsource.ToolObsidian]) {
+		if err := exec.Command(ds.toolPath(toolsource.ToolObsidian), pb.GetBrainDir()).Start(); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "opened"})
 		return
 	}
 	if err := pb.OpenInObsidian(); err != nil {

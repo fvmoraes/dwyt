@@ -14,7 +14,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
-	"github.com/fvmoraes/dwyt/internal/platform"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,9 +24,12 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	config.Tools = ensureRequiredTools(migrateToolList(config.Tools))
-	config.Ias = migrateToolList(config.Ias)
-	headroomSkipped := contains(config.Tools, "headroom") && !shouldInstallHeadroom(config)
+	normalizeSetupConfig(&config)
+	if err := resolveExternalToolSources(&config); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	headroomSkipped := contains(config.Tools, "headroom") && !toolIsExternal(config, toolsource.ToolHeadroom) && !shouldInstallHeadroom(config)
 
 	ds.installMu.Lock()
 	if ds.installing {
@@ -37,7 +40,9 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 	ds.installing = true
 	ds.installStatus = make(map[string]string)
 	for _, t := range config.Tools {
-		if t == "headroom" && headroomSkipped {
+		if t != "obsidian" && toolIsExternal(config, t) {
+			ds.installStatus[t] = "external: " + toolSourceFor(config, t).Path
+		} else if t == "headroom" && headroomSkipped {
 			ds.installStatus[t] = "skipped: Codex ChatGPT login"
 		} else {
 			ds.installStatus[t] = "pending"
@@ -45,7 +50,11 @@ func (ds *DashboardServer) apiSetupInstall(c *gin.Context) {
 	}
 	if contains(config.Tools, "obsidian") {
 		ds.installStatus["obsidian-mcp"] = "pending"
-		ds.installStatus["obsidian-app"] = "pending"
+		if toolIsExternal(config, toolsource.ToolObsidian) {
+			ds.installStatus["obsidian-app"] = "external: " + toolSourceFor(config, toolsource.ToolObsidian).Path
+		} else {
+			ds.installStatus["obsidian-app"] = "pending"
+		}
 	}
 	ds.installMu.Unlock()
 
@@ -68,6 +77,7 @@ func (ds *DashboardServer) apiInstallStatus(c *gin.Context) {
 // sem o log persistente, fechar o wizard ou reiniciar o daemon perdia a
 // causa de uma falha (foi como o bug do headroom passou despercebido).
 func (ds *DashboardServer) runInstall(config Config, headroomSkipped bool) {
+	normalizeSetupConfig(&config)
 	defer func() {
 		ds.installMu.Lock()
 		ds.installing = false
@@ -85,8 +95,20 @@ func (ds *DashboardServer) runInstall(config Config, headroomSkipped bool) {
 			log.Info("install step skipped", log.Fields{"tool": tool, "status": s})
 		}
 	}
-
+	// apiSetupInstall resolves sources before launching this goroutine. Keep the
+	// state in sync here as well because tests and future callers may invoke
+	// runInstall directly.
+	if err := resolveExternalToolSources(&config); err != nil {
+		setStatus("setup", "error: "+err.Error())
+		return
+	}
+	previousSources := ds.configuredToolSources()
 	ds.installTools(config, headroomSkipped, setStatus)
+	if err := ds.applyToolSourceProcesses(previousSources, config); err != nil {
+		setStatus("services", "error: "+err.Error())
+		return
+	}
+	ds.syncSetupClients(config)
 	if config.ProjectPath != "" {
 		ds.integrateProject(config, setStatus)
 	}
@@ -101,6 +123,14 @@ func (ds *DashboardServer) runInstall(config Config, headroomSkipped bool) {
 
 func (ds *DashboardServer) installTools(config Config, headroomSkipped bool, setStatus func(string, string)) {
 	for _, t := range config.Tools {
+		if t == toolsource.ToolObsidian && toolIsExternal(config, t) {
+			ds.installExternalObsidianBundle(toolSourceFor(config, t).Path, setStatus)
+			continue
+		}
+		if toolIsExternal(config, t) {
+			setStatus(t, "external: "+toolSourceFor(config, t).Path)
+			continue
+		}
 		if t == "headroom" && headroomSkipped {
 			setStatus(t, "skipped: Codex ChatGPT login")
 			continue
@@ -125,6 +155,21 @@ func (ds *DashboardServer) installTools(config Config, headroomSkipped bool, set
 			setStatus(t, "ok")
 		}
 	}
+}
+
+// installExternalObsidianBundle retains DWYT's embedded stdio MCP (needed by
+// the generated client configs) while explicitly leaving the selected desktop
+// application untouched. In particular, InstallObsidianApp is never called in
+// external mode.
+func (ds *DashboardServer) installExternalObsidianBundle(path string, setStatus func(string, string)) {
+	setStatus("obsidian", "external: "+path)
+	setStatus("obsidian-app", "external: "+path)
+	setStatus("obsidian-mcp", "installing")
+	if err := install.ObsidianMCP(ds.DwytBin); err != nil {
+		setStatus("obsidian-mcp", "error: "+err.Error())
+		return
+	}
+	setStatus("obsidian-mcp", "ok: embedded DWYT MCP")
 }
 
 // installObsidianBundle agrupa MCP + app desktop sob a tool "obsidian".
@@ -160,7 +205,9 @@ func (ds *DashboardServer) integrateProject(config Config, setStatus func(string
 	}
 	integrate.Project(config.ProjectPath, clients, ds.DwytBin)
 	if reg, err := mcpregistry.Load(); err == nil {
-		if err := reg.ConfigureMCP(config.ProjectPath, splitClients(clients)); err != nil {
+		if err := ds.configureRegistryToolSources(reg); err != nil {
+			setStatus("mcp-config", "error: "+err.Error())
+		} else if err := reg.ConfigureMCP(config.ProjectPath, splitClients(clients)); err != nil {
 			setStatus("mcp-config", "error: "+err.Error())
 		} else {
 			setStatus("mcp-config", "ok")
@@ -203,7 +250,7 @@ func (ds *DashboardServer) integrateProject(config Config, setStatus func(string
 func (ds *DashboardServer) indexCodebase(config Config, setStatus func(string, string)) {
 	setStatus("index", "installing")
 	argJSON, _ := json.Marshal(map[string]string{"repo_path": config.ProjectPath})
-	indexCmd := exec.Command(platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp"), "cli", "index_repository", string(argJSON))
+	indexCmd := exec.Command(toolPathFor(ds.DwytBin, toolsource.ToolCodebase, config.ToolSources), "cli", "index_repository", string(argJSON))
 	indexCmd.Env = append(os.Environ(), "CBM_CACHE_DIR="+filepath.Join(ds.DwytHome, "codebase"))
 	if err := indexCmd.Run(); err != nil {
 		setStatus("index", "error: "+err.Error())

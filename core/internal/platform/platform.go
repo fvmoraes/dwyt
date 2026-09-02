@@ -93,27 +93,12 @@ func DWYTLauncherName(tool string) string {
 }
 
 // DWYTLauncherPath joins binDir with the platform-correct launcher filename for
-// the given tool. binDir is taken as-is so callers can keep their own bin dir
-// (e.g. a server's configured DwytBin) rather than the process default.
-//
-// headroom is special-cased: unlike codebase-memory-mcp or the obsidian MCP,
-// it's a real CLI users may already have installed system-wide (pipx, cargo,
-// etc). If one is on PATH outside dwyt's own bin dir, prefer it over the
-// bundled venv copy so dwyt doesn't spawn a redundant second instance.
+// the given DWYT-managed tool. binDir is taken as-is so callers can keep their
+// own bin dir (e.g. a server's configured DwytBin) rather than the process
+// default. It deliberately never consults PATH: external/local tool ownership
+// is selected explicitly through the Hub's tool-source configuration.
 func DWYTLauncherPath(binDir, tool string) string {
-	embedded := filepath.Join(binDir, DWYTLauncherName(tool))
-	if tool == "headroom" {
-		if external, ok := LookPath("headroom"); ok {
-			if abs, err := filepath.Abs(external); err == nil {
-				if absBinDir, err := filepath.Abs(binDir); err == nil {
-					if !strings.EqualFold(filepath.Dir(abs), absBinDir) {
-						return abs
-					}
-				}
-			}
-		}
-	}
-	return embedded
+	return filepath.Join(binDir, DWYTLauncherName(tool))
 }
 
 // LookPath finds an executable on PATH (cross-platform via exec.LookPath).

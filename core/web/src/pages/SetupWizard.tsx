@@ -7,6 +7,12 @@ import LangToggle from '../components/LangToggle'
 import { useLang } from '../LangContext'
 import * as api from '../api'
 
+type ToolSource = { mode: 'dwyt' | 'external', path?: string }
+const defaultSources = (): Record<string, ToolSource> => ({
+  cbmcp: { mode: 'dwyt' }, obsidian: { mode: 'dwyt' },
+  headroom: { mode: 'dwyt' }, rtk: { mode: 'dwyt' },
+})
+
 export default function SetupWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -26,6 +32,7 @@ export default function SetupWizard() {
     { id: 'cursor',   label: 'Cursor',         desc: t.cursorDesc   },
     { id: 'opencode', label: 'OpenCode',        desc: t.opencodeDesc },
     { id: 'windsurf', label: 'Windsurf',        desc: t.windsurfDesc },
+    { id: 'continue', label: 'Continue',        desc: t.continueDesc },
   ]
 
   const [tools,       setTools]       = useState<string[]>(['cbmcp', 'rtk', 'headroom', 'obsidian'])
@@ -37,6 +44,8 @@ export default function SetupWizard() {
   const [installProgress, setInstallProgress] = useState<Record<string, string>>({})
   const [expanded,    setExpanded]    = useState<number[]>([0, 1, 2])
   const [ready,       setReady]       = useState(false)
+  const [toolSources, setToolSources] = useState<Record<string, ToolSource>>(defaultSources)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
     const urlProject = searchParams.get('project')
@@ -47,9 +56,10 @@ export default function SetupWizard() {
       const config  = configRes.status === 'fulfilled' ? configRes.value : null
       const cwdData = cwdRes.status    === 'fulfilled' ? cwdRes.value    : null
       if (config?.tools?.length) setTools(config.tools)
+      if (config?.tool_sources) setToolSources({ ...defaultSources(), ...config.tool_sources })
       // AI clients start disabled by default; the user explicitly enables the
       // ones to install. Returning users keep their previously saved selection.
-      setIas(config?.ias || [])
+      setIas(config?.ias?.length ? config.ias : (config?.clients || []))
       setProjectPath(urlProject || config?.project_path || cwdData?.cwd || '')
       setReady(true)
     })
@@ -78,26 +88,28 @@ export default function SetupWizard() {
     if (!projectPath) return
     if (ias.length === 0) { setClientWarning(true); return }
     setSaving(true)
+    setSaveError('')
     const selectedTools = tools.includes('obsidian') ? tools : [...tools, 'obsidian']
     try {
-      await api.saveSetup({ tools: selectedTools, ias, providers: [], project_path: projectPath })
-      await api.installSetup({ tools: selectedTools, ias, providers: [], project_path: projectPath })
+      const config = { tools: selectedTools, ias, providers: [], project_path: projectPath, tool_sources: toolSources }
+      await api.saveSetup(config)
+      await api.installSetup(config)
       setInstalling(true)
-    } catch { navigate('/dashboard') }
+    } catch (err) { setSaveError(err instanceof Error ? err.message : 'Unable to save setup') }
     finally { setSaving(false) }
   }
 
   function installIcon(s: string) {
     if (!s || s === 'pending')  return '⏳'
     if (s === 'installing')     return '🔄'
-    if (s === 'ok')             return '✅'
+    if (s === 'ok' || s.startsWith('external:')) return '✅'
     if (s.startsWith('skipped')) return '—'
     if (s.startsWith('error'))  return '❌'
     return '⏳'
   }
 
   function isDoneStatus(s: string): boolean {
-    return s === 'ok' || s.startsWith('error') || s.startsWith('skipped')
+    return s === 'ok' || s.startsWith('external:') || s.startsWith('error') || s.startsWith('skipped')
   }
 
   // ── Progress calculation ───────────────────────────────────────────────────
@@ -227,12 +239,25 @@ export default function SetupWizard() {
       subtitle: `${tools.length} ${t.of} ${TOOLS.length} ${t.selected}`,
       content: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {TOOLS.map(tool => (
-            <Toggle key={tool.id} label={tool.label} description={tool.desc}
-              checked={tools.includes(tool.id)}
-              disabled={tool.id === 'obsidian'}
-              onChange={() => toggle(tools, tool.id, setTools)} />
-          ))}
+          {TOOLS.map(tool => {
+            const source = toolSources[tool.id] || { mode: 'dwyt' as const }
+            return <div key={tool.id} style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: 5 }}>
+              <Toggle label={tool.label} description={tool.desc}
+                checked={tools.includes(tool.id)} disabled={tool.id === 'obsidian'}
+                onChange={() => toggle(tools, tool.id, setTools)} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 8 }}>
+                <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.toolSource}:</span>
+                {(['dwyt', 'external'] as const).map(mode => <button key={mode} type="button"
+                  onClick={() => setToolSources(prev => ({ ...prev, [tool.id]: { ...prev[tool.id], mode } }))}
+                  style={{ fontSize: 10, padding: '2px 7px', color: source.mode === mode ? 'var(--cyan)' : 'var(--muted)', borderColor: source.mode === mode ? 'var(--cyan)' : undefined }}>
+                  {mode === 'dwyt' ? t.toolSourceManaged : t.toolSourceExternal}
+                </button>)}
+              </div>
+              {source.mode === 'external' && <input value={source.path || ''}
+                onChange={e => setToolSources(prev => ({ ...prev, [tool.id]: { mode: 'external', path: e.target.value } }))}
+                placeholder={t.toolSourcePath} style={{ marginLeft: 8, fontSize: 10 }} />}
+            </div>
+          })}
         </div>
       ),
     },
@@ -282,6 +307,7 @@ export default function SetupWizard() {
           {t.selectAtLeastOneClient}
         </div>
       )}
+      {saveError && <div role="alert" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, fontSize: 11, color: 'var(--danger)', border: '1px solid var(--danger)' }}>{saveError}</div>}
 
       {/* Accordion */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>

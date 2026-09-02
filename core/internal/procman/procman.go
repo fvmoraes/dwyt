@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,19 +46,25 @@ type ManagedProcess struct {
 }
 
 type ProcessManager struct {
-	processes map[string]*ManagedProcess
-	mu        sync.RWMutex
-	logDir    string
-	dwytHome  string
+	processes     map[string]*ManagedProcess
+	mu            sync.RWMutex
+	logDir        string
+	dwytHome      string
+	terminateTree func(int) error
+	stopTimeout   time.Duration
 }
+
+const defaultProcessStopTimeout = 6 * time.Second
 
 func New(dwytHome string) *ProcessManager {
 	logDir := filepath.Join(dwytHome, "logs")
 	os.MkdirAll(logDir, 0755)
 	return &ProcessManager{
-		processes: make(map[string]*ManagedProcess),
-		logDir:    logDir,
-		dwytHome:  dwytHome,
+		processes:     make(map[string]*ManagedProcess),
+		logDir:        logDir,
+		dwytHome:      dwytHome,
+		terminateTree: procutil.TerminateTree,
+		stopTimeout:   defaultProcessStopTimeout,
 	}
 }
 
@@ -123,6 +130,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	}
 
 	cmd := buildServiceCommand(binPath, args)
+	setManagedProcessAttr(cmd)
 	// MCP servers that use stdio need stdin to stay alive.
 	// For services with a healthURL (HTTP-based like codebase UI), we can close stdin.
 	// For stdio-based services, we keep stdin open indefinitely.
@@ -183,19 +191,13 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 
 	if mp.HealthURL != "" {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", mp.Port, mp.HealthURL)
-		// codebase-memory-mcp takes longer to start — use a longer timeout
-		timeout := 10 * time.Second
-		retries := 5
-		if strings.Contains(binPath, "codebase") {
-			timeout = 30 * time.Second
-			retries = 10
-		}
-		if err := waitForHealth(healthURL, retries, timeout); err != nil {
+		timeout := managedHealthcheckTimeout()
+		if err := waitForHealth(healthURL, timeout); err != nil {
 			// Kill the process that failed its healthcheck; the reaper collects it.
 			if cmd.Process != nil {
-				procutil.Terminate(cmd.Process.Pid)
+				procutil.TerminateTree(cmd.Process.Pid)
 			}
-			log.Warn("process started but healthcheck failed, killed", log.Fields{"service": name, "error": err.Error()})
+			log.Warn("process started but healthcheck failed, killed", log.Fields{"service": name, "pid": mp.PID, "url": healthURL, "waited": timeout.String(), "error": err.Error()})
 			return &ServiceStatus{Name: name, Status: "error", State: "error", Running: false, Healthy: false, PID: 0, Port: mp.Port, Error: err.Error()}, err
 		}
 		log.Info("process healthy", log.Fields{"service": name, "port": mp.Port})
@@ -218,6 +220,34 @@ func (mp *ManagedProcess) closeLogFiles() {
 	mp.logFiles = nil
 }
 
+func (pm *ProcessManager) terminateProcessTree(pid int) error {
+	if pm.terminateTree != nil {
+		return pm.terminateTree(pid)
+	}
+	return procutil.TerminateTree(pid)
+}
+
+func (pm *ProcessManager) processStopTimeout() time.Duration {
+	if pm.stopTimeout > 0 {
+		return pm.stopTimeout
+	}
+	return defaultProcessStopTimeout
+}
+
+func waitForProcessExit(done <-chan struct{}, timeout time.Duration) bool {
+	if done == nil {
+		return false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 	mp := pm.get(name)
 	if mp == nil {
@@ -231,20 +261,25 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 		return pm.statusLocked(mp), nil
 	}
 
-	// Prefer the tracked child handle so we coordinate with the reaper
-	// goroutine (which owns the single Wait()). procutil.Terminate is
-	// cross-platform (SIGTERM→SIGKILL on Unix, taskkill /F /T on Windows).
+	// Coordinate with the reaper goroutine, which owns the single Wait(), and
+	// keep the process registered until that goroutine confirms its exit.
 	pid := mp.PID
 	done := mp.done
-	procutil.Terminate(pid)
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(6 * time.Second):
-			log.Warn("process didn't exit after terminate", log.Fields{"service": name, "pid": pid})
-			procutil.Terminate(pid)
-			<-done
+	if done == nil {
+		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d has no exit notification", name, pid)
+	}
+	if err := pm.terminateProcessTree(pid); err != nil {
+		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: terminate process tree %d: %w", name, pid, err)
+	}
+	timeout := pm.processStopTimeout()
+	if !waitForProcessExit(done, timeout) {
+		if err := pm.terminateProcessTree(pid); err != nil {
+			return pm.statusLocked(mp), fmt.Errorf("stopping service %s after %s timeout: terminate process tree %d: %w", name, timeout, pid, err)
 		}
+		if !waitForProcessExit(done, timeout) {
+			return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d did not exit after two %s waits", name, pid, timeout)
+		}
+		log.Warn("process required termination retry", log.Fields{"service": name, "pid": pid})
 	}
 	mp.closeLogFiles()
 
@@ -256,7 +291,10 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 }
 
 func (pm *ProcessManager) Restart(name string) (*ServiceStatus, error) {
-	pm.Stop(name)
+	status, err := pm.Stop(name)
+	if err != nil {
+		return status, fmt.Errorf("stopping service %s before restart: %w", name, err)
+	}
 	time.Sleep(500 * time.Millisecond)
 	return pm.Start(name)
 }
@@ -340,30 +378,69 @@ func (mp *ManagedProcess) Running() bool {
 }
 
 func probeURL(url string) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	ok, _ := probeHealthURL(url, 2*time.Second)
+	return ok
 }
 
-func waitForHealth(url string, maxRetries int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	delay := 500 * time.Millisecond
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("healthcheck timeout after %s", timeout)
-		}
-		if probeURL(url) {
-			return nil
-		}
-		time.Sleep(delay)
-		delay *= 2
+func probeHealthURL(url string, timeout time.Duration) (bool, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false, err
 	}
-	return fmt.Errorf("healthcheck failed after %d retries", maxRetries)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return true, nil
+}
+
+// managedHealthcheckTimeout shares the startup budget with the daemon. The
+// Windows default accounts for slower launcher and Python environment startup.
+func managedHealthcheckTimeout() time.Duration {
+	defaultSeconds := 60
+	if runtime.GOOS == "windows" {
+		defaultSeconds = 120
+	}
+	if raw := strings.TrimSpace(os.Getenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return time.Duration(defaultSeconds) * time.Second
+}
+
+// waitForHealth probes immediately and retries at a stable cadence until the
+// total deadline. HTTP 200 is intentionally sufficient: Headroom may expose
+// optional components (such as kompress) as degraded while it is ready.
+func waitForHealth(url string, timeout time.Duration) error {
+	started := time.Now()
+	deadline := started.Add(timeout)
+	lastError := "not attempted"
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("healthcheck timeout: url=%s last_error=%s waited=%s", url, lastError, time.Since(started).Round(time.Millisecond))
+		}
+		requestTimeout := 2 * time.Second
+		if remaining < requestTimeout {
+			requestTimeout = remaining
+		}
+		if ok, err := probeHealthURL(url, requestTimeout); ok {
+			return nil
+		} else if err != nil {
+			lastError = err.Error()
+		}
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			continue
+		}
+		sleep := 500 * time.Millisecond
+		if remaining < sleep {
+			sleep = remaining
+		}
+		time.Sleep(sleep)
+	}
 }
 
 func tailBytes(data []byte, n int) []byte {

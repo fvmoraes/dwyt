@@ -1,6 +1,7 @@
 package status
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/health"
@@ -61,15 +63,51 @@ type HeadroomMetrics struct {
 	RequestsDone int64 `json:"requests_done"`
 }
 
-var headroomDefaultPort = 8787
+const defaultHeadroomPort = 8787
 
-func SetHeadroomPort(port int) { headroomDefaultPort = port }
+const toolProbeTimeout = 2 * time.Second
+
+var headroomPort atomic.Int64
+
+func init() { headroomPort.Store(defaultHeadroomPort) }
+
+// SetHeadroomPort publishes the port selected by the daemon. Atomic access is
+// required because startup chooses a fallback port in a goroutine while the
+// dashboard can poll status and metrics concurrently.
+func SetHeadroomPort(port int) {
+	if port < 1 || port > 65535 {
+		return
+	}
+	headroomPort.Store(int64(port))
+}
+
+// HeadroomPort returns a consistent snapshot of the port used by all status
+// probes. It is intentionally exported for callers that need the same value
+// without reading the mutable startup state directly.
+func HeadroomPort() int {
+	port := int(headroomPort.Load())
+	if port < 1 || port > 65535 {
+		return defaultHeadroomPort
+	}
+	return port
+}
 
 func PollAll(dwytBin string, hasObsidianVault ...bool) *SystemStatus {
+	return PollAllWithPaths(
+		platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp"),
+		platform.DWYTLauncherPath(dwytBin, "rtk"),
+		platform.DWYTLauncherPath(dwytBin, "headroom"), hasObsidianVault...)
+}
+
+// PollAllWithPaths is the ownership-aware variant used by the dashboard. The
+// explicit paths ensure an external tool is reported as itself, never as a
+// missing DWYT-managed copy.
+func PollAllWithPaths(codebaseBin, rtkBin, headroomBin string, hasObsidianVault ...bool) *SystemStatus {
 	s := &SystemStatus{Timestamp: time.Now()}
-	s.Tools = append(s.Tools, pollCBMCP(dwytBin))
-	s.Tools = append(s.Tools, pollRTK(dwytBin))
-	s.Tools = append(s.Tools, pollHeadroom(dwytBin))
+	headroomPort := HeadroomPort()
+	s.Tools = append(s.Tools, pollCBMCPPath(codebaseBin))
+	s.Tools = append(s.Tools, pollRTKPath(rtkBin))
+	s.Tools = append(s.Tools, pollHeadroomPath(headroomBin, headroomPort))
 	vault := false
 	if len(hasObsidianVault) > 0 {
 		vault = hasObsidianVault[0]
@@ -79,6 +117,10 @@ func PollAll(dwytBin string, hasObsidianVault ...bool) *SystemStatus {
 }
 
 func pollCBMCP(dwytBin string) ToolStatus {
+	return pollCBMCPPath(platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp"))
+}
+
+func pollCBMCPPath(bin string) ToolStatus {
 	ts := ToolStatus{Name: "codebase-memory-mcp", Status: StateNotInstalled, State: StateNotInstalled}
 	if health.ProbeURL("http://127.0.0.1:9749/health") {
 		ts.Status = StateOnline
@@ -99,13 +141,12 @@ func pollCBMCP(dwytBin string) ToolStatus {
 		return ts
 	}
 
-	bin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
 	}
 
 	// Binary exists — verify it's functional with --version
-	if _, err := exec.Command(bin, "--version").Output(); err != nil {
+	if _, err := commandOutput(bin, "--version"); err != nil {
 		ts.Status = StateError
 		ts.State = StateError
 		ts.Error = "binary is present but not responding"
@@ -122,15 +163,18 @@ func pollCBMCP(dwytBin string) ToolStatus {
 }
 
 func pollRTK(dwytBin string) ToolStatus {
+	return pollRTKPath(platform.DWYTLauncherPath(dwytBin, "rtk"))
+}
+
+func pollRTKPath(bin string) ToolStatus {
 	ts := ToolStatus{Name: "rtk", Status: StateNotInstalled, State: StateNotInstalled}
-	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
 	if _, err := os.Stat(bin); err != nil {
 		return ts
 	}
 
 	ts.Status = StateInstalled
 	ts.State = StateInstalled
-	if out, err := exec.Command(bin, "--version").Output(); err == nil {
+	if out, err := commandOutput(bin, "--version"); err == nil {
 		ts.Running = true
 		ts.Healthy = true
 		ts.Details = strings.TrimSpace(string(out))
@@ -142,17 +186,20 @@ func pollRTK(dwytBin string) ToolStatus {
 	return ts
 }
 
-func pollHeadroom(dwytBin string) ToolStatus {
-	ts := ToolStatus{Name: "headroom", Port: headroomDefaultPort, Status: StateNotInstalled, State: StateNotInstalled}
-	url := fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)
+func pollHeadroom(dwytBin string, port int) ToolStatus {
+	return pollHeadroomPath(platform.DWYTLauncherPath(dwytBin, "headroom"), port)
+}
+
+func pollHeadroomPath(bin string, port int) ToolStatus {
+	ts := ToolStatus{Name: "headroom", Port: port, Status: StateNotInstalled, State: StateNotInstalled}
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	if health.ProbeURL(url) {
 		ts.Running = true
 		ts.Healthy = true
 		ts.Status = StateOnline
 		ts.State = StateOnline
-		ts.Details = fmt.Sprintf("proxy on port %d", headroomDefaultPort)
+		ts.Details = fmt.Sprintf("proxy on port %d", port)
 	} else {
-		bin := platform.DWYTLauncherPath(dwytBin, "headroom")
 		if _, err := os.Stat(bin); err != nil {
 			return ts
 		}
@@ -226,11 +273,14 @@ func obsidianAppInstalled() bool {
 }
 
 func GetRTKMetrics(dwytBin string) *RTKMetrics {
-	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
+	return GetRTKMetricsForBinary(platform.DWYTLauncherPath(dwytBin, "rtk"))
+}
+
+func GetRTKMetricsForBinary(bin string) *RTKMetrics {
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
-	out, err := exec.Command(bin, "gain").Output()
+	out, err := commandOutput(bin, "gain")
 	if err != nil {
 		return nil
 	}
@@ -255,8 +305,17 @@ func GetRTKMetrics(dwytBin string) *RTKMetrics {
 }
 
 func GetHeadroomMetrics() *HeadroomMetrics {
-	m := &HeadroomMetrics{Port: headroomDefaultPort}
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/stats", headroomDefaultPort))
+	port := HeadroomPort()
+	return getHeadroomMetrics(port, headroomMetricsHTTPClient)
+}
+
+const headroomMetricsTimeout = 2 * time.Second
+
+var headroomMetricsHTTPClient = &http.Client{Timeout: headroomMetricsTimeout}
+
+func getHeadroomMetrics(port int, client *http.Client) *HeadroomMetrics {
+	m := &HeadroomMetrics{Port: port}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/stats", port))
 	if err != nil {
 		return m
 	}
@@ -311,7 +370,10 @@ func parseTokenCount(s string) int64 {
 }
 
 func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
-	bin := platform.DWYTLauncherPath(dwytBin, "rtk")
+	return GetRTKMetricsForPathBinary(platform.DWYTLauncherPath(dwytBin, "rtk"), projectPath)
+}
+
+func GetRTKMetricsForPathBinary(bin, projectPath string) *RTKMetrics {
 	if _, err := os.Stat(bin); err != nil {
 		return nil
 	}
@@ -321,9 +383,7 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 		return nil // RTK not initialized in this project
 	}
 
-	cmd := exec.Command(bin, "gain", "--project")
-	cmd.Dir = projectPath
-	out, err := cmd.Output()
+	out, err := commandOutputInDir(projectPath, bin, "gain", "--project")
 	if err != nil {
 		return nil
 	}
@@ -353,6 +413,7 @@ func GetRTKMetricsForPath(dwytBin, projectPath string) *RTKMetrics {
 // HealthStatus returns a summary of all tool health suitable for quick polling.
 func HealthStatus(dwytBin string) map[string]ServiceState {
 	states := make(map[string]ServiceState)
+	headroomPort := HeadroomPort()
 
 	// codebase: MCP server launched on-demand by clients, not a persistent service
 	bin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
@@ -360,7 +421,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 		states["codebase-memory-mcp"] = StateOnline
 	} else if _, err := os.Stat(bin); err != nil {
 		states["codebase-memory-mcp"] = StateNotInstalled
-	} else if _, err := exec.Command(bin, "--version").Output(); err == nil {
+	} else if _, err := commandOutput(bin, "--version"); err == nil {
 		states["codebase-memory-mcp"] = StateOffline
 	} else {
 		states["codebase-memory-mcp"] = StateError
@@ -368,7 +429,7 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 
 	// headroom
 	bin = platform.DWYTLauncherPath(dwytBin, "headroom")
-	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", headroomDefaultPort)) {
+	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)) {
 		states["headroom"] = StateOnline
 	} else if _, err := os.Stat(bin); err != nil {
 		states["headroom"] = StateNotInstalled
@@ -390,4 +451,23 @@ func HealthStatus(dwytBin string) map[string]ServiceState {
 
 	log.Debug("health status poll", log.Fields{"states": states})
 	return states
+}
+
+// commandOutput bounds local binary probes used by dashboard polling. A
+// damaged wrapper or a tool waiting for network/input must not make `/status`
+// or metrics requests hang indefinitely.
+func commandOutput(bin string, args ...string) ([]byte, error) {
+	return commandOutputInDir("", bin, args...)
+}
+
+func commandOutputInDir(dir, bin string, args ...string) ([]byte, error) {
+	return commandOutputWithTimeout(toolProbeTimeout, dir, bin, args...)
+}
+
+func commandOutputWithTimeout(timeout time.Duration, dir, bin string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
+	return cmd.Output()
 }

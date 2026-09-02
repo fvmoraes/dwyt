@@ -8,7 +8,7 @@ DWYT (Don't Waste Your Tokens) is a self-contained, single-binary orchestrator t
 User runs: dwyt .
   → Detects project directory
   → Creates/loads Obsidian vault (~/.dwyt/projects/<id>_<name>/)
-  → Starts Headroom proxy in background (port 8787)
+  → Starts Headroom proxy in background (port 8787 or the first free fallback)
   → Codebase sits idle (on-demand indexing)
   → RTK is active as CLI tool
   → Serves React UI at http://localhost:2737
@@ -99,7 +99,7 @@ Vite outputs to `core/internal/server/dashboard/dist/`. At build time, GoRelease
 dwyt .
   │
   ├─ 1. detect.Detect()           → OS, shell, home dir, DWYT paths
-  ├─ 2. env.Init()                → creates ~/.dwyt/env.sh, injects into .zshrc/.bashrc
+  ├─ 2. env.Init()                → creates env.sh on Linux/macOS or env.ps1 on Windows; injects the matching profile
   ├─ 3. obsidian check            → prints status (warning if not installed)
   ├─ 4. probeDaemon()             → checks :2737 and reads daemon version
   │    └─ YES, same version → switchProject() → POST /api/project/switch, open browser, exit
@@ -107,9 +107,10 @@ dwyt .
   │    └─ NO → continue
   ├─ 5. startServicesAsync()      → prints tool availability (no blocking)
   ├─ 6. spawn daemon process      → exec.Command(exe, "daemon")
-  │    └─ detached with Setsid    → DWYT_PROJECT, DWYT_HEADROOM_PORT env vars
-  ├─ 7. waitForDaemon()           → health probe loop (3s timeout, 300ms interval)
-  └─ 8. openBrowserURL()          → xdg-open http://localhost:2737
+  │    └─ dedicated session on Unix; standard child on Windows → DWYT_PROJECT, DWYT_HEADROOM_PORT env vars
+  ├─ 7. waitForDaemon()           → immediate health probe, then every 500 ms
+  │    └─ total budget: 60 s on Linux/macOS, 120 s on Windows (configurable)
+  └─ 8. openBrowserURL()          → native browser opener for http://localhost:2737
 ```
 
 ### Daemon Process
@@ -253,7 +254,7 @@ Manages daemon services with robust lifecycle control.
 
 ```
 Start(name)  → check PID → find free port → spawn → healthcheck → return status
-Stop(name)   → SIGTERM → wait 5s → SIGKILL → return status
+Stop(name)   → terminate managed process (its tree on Windows) → wait for reaper → return status
 Status(name) → return {running, healthy, pid, port, uptime, error}
 Logs(name,n) → read last N lines from ~/.dwyt/logs/<name>-*.log
 Restart(name)→ Stop + wait 500ms + Start
@@ -261,19 +262,31 @@ Restart(name)→ Stop + wait 500ms + Start
 
 ### Healthcheck
 
-```
-5 retries with exponential backoff:
-  Attempt 1: wait 500ms  → GET http://127.0.0.1:<port>/health
-  Attempt 2: wait 1s     → GET ...
-  Attempt 3: wait 2s     → GET ...
-  Attempt 4: wait 4s     → GET ...
-  Attempt 5: wait 8s     → GET ...
-  Timeout total: 10s
-```
+The dashboard daemon (`GET /api/health`) and managed HTTP services use one
+deadline-based healthcheck strategy:
+
+- The first request is made immediately; subsequent requests run every 500 ms.
+- Each HTTP request has a 2-second limit and is capped by the remaining total
+  budget.
+- The default total budget is 60 seconds on Linux/macOS and 120 seconds on
+  Windows. A positive `DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` value
+  overrides either default for the current `dwyt` process.
+- HTTP 200 is sufficient for the configured endpoint. Headroom may report
+  optional components such as `kompress` as degraded without blocking a ready
+  proxy.
+
+When the daemon startup deadline expires, the log records the URL, child PID,
+last HTTP/connection error, and elapsed wait. DWYT then terminates the failed
+daemon tree. On Windows this is `taskkill /F /T`; on Linux/macOS the daemon's
+dedicated process group is terminated, which also reaps its managed descendants.
 
 ### Port conflicts
 
-If default port is occupied, tries +1, +2, +3, +4. Updates state.json.
+The ProcessManager tests the requested port and the next four ports, selecting
+the first free one. For example, Headroom falls back from 8787 to 8788 through
+8791 and Codebase from 9749 to 9750 through 9753. The effective Headroom port
+is published to runtime state, the dashboard, and the DWYT-managed
+`env.sh`/`env.ps1` file so subsequent client launches use the right proxy.
 
 ### Log capture
 
@@ -410,27 +423,36 @@ Headroom is a Python HTTP proxy that compresses API calls to AI providers.
 1. Daemon calls `procman.Start("headroom")`
 2. ProcessManager: finds free port → spawns `headroom proxy --port <port>` → healthcheck
 3. PID registered in RuntimeState
-4. Proxy config injected into client files (AGENTS.md, CLAUDE.md, etc.)
+4. Once healthy, DWYT runs Headroom's durable non-interactive `init` setup for
+   eligible selected clients and publishes the effective port
 
 ### Auto-config (transparent to user)
 
-`env.sh` exports (injected into shell RC):
+`env.sh` (Linux/macOS) or `env.ps1` (Windows) exports the effective port. This
+example uses the default port:
 ```bash
 export HEADROOM_PORT=8787
 export OPENAI_BASE_URL="http://127.0.0.1:8787/v1"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
-Client config injection (via `integrate.WriteHeadroomProxyConfig()`):
-```markdown
-<!-- dwyt:headroom-proxy-start -->
-**Headroom proxy is ACTIVE** on http://127.0.0.1:8787
-<!-- dwyt:headroom-proxy-end -->
-```
+### Client setup
 
-### Stop cleanup
+DWYT intentionally does not use interactive `headroom wrap`/`unwrap`: those
+commands start a separate proxy and CLI process, which conflicts with daemon
+ownership. Instead it uses `headroom init --port <effective-port> claude` or
+`codex`, and `headroom init --global --port <effective-port> copilot`. Codex
+using ChatGPT/OAuth is skipped. Headroom provides no durable Cursor `init`
+command, so Cursor needs its base URL set manually to
+`http://127.0.0.1:<effective-port>/v1`. Kiro, OpenCode, Windsurf, and Continue
+use the managed environment variables rather than a native Headroom init step.
 
-`integrate.RemoveHeadroomProxyConfig()` removes all marked blocks from client files.
+### Failure cleanup
+
+On Windows, failed startup and stop use `taskkill /F /T` and wait for the
+reaper, so a Headroom `.bat` launcher or Python descendant cannot survive its
+parent. On Linux/macOS, a failed daemon startup terminates the daemon's
+dedicated process group, including its managed descendants.
 
 ---
 
@@ -836,14 +858,14 @@ fmt.Printf("dwyt %s — Don't Waste Your Tokens\n", version)
 User runs: dwyt .
   │
   ├─ DWYT starts daemon → Obsidian vault loaded
-  ├─ Headroom starts → env.sh exports proxy vars
+  ├─ Headroom starts → env.sh/env.ps1 exports the effective proxy port
   ├─ UI opens → Dashboard with project stats
   │
   └─ User opens Claude Code / Codex / Cursor (in new terminal)
        │
-       ├─ Shell sources ~/.dwyt/env.sh
-       │   → OPENAI_BASE_URL=http://127.0.0.1:8787/v1
-       │   → ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+       ├─ Shell/profile sources the DWYT-managed env.sh or env.ps1
+       │   → OPENAI_BASE_URL=http://127.0.0.1:<effective-port>/v1
+       │   → ANTHROPIC_BASE_URL=http://127.0.0.1:<effective-port>
        │
        ├─ Shell commands prefixed with rtk
        │   → 60-98% output compression

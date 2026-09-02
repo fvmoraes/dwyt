@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -29,12 +30,12 @@ func Headroom(dwytBin, dwytHome string) error {
 
 	cleanPartialHeadroom(wrapperPath, venvDir)
 
-	pythonBin, err := findCompatiblePython()
+	python, err := findCompatiblePythonCommand()
 	if err != nil {
 		return fmt.Errorf("headroom: %w", err)
 	}
-	fmt.Printf("  → headroom venv (%s)...\n", pythonBin)
-	if out, vErr := runFromHome(dwytHome, pythonBin, "-m", "venv", venvDir); vErr != nil {
+	fmt.Printf("  → headroom venv (%s)...\n", python)
+	if out, vErr := runPythonFromHome(dwytHome, python, "-m", "venv", venvDir); vErr != nil {
 		return fmt.Errorf("headroom: venv creation failed: %w\n%s", vErr, string(out))
 	}
 
@@ -162,6 +163,15 @@ func runFromHome(workDir, bin string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// runPythonFromHome is the command-aware version of runFromHome. It preserves
+// launcher arguments such as Windows' `py -3.12` while still anchoring the
+// child process in a stable work directory.
+func runPythonFromHome(workDir string, python pythonCommand, args ...string) ([]byte, error) {
+	cmd := exec.Command(python.bin, python.commandArgs(args...)...)
+	cmd.Dir = safeWorkDir(workDir)
+	return cmd.CombinedOutput()
+}
+
 // safeWorkDir picks a guaranteed-existing directory for child processes.
 // dwytHome is preferred (always created by the caller); falls back to
 // $HOME and finally "/" so we never hand a non-existent cwd to a child.
@@ -183,8 +193,16 @@ func safeWorkDir(preferred string) string {
 // Windows) pointing at the venv-internal binary.
 func writeHeadroomWrapper(hrBin, wrapperPath string) error {
 	if runtime.GOOS == "windows" {
-		bat := fmt.Sprintf("@echo off\r\n%q %%*\r\n", hrBin)
-		return os.WriteFile(wrapperPath, []byte(bat), 0644)
+		return os.WriteFile(wrapperPath, []byte(headroomBatchWrapper(hrBin)), 0644)
 	}
 	return os.Symlink(hrBin, wrapperPath)
+}
+
+// headroomBatchWrapper uses cmd.exe quoting rather than Go's %q. Go escapes
+// every Windows separator (C:\\Users), while cmd.exe keeps those backslashes
+// literal and may therefore try to execute a non-existent path. Percent signs
+// are doubled because this string is evaluated as a batch file.
+func headroomBatchWrapper(hrBin string) string {
+	quotedPath := `"` + strings.ReplaceAll(hrBin, "%", "%%") + `"`
+	return "@echo off\r\n" + quotedPath + " %*\r\n"
 }

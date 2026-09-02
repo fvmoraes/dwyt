@@ -2,10 +2,13 @@ package mcpproxy
 
 import (
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type capReporter struct {
@@ -115,5 +118,41 @@ func TestCallCounterChunkedLines(t *testing.T) {
 	calls := rep.snapshot()
 	if len(calls) != 1 || calls[0].Tool != "get_code_snippet" {
 		t.Fatalf("expected 1 get_code_snippet call, got %#v", calls)
+	}
+}
+
+func TestHTTPReporterCloseCancelsQueuedReportsAndAllowsLateReport(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+	}))
+	defer server.Close()
+
+	reporter := NewHTTPReporter(server.URL)
+	reporter.Report(UsageReport{Server: "codebase", Tool: "first"})
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("usage request did not reach the test server")
+	}
+	// Fill the best-effort queue. The old Close drained this one request at a
+	// time (up to 256 × HTTP timeout); shutdown must instead cancel promptly.
+	for i := 0; i < cap(reporter.ch); i++ {
+		reporter.Report(UsageReport{Server: "codebase", Tool: "queued"})
+	}
+
+	start := time.Now()
+	reporter.Close()
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Close took %s while dashboard request was stalled", elapsed)
+	}
+	close(releaseRequest)
+
+	// Run's stdin tee can still call Report after the child exits. This must be
+	// a harmless drop rather than a send-on-closed-channel panic.
+	for i := 0; i < 10; i++ {
+		reporter.Report(UsageReport{Server: "codebase", Tool: "late"})
 	}
 }

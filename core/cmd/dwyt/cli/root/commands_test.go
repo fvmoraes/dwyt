@@ -1,9 +1,11 @@
 package root
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/status"
 )
 
@@ -63,5 +65,27 @@ func TestDaemonVersionNeedsRestartSkipsDevCLI(t *testing.T) {
 	}
 	if got := normalizeDaemonVersion("4.8.0"); got != "v4.8.0" || strings.Contains(got, "vv") {
 		t.Fatalf("unexpected normalized version: %q", got)
+	}
+}
+
+func TestEffectiveDWYTPathsKeepsDWYTHomeOverride(t *testing.T) {
+	oldHome, oldBin, oldData := DwytHome, DwytBin, DwytData
+	t.Cleanup(func() {
+		DwytHome, DwytBin, DwytData = oldHome, oldBin, oldData
+	})
+
+	customHome := filepath.Join(t.TempDir(), "custom-dwyt")
+	DwytHome = customHome
+	DwytBin = filepath.Join(customHome, "bin")
+	DwytData = filepath.Join(customHome, "data")
+	detected := &detect.Env{
+		DwytHome: filepath.Join(t.TempDir(), "platform-default"),
+		DwytBin:  filepath.Join(t.TempDir(), "platform-default", "bin"),
+		DwytData: filepath.Join(t.TempDir(), "platform-default", "data"),
+	}
+
+	home, bin, data := effectiveDWYTPaths(detected)
+	if home != DwytHome || bin != DwytBin || data != DwytData {
+		t.Fatalf("override paths were lost: got home=%q bin=%q data=%q, want home=%q bin=%q data=%q", home, bin, data, DwytHome, DwytBin, DwytData)
 	}
 }

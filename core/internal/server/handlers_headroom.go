@@ -2,15 +2,26 @@ package server
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/gin-gonic/gin"
 )
 
-func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
+// startHeadroom is the sole process-manager entry point for the proxy. It
+// publishes a fallback port selected by ProcessManager before callers build
+// URLs or configure client wrappers.
+func (ds *DashboardServer) startHeadroom() (*procman.ServiceStatus, error) {
 	status, err := ds.ProcMan.Start("headroom")
+	if status != nil {
+		ds.setHeadroomPort(status.Port)
+	}
+	return status, err
+}
+
+func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
+	status, err := ds.startHeadroom()
 	if err != nil || status == nil || !status.Healthy {
 		errMsg := "headroom failed to start"
 		if status != nil && status.Error != "" {
@@ -24,36 +35,43 @@ func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
 
 	ds.RuntimeState.RegisterProcess("headroom", status.PID, status.Port)
 
-	ds.runHeadroomWrap(ds.DefaultProject)
+	ds.configureHeadroomClients(ds.DefaultProject)
 
 	c.JSON(200, gin.H{"status": "started", "port": status.Port})
 }
 
 func (ds *DashboardServer) apiHeadroomStopPM(c *gin.Context) {
-	ds.runHeadroomUnwrap(ds.DefaultProject)
-
-	ds.ProcMan.Stop("headroom")
-	ds.RuntimeState.RemoveProcess("headroom")
+	if _, err := ds.ProcMan.Stop("headroom"); err != nil {
+		if ds.RuntimeState != nil {
+			ds.RuntimeState.SetToolError("headroom", err.Error())
+		}
+		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
+		return
+	}
+	if ds.RuntimeState != nil {
+		ds.RuntimeState.RemoveProcess("headroom")
+	}
 
 	c.JSON(200, gin.H{"status": "stopped"})
 }
 
 func (ds *DashboardServer) apiHeadroomStatusPM(c *gin.Context) {
 	st := ds.ProcMan.Status("headroom")
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)
+	port := ds.headroomPort()
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	if health.ProbeURL(healthURL) {
 		st.Status = "online"
 		st.State = "online"
 		st.Running = true
 		st.Healthy = true
-		st.Port = ds.HeadroomPort
+		st.Port = port
 		st.Error = ""
-	} else if isPortOpen(ds.HeadroomPort) {
+	} else if isPortOpen(port) {
 		st.Status = "port_open_no_health"
 		st.State = "port_open_no_health"
 		st.Running = false
 		st.Healthy = false
-		st.Port = ds.HeadroomPort
+		st.Port = port
 		st.Error = "port open but healthcheck failed"
 	}
 	c.JSON(200, st)
@@ -69,26 +87,27 @@ func (ds *DashboardServer) apiHeadroomLogsPM(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiHeadroomStatsURL(c *gin.Context) {
-	proxyPort := fmt.Sprintf("%d", ds.HeadroomPort)
-	healthURL := fmt.Sprintf("http://127.0.0.1:%s/health", proxyPort)
-	statsURL := fmt.Sprintf("http://127.0.0.1:%s/stats", proxyPort)
-
-	bin := fmt.Sprintf("%s/headroom", ds.DwytBin)
+	port := ds.headroomPort()
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", port)
 	if health.ProbeURL(healthURL) {
 		c.JSON(200, gin.H{"url": statsURL, "started": false})
 		return
 	}
-	if _, err := os.Stat(bin); err != nil {
-		c.JSON(404, gin.H{"status": "not_installed", "error": "headroom not installed", "url": ""})
+
+	status, err := ds.startHeadroom()
+	if err != nil || status == nil || !status.Healthy {
+		errMsg := "headroom failed to start"
+		if status != nil && status.Error != "" {
+			errMsg = status.Error
+		} else if err != nil {
+			errMsg = err.Error()
+		}
+		log.Error("failed to start headroom proxy", log.Fields{"error": errMsg})
+		c.JSON(500, gin.H{"status": "error", "error": errMsg, "url": ""})
 		return
 	}
 
-	check, err := health.StartService("headroom", bin, healthURL, "proxy", "--port", proxyPort)
-	if err != nil || !check.Healthy {
-		log.Error("failed to start headroom proxy", log.Fields{"error": check.Error})
-		c.JSON(200, gin.H{"url": statsURL, "started": true, "note": "may still be starting"})
-		return
-	}
-
+	statsURL = fmt.Sprintf("http://127.0.0.1:%d/stats", status.Port)
 	c.JSON(200, gin.H{"url": statsURL, "started": true})
 }

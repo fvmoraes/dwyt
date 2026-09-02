@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestLoadMigratesLegacyMCPNames(t *testing.T) {
@@ -43,12 +46,71 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 	}
 }
 
+func TestLoadReturnsErrorForCorruptRegistryWithoutReplacingIt(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := []byte(`{"mcpServers":`)
+	if err := os.WriteFile(configPath, corrupt, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("Load error = %v, want invalid JSON error", err)
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(corrupt) {
+		t.Fatalf("corrupt registry was modified: got %q, want %q", got, corrupt)
+	}
+}
+
+func TestLoadReturnsErrorWhenRegistryDirectoryCannotBeCreated(t *testing.T) {
+	base := t.TempDir()
+	dwytHome := filepath.Join(base, "dwyt-home-file")
+	if err := os.WriteFile(dwytHome, []byte("not a directory"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "create MCP registry config directory") {
+		t.Fatalf("Load error = %v, want config directory error", err)
+	}
+}
+
 // setTestHome routes every global-config lookup (os.UserHomeDir reads
 // USERPROFILE on Windows, HOME on Unix) into a temp directory.
 func setTestHome(t *testing.T, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+}
+
+func claudeDesktopConfigPathForTest(home string) string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+	case "windows":
+		return filepath.Join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json")
+	default:
+		return filepath.Join(home, ".config", "claude-desktop", "claude_desktop_config.json")
+	}
+}
+
+func assertFileContent(t *testing.T, path string, want []byte) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("%s was modified: got %q, want %q", path, got, want)
+	}
 }
 
 func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
@@ -104,6 +166,76 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 		!strings.Contains(string(codex), "[mcp_servers.obsidian]") ||
 		!strings.Contains(string(codex), "[mcp_servers.obsidian.env]") {
 		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
+	}
+}
+
+func TestSyncCodexGlobalRewritesCRLFManagedBlock(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.stale]",
+		`command = "C:\\Old\\stale.exe"`,
+		"args = []",
+		"# dwyt:mcp:end",
+		"",
+	}, "\r\n")
+	if err := os.WriteFile(codexPath, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reg.SyncCodexGlobal(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	withoutCRLF := strings.ReplaceAll(content, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("full Codex sync introduced mixed or malformed line endings: %q", content)
+	}
+	if strings.Count(content, "# dwyt:mcp:start") != 1 || strings.Count(content, "# dwyt:mcp:end") != 1 {
+		t.Fatalf("full Codex sync did not replace the managed block exactly once:\n%s", content)
+	}
+
+	var parsed struct {
+		Model      string `toml:"model"`
+		MCPServers map[string]struct {
+			Command string `toml:"command"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated Codex config is not valid TOML: %v\n%s", err, content)
+	}
+	if parsed.Model != "keep-user-setting" {
+		t.Fatalf("model = %q, want keep-user-setting", parsed.Model)
+	}
+	if _, ok := parsed.MCPServers["stale"]; ok {
+		t.Fatalf("stale managed table survived full sync: %#v", parsed.MCPServers)
+	}
+	for _, name := range []string{"codebase", "obsidian"} {
+		if got := parsed.MCPServers[name].Command; got != reg.MCPServers[name].Command {
+			t.Fatalf("%s command = %q, want %q", name, got, reg.MCPServers[name].Command)
+		}
 	}
 }
 
@@ -222,6 +354,361 @@ func TestSyncKiroPreservesExistingServers(t *testing.T) {
 	}
 	if kiro["custom"] != true {
 		t.Fatalf("expected custom top-level config to be preserved: %#v", kiro)
+	}
+}
+
+func TestSyncCursorRefusesCorruptUserConfig(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "codebase-memory-mcp"))
+
+	projectPath := t.TempDir()
+	path := filepath.Join(projectPath, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := []byte(`{"mcpServers":`)
+	if err := os.WriteFile(path, corrupt, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SyncCursor(projectPath); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("SyncCursor error = %v, want invalid JSON error", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(corrupt) {
+		t.Fatalf("corrupt Cursor config was modified: got %q, want %q", got, corrupt)
+	}
+}
+
+func TestSyncClaudeDesktopRefusesWrongMCPServersFieldType(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "codebase-memory-mcp"))
+
+	configPath := claudeDesktopConfigPathForTest(home)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"mcpServers":[],"custom":true}`)
+	if err := os.WriteFile(configPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SyncClaudeDesktop(); err == nil || !strings.Contains(err.Error(), `"mcpServers"`) {
+		t.Fatalf("SyncClaudeDesktop error = %v, want wrong mcpServers type", err)
+	}
+	assertFileContent(t, configPath, original)
+}
+
+func TestSyncCursorRefusesWrongMCPServersFieldType(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "codebase-memory-mcp"))
+
+	projectPath := t.TempDir()
+	configPath := filepath.Join(projectPath, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"mcpServers":"user-defined","custom":true}`)
+	if err := os.WriteFile(configPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SyncCursor(projectPath); err == nil || !strings.Contains(err.Error(), `"mcpServers"`) {
+		t.Fatalf("SyncCursor error = %v, want wrong mcpServers type", err)
+	}
+	assertFileContent(t, configPath, original)
+}
+
+func TestSyncOpenCodeRefusesWrongMCPFieldType(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "codebase-memory-mcp"))
+
+	projectPath := t.TempDir()
+	configPath := filepath.Join(projectPath, "opencode.json")
+	original := []byte(`{"mcp":[],"custom":true}`)
+	if err := os.WriteFile(configPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SyncOpenCodeProject(projectPath); err == nil || !strings.Contains(err.Error(), `"mcp"`) {
+		t.Fatalf("SyncOpenCodeProject error = %v, want wrong mcp type", err)
+	}
+	assertFileContent(t, configPath, original)
+}
+
+func TestConfigureMCPRemovesOnlyDisabledOrMissingCanonicalServers(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := t.TempDir()
+	cursorPath := filepath.Join(projectPath, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"user-tool": map[string]interface{}{"command": "/tmp/user-tool"},
+			"codebase":  map[string]interface{}{"command": "/tmp/stale-codebase"},
+			"obsidian":  map[string]interface{}{"command": "/tmp/stale-obsidian"},
+		},
+		"custom": true,
+	}
+	if err := writeJSONFile(cursorPath, existing); err != nil {
+		t.Fatal(err)
+	}
+
+	// A full sync must remove the disabled canonical entry but retain active
+	// DWYT entries and every server the user owns.
+	obsidian := reg.MCPServers["obsidian"]
+	obsidian.Enabled = false
+	reg.Set("obsidian", obsidian)
+	if err := reg.ConfigureMCP(projectPath, []string{"cursor"}); err != nil {
+		t.Fatal(err)
+	}
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "user-tool", true)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "codebase", true)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "obsidian", false)
+
+	// If the real Codebase target disappears, the stale canonical config must
+	// be removed on the next full sync; the user entry is still untouched.
+	codebase := reg.MCPServers["codebase"]
+	if codebase.Target == "" {
+		t.Fatalf("expected proxied codebase entry with target, got %#v", codebase)
+	}
+	if err := os.Remove(codebase.Target); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.ConfigureMCP(projectPath, []string{"cursor"}); err != nil {
+		t.Fatal(err)
+	}
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "user-tool", true)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "codebase", false)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", "obsidian", false)
+}
+
+func TestConfigureMCPByNameOnlyMutatesRequestedServer(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectPath := t.TempDir()
+	cursorPath := filepath.Join(projectPath, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			// This represents an existing Codebase card configuration. Reconfiguring
+			// the Obsidian card must not replace it with the current registry value.
+			"codebase":  map[string]interface{}{"command": "/tmp/keep-codebase"},
+			"obsidian":  map[string]interface{}{"command": "/tmp/old-obsidian"},
+			"user-tool": map[string]interface{}{"command": "/tmp/user-tool"},
+		},
+	}
+	if err := writeJSONFile(cursorPath, existing); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reg.ConfigureMCPByName(projectPath, "obsidian", []string{"cursor"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]interface{}
+	readJSONFile(t, cursorPath, &got)
+	servers := got["mcpServers"].(map[string]interface{})
+	codebase := servers["codebase"].(map[string]interface{})
+	if codebase["command"] != "/tmp/keep-codebase" {
+		t.Fatalf("scoped Obsidian sync rewrote Codebase: %#v", codebase)
+	}
+	obsidian := servers["obsidian"].(map[string]interface{})
+	if obsidian["command"] != reg.MCPServers["obsidian"].Command {
+		t.Fatalf("expected Obsidian to be refreshed, got %#v", obsidian)
+	}
+	if _, ok := servers["user-tool"]; !ok {
+		t.Fatalf("scoped sync removed user server: %#v", servers)
+	}
+}
+
+func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	windowsCommand := `C:\Program Files\DWYT\dwyt.exe`
+	obsidian := reg.MCPServers["obsidian"]
+	obsidian.Command = windowsCommand
+	reg.MCPServers["obsidian"] = obsidian
+
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.codebase]",
+		`command = "/tmp/keep-codebase"`,
+		"args = []",
+		"startup_timeout_sec = 20",
+		"tool_timeout_sec = 120",
+		"",
+		"# dwyt:mcp:end",
+		"",
+	}, "\r\n")
+	if err := os.WriteFile(codexPath, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reg.ConfigureMCPByName("", "obsidian", []string{"codex"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	withoutCRLF := strings.ReplaceAll(content, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("scoped Codex sync introduced mixed or malformed line endings: %q", content)
+	}
+	if !strings.Contains(content, "model = \"keep-user-setting\"") || !strings.Contains(content, "command = \"/tmp/keep-codebase\"") {
+		t.Fatalf("scoped Codex sync changed unrelated configuration:\n%s", content)
+	}
+	obsidianCommand := "command = " + strconv.Quote(reg.MCPServers["obsidian"].Command)
+	if !strings.Contains(content, "[mcp_servers.obsidian]") || !strings.Contains(content, obsidianCommand) {
+		t.Fatalf("expected scoped sync to add refreshed Obsidian table:\n%s", content)
+	}
+
+	var parsed struct {
+		Model      string `toml:"model"`
+		MCPServers map[string]struct {
+			Command string `toml:"command"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated Codex config is not valid TOML: %v\n%s", err, content)
+	}
+	if parsed.Model != "keep-user-setting" {
+		t.Fatalf("model = %q, want keep-user-setting", parsed.Model)
+	}
+	if got := parsed.MCPServers["codebase"].Command; got != "/tmp/keep-codebase" {
+		t.Fatalf("codebase command = %q, want /tmp/keep-codebase", got)
+	}
+	if got := parsed.MCPServers["obsidian"].Command; got != windowsCommand {
+		t.Fatalf("obsidian command = %q, want %q", got, windowsCommand)
+	}
+}
+
+func TestRemoveManagedBlockPreservesCRLFBoundaries(t *testing.T) {
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.codebase]",
+		`command = "C:\\Program Files\\DWYT\\codebase.exe"`,
+		"args = []",
+		"# dwyt:mcp:end",
+		"",
+		"[profiles.keep]",
+		`model = "keep-profile"`,
+		"",
+	}, "\r\n")
+	want := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"[profiles.keep]",
+		`model = "keep-profile"`,
+		"",
+	}, "\r\n")
+
+	got := removeManagedBlock(original, "# dwyt:mcp:start", "# dwyt:mcp:end")
+	if got != want {
+		t.Fatalf("removeManagedBlock() = %q, want %q", got, want)
+	}
+	withoutCRLF := strings.ReplaceAll(got, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("removeManagedBlock left a partial line ending: %q", got)
+	}
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("TOML after managed block removal is invalid: %v\n%s", err, got)
+	}
+}
+
+func assertMCPServerPresence(t *testing.T, path, key, name string, want bool) {
+	t.Helper()
+	var config map[string]interface{}
+	readJSONFile(t, path, &config)
+	servers, ok := config[key].(map[string]interface{})
+	if !ok {
+		t.Fatalf("%s: missing %s: %#v", path, key, config)
+	}
+	_, got := servers[name]
+	if got != want {
+		t.Fatalf("%s: server %q presence=%t, want %t; servers=%#v", path, name, got, want, servers)
 	}
 }
 

@@ -71,22 +71,37 @@ func exeName(base string) string {
 	return base
 }
 
-func configDir() string {
+func configDir() (string, error) {
 	d := filepath.Join(dwytHome(), "config")
-	os.MkdirAll(d, 0755)
-	return d
+	if err := os.MkdirAll(d, 0755); err != nil {
+		return "", fmt.Errorf("create MCP registry config directory %s: %w", d, err)
+	}
+	return d, nil
 }
 
 func Load() (*Registry, error) {
-	path := filepath.Join(configDir(), "mcp-registry.json")
+	dir, err := configDir()
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, "mcp-registry.json")
 	r := &Registry{
 		MCPServers: make(map[string]MCPServerEntry),
 		path:       path,
 	}
 	r.migrated = false
 
-	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, r)
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		if err := json.Unmarshal(data, r); err != nil {
+			return nil, fmt.Errorf("read MCP registry %s: invalid JSON: %w", path, err)
+		}
+	} else if !os.IsNotExist(readErr) {
+		return nil, fmt.Errorf("read MCP registry %s: %w", path, readErr)
+	}
+	// A syntactically valid `{ "mcpServers": null }` is still usable: treat
+	// it as an empty registry so the canonical entries can be seeded below.
+	if r.MCPServers == nil {
+		r.MCPServers = make(map[string]MCPServerEntry)
 	}
 
 	migrated := false
@@ -109,7 +124,15 @@ func Load() (*Registry, error) {
 	// Ensure default entries
 	binDir := filepath.Join(dwytHome(), "bin")
 	dwytShim := filepath.Join(binDir, exeName("dwyt"))
-	codebaseTarget := filepath.Join(binDir, exeName("codebase-memory-mcp"))
+	defaultCodebaseTarget := filepath.Join(binDir, exeName("codebase-memory-mcp"))
+	codebaseTarget := defaultCodebaseTarget
+	// A configured external source is stored as Target while Command remains
+	// DWYT's accounting proxy. Preserve it on Load instead of "healing" it
+	// back to the bundled binary; setup explicitly switches this field when
+	// ownership changes back to DWYT-managed mode.
+	if existing, ok := r.MCPServers["codebase"]; ok && strings.TrimSpace(existing.Target) != "" {
+		codebaseTarget = existing.Target
+	}
 
 	// Codebase runs through the DWYT stdio shim so its tool calls are countable
 	// by the dashboard regardless of the IDE/harness; Obsidian is DWYT's own MCP
@@ -124,22 +147,7 @@ func Load() (*Registry, error) {
 	// counting, but it still works. This is self-correcting: once the shim
 	// appears, the next Load heals the entry to the proxied form (and
 	// vice-versa).
-	codebaseEntry := MCPServerEntry{
-		Command:   codebaseTarget,
-		Port:      9749,
-		HealthURL: "/health",
-		Enabled:   true,
-	}
-	if fileExists(dwytShim) {
-		codebaseEntry = MCPServerEntry{
-			Command:   dwytShim,
-			Args:      []string{"mcp-proxy", "--target", codebaseTarget, "--name", "codebase"},
-			Target:    codebaseTarget,
-			Port:      9749,
-			HealthURL: "/health",
-			Enabled:   true,
-		}
-	}
+	codebaseEntry := newCodebaseEntry(dwytShim, codebaseTarget)
 	canonical := map[string]MCPServerEntry{
 		"codebase": codebaseEntry,
 		"obsidian": {
@@ -183,11 +191,52 @@ func Load() (*Registry, error) {
 	if migrated {
 		r.migrated = true
 		if err := r.Save(); err != nil {
-			log.Warn("mcp registry migration save failed", log.Fields{"error": err.Error()})
+			return nil, fmt.Errorf("save migrated MCP registry: %w", err)
 		}
 	}
 
 	return r, nil
+}
+
+func newCodebaseEntry(dwytShim, target string) MCPServerEntry {
+	entry := MCPServerEntry{
+		Command:   target,
+		Port:      9749,
+		HealthURL: "/health",
+		Enabled:   true,
+	}
+	if fileExists(dwytShim) {
+		entry = MCPServerEntry{
+			Command:   dwytShim,
+			Args:      []string{"mcp-proxy", "--target", target, "--name", "codebase"},
+			Target:    target,
+			Port:      9749,
+			HealthURL: "/health",
+			Enabled:   true,
+		}
+	}
+	return entry
+}
+
+// SetCodebaseTarget changes only DWYT's registry wiring so the MCP accounting
+// proxy launches the selected Codebase executable. It never copies, updates,
+// deletes, or otherwise changes target itself; that target may be a user-owned
+// external/local installation.
+func (r *Registry) SetCodebaseTarget(target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("codebase target path is required")
+	}
+	if r.MCPServers == nil {
+		r.MCPServers = make(map[string]MCPServerEntry)
+	}
+	binDir := filepath.Join(dwytHome(), "bin")
+	entry := newCodebaseEntry(filepath.Join(binDir, exeName("dwyt")), target)
+	if existing, ok := r.MCPServers["codebase"]; ok {
+		entry.Enabled = existing.Enabled
+	}
+	r.MCPServers["codebase"] = entry
+	return r.Save()
 }
 
 // migrateObsidianCommand rewrites a legacy `dwyt-obsidian-mcp`/`dwyt-obsidian`
@@ -207,10 +256,19 @@ func migrateObsidianCommand(entry MCPServerEntry) MCPServerEntry {
 
 func (r *Registry) Save() error {
 	if r.path == "" {
-		r.path = filepath.Join(configDir(), "mcp-registry.json")
+		dir, err := configDir()
+		if err != nil {
+			return err
+		}
+		r.path = filepath.Join(dir, "mcp-registry.json")
 	}
-	os.MkdirAll(filepath.Dir(r.path), 0755)
-	data, _ := json.MarshalIndent(r, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(r.path), 0755); err != nil {
+		return fmt.Errorf("create MCP registry directory %s: %w", filepath.Dir(r.path), err)
+	}
+	data, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode MCP registry: %w", err)
+	}
 	return os.WriteFile(r.path, data, 0644)
 }
 
@@ -289,14 +347,84 @@ func fileExists(path string) bool {
 	return false
 }
 
-// SyncClaudeDesktop writes the Claude Desktop MCP config.
-func (r *Registry) SyncClaudeDesktop() error {
-	claudeConfig := make(map[string]interface{})
+// canonicalDWYTMCPNames are the only server keys DWYT owns in client config
+// files. Sync may remove these stale entries when they are disabled or no
+// longer installed, but it must never remove user-managed MCP servers.
+var canonicalDWYTMCPNames = []string{"codebase", "obsidian"}
 
-	for name, entry := range r.MCPServers {
-		if !entry.Enabled || !r.IsBinaryInstalled(name) {
-			continue
+func isCanonicalDWYTMCP(name string) bool {
+	for _, candidate := range canonicalDWYTMCPNames {
+		if name == candidate {
+			return true
 		}
+	}
+	return false
+}
+
+// entriesForSync returns enabled, installed registry entries in the requested
+// scope. A nil/empty scope means a full sync; a non-empty scope is used by a
+// card-level reconfigure action and prevents it from changing other servers.
+func (r *Registry) entriesForSync(names []string) map[string]MCPServerEntry {
+	entries := make(map[string]MCPServerEntry)
+	if len(names) == 0 {
+		for name, entry := range r.MCPServers {
+			if entry.Enabled && r.IsBinaryInstalled(name) {
+				entries[name] = entry
+			}
+		}
+		return entries
+	}
+	for _, name := range names {
+		entry, ok := r.MCPServers[name]
+		if ok && entry.Enabled && r.IsBinaryInstalled(name) {
+			entries[name] = entry
+		}
+	}
+	return entries
+}
+
+// canonicalNamesForSync tells a writer which DWYT-owned keys it may reconcile.
+// Full sync reconciles both canonical keys; a scoped sync may only touch the
+// named canonical key, preserving the other card's configuration verbatim.
+func canonicalNamesForSync(names []string) []string {
+	if len(names) == 0 {
+		return append([]string(nil), canonicalDWYTMCPNames...)
+	}
+	result := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if isCanonicalDWYTMCP(name) && !seen[name] {
+			result = append(result, name)
+			seen[name] = true
+		}
+	}
+	return result
+}
+
+func removeCanonicalDWYTMCPEntries(servers map[string]interface{}, names []string) {
+	for _, name := range names {
+		delete(servers, name)
+	}
+}
+
+func removeLegacyServerKeysFor(servers map[string]interface{}, names []string) {
+	legacyByCanonical := map[string][]string{
+		"codebase": {"dwyt", "dwyt-codebase"},
+		"obsidian": {"dwyt-obsidian", "obsidian-mcp"},
+	}
+	for _, canonical := range canonicalNamesForSync(names) {
+		for _, legacy := range legacyByCanonical[canonical] {
+			delete(servers, legacy)
+		}
+	}
+}
+
+// SyncClaudeDesktop writes the Claude Desktop MCP config.
+func (r *Registry) SyncClaudeDesktop() error { return r.syncClaudeDesktop(nil) }
+
+func (r *Registry) syncClaudeDesktop(names []string) error {
+	claudeConfig := make(map[string]interface{})
+	for name, entry := range r.entriesForSync(names) {
 		args := entry.Args
 		if args == nil {
 			args = []string{}
@@ -311,10 +439,6 @@ func (r *Registry) SyncClaudeDesktop() error {
 		claudeConfig[name] = config
 	}
 
-	if len(claudeConfig) == 0 {
-		return nil
-	}
-
 	home, _ := os.UserHomeDir()
 	var configPath string
 	switch runtime.GOOS {
@@ -326,22 +450,23 @@ func (r *Registry) SyncClaudeDesktop() error {
 		configPath = filepath.Join(home, ".config", "claude-desktop", "claude_desktop_config.json")
 	}
 
-	os.MkdirAll(filepath.Dir(configPath), 0755)
-
-	// Read existing config and merge
-	existing := make(map[string]interface{})
-	if data, err := os.ReadFile(configPath); err == nil {
-		json.Unmarshal(data, &existing)
+	// Read existing config and merge. If there are no active DWYT entries and
+	// no existing file, leave the user's filesystem untouched.
+	existing, exists, err := readJSONObject(configPath)
+	if err != nil {
+		return fmt.Errorf("read Claude Desktop MCP config: %w", err)
+	}
+	if !exists && len(claudeConfig) == 0 {
+		return nil
 	}
 
-	if _, ok := existing["mcpServers"]; !ok {
-		existing["mcpServers"] = make(map[string]interface{})
+	servers, err := jsonObjectField(existing, "mcpServers")
+	if err != nil {
+		return fmt.Errorf("invalid Claude Desktop MCP config: %w", err)
 	}
-	servers, ok := existing["mcpServers"].(map[string]interface{})
-	if !ok {
-		servers = make(map[string]interface{})
-		existing["mcpServers"] = servers
-	}
+	existing["mcpServers"] = servers
+	removeLegacyServerKeysFor(servers, names)
+	removeCanonicalDWYTMCPEntries(servers, canonicalNamesForSync(names))
 	for name, entry := range claudeConfig {
 		servers[name] = entry
 	}
@@ -350,57 +475,60 @@ func (r *Registry) SyncClaudeDesktop() error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("create Claude Desktop config directory %s: %w", filepath.Dir(configPath), err)
+	}
 	return os.WriteFile(configPath, data, 0644)
 }
 
 // SyncVSCode writes or updates .vscode/mcp.json in the project directory.
-func (r *Registry) SyncVSCode(projectPath string) error {
-	servers := make(map[string]interface{})
-	for name, entry := range r.MCPServers {
-		if !entry.Enabled || !r.IsBinaryInstalled(name) {
-			continue
-		}
-		servers[name] = mcpServerConfig(entry, true)
-	}
-	return writeMergedMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), "servers", servers, true)
+func (r *Registry) SyncVSCode(projectPath string) error { return r.syncVSCode(projectPath, nil) }
+
+func (r *Registry) syncVSCode(projectPath string, names []string) error {
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), "servers", r.projectStdioServersFor(names, true), canonicalNamesForSync(names), true)
 }
 
 // SyncCursor writes project-scoped MCP config for Cursor.
-func (r *Registry) SyncCursor(projectPath string) error {
-	servers := make(map[string]interface{})
-	for name, entry := range r.MCPServers {
-		if !entry.Enabled || !r.IsBinaryInstalled(name) {
-			continue
-		}
-		servers[name] = mcpServerConfig(entry, false)
-	}
-	return writeMergedMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), "mcpServers", servers, false)
+func (r *Registry) SyncCursor(projectPath string) error { return r.syncCursor(projectPath, nil) }
+
+func (r *Registry) syncCursor(projectPath string, names []string) error {
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), "mcpServers", r.projectStdioServersFor(names, false), canonicalNamesForSync(names), false)
 }
 
 // SyncKiro writes both current and legacy Kiro workspace MCP config paths.
-func (r *Registry) SyncKiro(projectPath string) error {
-	servers := make(map[string]interface{})
-	for name, entry := range r.MCPServers {
-		if !entry.Enabled || !r.IsBinaryInstalled(name) {
-			continue
-		}
-		servers[name] = mcpServerConfig(entry, false)
-	}
-	if err := writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), "mcpServers", servers, false); err != nil {
+func (r *Registry) SyncKiro(projectPath string) error { return r.syncKiro(projectPath, nil) }
+
+func (r *Registry) syncKiro(projectPath string, names []string) error {
+	servers := r.projectStdioServersFor(names, false)
+	managed := canonicalNamesForSync(names)
+	if err := writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), "mcpServers", servers, managed, false); err != nil {
 		return err
 	}
-	return writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), "mcpServers", servers, false)
+	return writeMergedMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), "mcpServers", servers, managed, false)
 }
 
 // SyncCodexGlobal writes MCP servers to Codex's shared config file.
-func (r *Registry) SyncCodexGlobal() error {
+func (r *Registry) SyncCodexGlobal() error { return r.syncCodexGlobal(nil) }
+
+// syncCodexGlobal reconciles the whole DWYT-owned block for a full sync. A
+// card-level sync changes only its requested table, retaining the other DWYT
+// table exactly as it was, so reconfiguring Obsidian never adds or rewrites
+// Codebase behind the user's back.
+func (r *Registry) syncCodexGlobal(names []string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	configPath := filepath.Join(home, ".codex", "config.toml")
-	data, _ := os.ReadFile(configPath)
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fmt.Errorf("read Codex MCP config %s: %w", configPath, readErr)
+	}
 	original := string(data)
+	if len(names) > 0 {
+		return r.syncScopedCodexGlobal(configPath, original, names)
+	}
+	lineEnding := preferredLineEnding(original)
 	content := removeManagedBlock(original, "# dwyt:mcp:start", "# dwyt:mcp:end")
 
 	block := r.codexTOMLBlock()
@@ -408,31 +536,41 @@ func (r *Registry) SyncCodexGlobal() error {
 		if content == original {
 			return nil
 		}
-		os.MkdirAll(filepath.Dir(configPath), 0755)
+		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+			return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
+		}
 		return os.WriteFile(configPath, []byte(content), 0644)
 	}
 	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
+		content += lineEnding
 	}
 	if strings.TrimSpace(content) != "" {
-		content += "\n"
+		content += lineEnding
 	}
-	content += block
+	content += withLineEnding(block, lineEnding)
 
-	os.MkdirAll(filepath.Dir(configPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
+	}
 	return os.WriteFile(configPath, []byte(content), 0644)
 }
 
 func (r *Registry) codexTOMLBlock() string {
+	tables := r.codexTOMLTables(nil)
+	if tables == "" {
+		return ""
+	}
+	return "# dwyt:mcp:start\n" + tables + "# dwyt:mcp:end\n"
+}
+
+func (r *Registry) codexTOMLTables(names []string) string {
 	var b strings.Builder
-	b.WriteString("# dwyt:mcp:start\n")
-	wrote := false
-	for _, name := range []string{"codebase", "obsidian"} {
-		entry, ok := r.MCPServers[name]
-		if !ok || !entry.Enabled || !r.IsBinaryInstalled(name) {
+	entries := r.entriesForSync(names)
+	for _, name := range canonicalNamesForSync(names) {
+		entry, ok := entries[name]
+		if !ok {
 			continue
 		}
-		wrote = true
 		b.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
 		b.WriteString(fmt.Sprintf("command = %q\n", entry.Command))
 		b.WriteString("args = [")
@@ -453,11 +591,109 @@ func (r *Registry) codexTOMLBlock() string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString("# dwyt:mcp:end\n")
-	if !wrote {
-		return ""
-	}
 	return b.String()
+}
+
+func (r *Registry) syncScopedCodexGlobal(configPath, original string, names []string) error {
+	startMarker := "# dwyt:mcp:start"
+	endMarker := "# dwyt:mcp:end"
+	lineEnding := preferredLineEnding(original)
+	start := strings.Index(original, startMarker)
+	end := -1
+	if start >= 0 {
+		if relative := strings.Index(original[start:], endMarker); relative >= 0 {
+			end = start + relative + len(endMarker)
+			end = consumeLineEnding(original, end)
+		}
+	}
+
+	// No previous DWYT block: only create one when the requested server is
+	// currently enabled and installed. A disabled card must not create noise.
+	if start < 0 || end < 0 {
+		tables := r.codexTOMLTables(names)
+		if tables == "" {
+			return nil
+		}
+		content := original
+		if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
+			content += lineEnding
+		}
+		if strings.TrimSpace(content) != "" {
+			content += lineEnding
+		}
+		content += startMarker + lineEnding + withLineEnding(tables, lineEnding) + endMarker + lineEnding
+		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+			return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
+		}
+		return os.WriteFile(configPath, []byte(content), 0644)
+	}
+
+	block := original[start:end]
+	for _, name := range canonicalNamesForSync(names) {
+		block = removeCodexMCPEntry(block, name)
+	}
+	if tables := r.codexTOMLTables(names); tables != "" {
+		marker := strings.Index(block, endMarker)
+		if marker >= 0 {
+			block = block[:marker] + withLineEnding(tables, lineEnding) + block[marker:]
+		}
+	}
+
+	content := original[:start] + block + original[end:]
+	if !strings.Contains(block, "[mcp_servers.") {
+		content = removeManagedBlock(original, startMarker, endMarker)
+	}
+	if content == original {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
+	}
+	return os.WriteFile(configPath, []byte(content), 0644)
+}
+
+// removeCodexMCPEntry removes just the requested table and its optional env
+// table from DWYT's managed Codex block. The rest of the TOML (including the
+// other DWYT MCP and all user tables) is left byte-for-byte intact.
+func removeCodexMCPEntry(block, name string) string {
+	for {
+		start := findCodexMCPTable(block, name)
+		if start < 0 {
+			return block
+		}
+		end := len(block)
+		if next := strings.Index(block[start+1:], "\n["); next >= 0 {
+			end = start + 1 + next + 1
+		}
+		if marker := strings.Index(block[start:], "# dwyt:mcp:end"); marker >= 0 {
+			markerStart := start + marker
+			if markerStart < end {
+				end = markerStart
+			}
+		}
+		block = block[:start] + block[end:]
+	}
+}
+
+func findCodexMCPTable(block, name string) int {
+	for _, header := range []string{
+		"[mcp_servers." + name + "]",
+		"[mcp_servers." + name + ".env]",
+	} {
+		searchFrom := 0
+		for {
+			idx := strings.Index(block[searchFrom:], header)
+			if idx < 0 {
+				break
+			}
+			idx += searchFrom
+			if idx == 0 || block[idx-1] == '\n' {
+				return idx
+			}
+			searchFrom = idx + len(header)
+		}
+	}
+	return -1
 }
 
 func mcpServerConfig(entry MCPServerEntry, includeType bool) map[string]interface{} {
@@ -519,8 +755,46 @@ func isObsidianEntry(name string, entry MCPServerEntry) bool {
 	return strings.Contains(base, "dwyt-obsidian-mcp") || base == "dwyt-obsidian"
 }
 
+// readJSONObject loads a user-managed JSON configuration without silently
+// replacing malformed data. Callers can safely merge into the returned map;
+// a missing file is distinct from an unreadable or invalid one.
+func readJSONObject(path string) (map[string]interface{}, bool, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return make(map[string]interface{}), false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	config := make(map[string]interface{})
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, false, fmt.Errorf("invalid JSON in %s: %w", path, err)
+	}
+	if config == nil {
+		return nil, false, fmt.Errorf("invalid JSON in %s: expected an object", path)
+	}
+	return config, true, nil
+}
+
+// jsonObjectField returns an object-valued field, creating it only when the
+// field is absent. A present array/string/null is a user configuration error:
+// replacing it would silently destroy a valid (but unexpected) configuration.
+func jsonObjectField(config map[string]interface{}, key string) (map[string]interface{}, error) {
+	raw, exists := config[key]
+	if !exists {
+		return make(map[string]interface{}), nil
+	}
+	value, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("field %q must be a JSON object, got %T", key, raw)
+	}
+	return value, nil
+}
+
 func writeJSONFile(path string, value interface{}) error {
-	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create config directory %s: %w", filepath.Dir(path), err)
+	}
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
@@ -528,16 +802,21 @@ func writeJSONFile(path string, value interface{}) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-func writeMergedMCPJSON(path, serverKey string, managedServers map[string]interface{}, ensureInputs bool) error {
-	config := make(map[string]interface{})
-	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
-		json.Unmarshal(data, &config)
+// writeMergedMCPJSON reconciles only the DWYT server names supplied in
+// managedNames. This lets a full sync remove stale disabled/uninstalled DWYT
+// entries while a per-card sync leaves every other server (including the other
+// DWYT card and all user servers) untouched.
+func writeMergedMCPJSON(path, serverKey string, managedServers map[string]interface{}, managedNames []string, ensureInputs bool) error {
+	config, _, err := readJSONObject(path)
+	if err != nil {
+		return err
 	}
-	servers, _ := config[serverKey].(map[string]interface{})
-	if servers == nil {
-		servers = make(map[string]interface{})
+	servers, err := jsonObjectField(config, serverKey)
+	if err != nil {
+		return fmt.Errorf("invalid MCP config %s: %w", path, err)
 	}
-	removeLegacyServerKeys(servers)
+	removeLegacyServerKeysFor(servers, managedNames)
+	removeCanonicalDWYTMCPEntries(servers, managedNames)
 	for name, entry := range managedServers {
 		servers[name] = entry
 	}
@@ -552,9 +831,7 @@ func writeMergedMCPJSON(path, serverKey string, managedServers map[string]interf
 }
 
 func removeLegacyServerKeys(servers map[string]interface{}) {
-	for _, key := range []string{"dwyt", "dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
-		delete(servers, key)
-	}
+	removeLegacyServerKeysFor(servers, nil)
 }
 
 func removeManagedBlock(content, start, end string) string {
@@ -568,14 +845,48 @@ func removeManagedBlock(content, start, end string) string {
 			return content
 		}
 		endPos := startIdx + endIdx + len(end)
-		if endPos < len(content) && content[endPos] == '\n' {
-			endPos++
-		}
-		if startIdx > 0 && content[startIdx-1] == '\n' {
-			startIdx--
-		}
+		endPos = consumeLineEnding(content, endPos)
+		startIdx = trimPreviousLineEnding(content, startIdx)
 		content = content[:startIdx] + content[endPos:]
 	}
+}
+
+func preferredLineEnding(content string) string {
+	newline := strings.IndexByte(content, '\n')
+	if newline > 0 && content[newline-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func withLineEnding(content, lineEnding string) string {
+	if lineEnding == "\n" {
+		return content
+	}
+	return strings.ReplaceAll(content, "\n", lineEnding)
+}
+
+func consumeLineEnding(content string, position int) int {
+	if position >= len(content) {
+		return position
+	}
+	if strings.HasPrefix(content[position:], "\r\n") {
+		return position + 2
+	}
+	if content[position] == '\r' || content[position] == '\n' {
+		return position + 1
+	}
+	return position
+}
+
+func trimPreviousLineEnding(content string, position int) int {
+	if position >= 2 && content[position-2:position] == "\r\n" {
+		return position - 2
+	}
+	if position > 0 && (content[position-1] == '\r' || content[position-1] == '\n') {
+		return position - 1
+	}
+	return position
 }
 
 // ConfigureMCPByName writes MCP configuration for a specific MCP server only,
@@ -588,7 +899,7 @@ func (r *Registry) ConfigureMCPByName(projectPath, name string, clients []string
 		return fmt.Errorf("mcp registry save failed: %w", err)
 	}
 
-	errors := r.syncConfiguredTargets(projectPath, clients)
+	errors := r.syncConfiguredTargets(projectPath, clients, []string{name})
 	if len(errors) > 0 {
 		return fmt.Errorf("sync errors: %v", errors)
 	}
@@ -609,7 +920,7 @@ func (r *Registry) ConfigureMCP(projectPath string, clients []string) error {
 		backup[k] = v
 	}
 
-	errors := r.syncConfiguredTargets(projectPath, clients)
+	errors := r.syncConfiguredTargets(projectPath, clients, nil)
 
 	if len(errors) > 0 {
 		// Rollback: restore registry to pre-sync state

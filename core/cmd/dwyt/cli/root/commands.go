@@ -219,7 +219,7 @@ func syncMCPAll() error {
 		return fmt.Errorf("mcp configure: %w", err)
 	}
 	fmt.Printf("\n  ✓ MCP configs synced for: %v\n", clients)
-	fmt.Printf("  Registry: %s\n\n", filepath.Join(os.Getenv("HOME"), ".dwyt", "config", "mcp-registry.json"))
+	fmt.Printf("  Registry: %s\n\n", filepath.Join(DwytHome, "config", "mcp-registry.json"))
 	return nil
 }
 

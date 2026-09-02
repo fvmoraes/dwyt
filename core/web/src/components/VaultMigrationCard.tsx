@@ -47,8 +47,11 @@ export default function VaultMigrationCard({ t }: Props) {
     setRunning(true)
     setError('')
     try {
-      const r = await api.runVaultMigration()
-      setReport(r.report)
+      await api.runVaultMigration()
+      // The POST reports what it just changed. Reload the dry-run state so a
+      // successful migration disappears immediately instead of leaving a
+      // stale "migrated" card on screen until the dashboard is refreshed.
+      await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

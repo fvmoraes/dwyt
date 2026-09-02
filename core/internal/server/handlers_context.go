@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
-	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +22,9 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 
 	toolsInstalled := map[string]bool{}
 	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom"} {
-		_, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, t))
+		tool := t
+		if t == "codebase-memory-mcp" { tool = "cbmcp" }
+		_, err := os.Stat(ds.toolPath(tool))
 		toolsInstalled[t] = err == nil
 	}
 	toolsInstalled["obsidian"] = true
@@ -76,7 +77,7 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 					item["obsidian_count"] = 0
 					item["has_obsidian"] = false
 				}
-				if rtkMetrics := status.GetRTKMetricsForPath(ds.DwytBin, p.Path); rtkMetrics != nil {
+				if rtkMetrics := status.GetRTKMetricsForPathBinary(ds.rtkPath(), p.Path); rtkMetrics != nil {
 					item["rtk_commands"] = rtkMetrics.TotalCommands
 					item["rtk_saved"] = rtkMetrics.TokensSaved
 				}

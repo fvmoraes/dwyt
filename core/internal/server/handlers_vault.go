@@ -48,11 +48,26 @@ func (ds *DashboardServer) vaultMigrationOpts() brain.MigrationOptions {
 			if ds.Store == nil {
 				return "", "", false
 			}
-			p, err := ds.Store.GetProject(hash)
+			p, err := ds.Store.GetActiveProject(hash)
 			if err != nil || p == nil {
 				return "", "", false
 			}
 			return p.Path, p.Name, true
 		},
+		IgnoreHash: ds.ignoreRemovedVault,
 	}
+}
+
+// ignoreRemovedVault keeps a soft-removed project's vault intact without
+// surfacing it as pending migration work. Re-adding the project restores it
+// to the active registry, where it becomes eligible again automatically.
+func (ds *DashboardServer) ignoreRemovedVault(hash string) bool {
+	if ds.Store == nil {
+		return false
+	}
+	if _, err := ds.Store.GetProject(hash); err != nil {
+		return false
+	}
+	_, err := ds.Store.GetActiveProject(hash)
+	return err != nil
 }
