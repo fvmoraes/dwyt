@@ -104,7 +104,7 @@ Metrics are filtered per project — the card shows commands executed and tokens
 A code graph that enables structural navigation without file-by-file grep. It is the source of truth for symbols, dependencies, calls, routes, and impact analysis. Indexing is on-demand: click "Index" when you want to analyze the project.
 
 Managed by the internal **ProcessManager**:
-- Start/Stop with healthcheck (5 retries, exponential backoff)
+- Start/Stop with an immediate health probe, then 500 ms polling within a total startup budget
 - Stdout/stderr captured to `~/.dwyt/logs/codebase-*.log`
 - Dynamic port (9749, falls back to alternatives if occupied)
 - **View Logs** button for real diagnostics on failure
@@ -156,16 +156,7 @@ The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault 
 
 ### Headroom — compatible API compression
 
-A proxy/cache optimization for compatible AI clients. DWYT can configure eligible clients with Headroom's native wrapping:
-
-```bash
-headroom wrap claude      # Claude Code
-headroom wrap codex       # Codex API-key login only
-headroom wrap cursor      # Cursor
-headroom wrap copilot     # GitHub Copilot CLI
-```
-
-Codex authenticated through ChatGPT/OAuth is skipped. Headroom is an optimization only; it is not memory and not a source of code truth. If installed but inactive, DWYT reports it as `installed (launch on demand)` instead of a critical error.
+A proxy/cache optimization for compatible AI clients. DWYT owns the proxy through its ProcessManager and configures supported clients with Headroom's non-interactive, durable `init` command rather than interactive `wrap` commands. Codex authenticated through ChatGPT/OAuth is skipped. Headroom is an optimization only; it is not memory and not a source of code truth. If installed but inactive, DWYT reports it as `installed (launch on demand)` instead of a critical error.
 
 ---
 
@@ -231,10 +222,11 @@ On first run, the UI opens the Setup Wizard. **Obsidian is mandatory** and pre-s
 │  │ ● RTK            Terminal output compression    │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
-│  ▾ AI Clients                6 of 6 selected            │
+│  ▾ AI Clients                8 of 8 selected            │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │ ● Claude Code   ● Codex   ● GitHub Copilot      │    │
 │  │ ● Kiro          ● Cursor  ● OpenCode            │    │
+│  │ ● Windsurf      ● Continue                       │    │
 │  └─────────────────────────────────────────────────┘    │
 │                                                         │
 │  ▾ Project                   /home/user/my-project      │
@@ -244,7 +236,7 @@ On first run, the UI opens the Setup Wizard. **Obsidian is mandatory** and pre-s
 └─────────────────────────────────────────────────────────┘
 ```
 
-Click **Install →** and DWYT downloads Configures Codebase, Headroom, and RTK. Generates instruction files for each AI client. Runs `headroom wrap` for supported clients; Codex Headroom setup only runs for API-key login. Starts services. Opens the Dashboard.
+Click **Install →** and DWYT downloads and configures Codebase, Headroom, and RTK. It generates instruction files for each selected AI client. Once the proxy is healthy, DWYT runs the supported non-interactive `headroom init` setup; Codex Headroom setup only runs for API-key login. It then starts services and opens the Dashboard.
 
 ---
 
@@ -335,6 +327,8 @@ The generated instructions enforce the [Codebase Law](docs/CODEBASE-LAW.md) and 
 | **Kiro** | `.kiro/steering/dwyt.md`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `AGENTS.md` |
 | **Cursor** | `.cursor/rules/dwyt.mdc`, `AGENTS.md` |
 | **OpenCode** | `opencode.json`, `AGENTS.md`, `.mcp.json` |
+| **Windsurf** | `.windsurf/rules/dwyt.md`, `.windsurf/mcp.json` |
+| **Continue** | `.continue/mcp.json` |
 
 ---
 
@@ -383,7 +377,9 @@ See [Kiro Power](docs/KIRO-POWER.md).
 
 ## Headroom — technical details
 
-Headroom starts automatically in background on port 8787 with `dwyt .`. The `env.sh` injected into your shell RC (Linux / macOS) exports:
+Headroom requests port 8787 by default when `dwyt .` starts it. If that port is occupied, DWYT selects the first free port from 8788 through 8791 and publishes the effective port to the dashboard, runtime state, and managed environment file. New terminals should source the updated `env.sh` (Linux/macOS) or `env.ps1` (Windows) before launching a client.
+
+The `env.sh` injected into your shell RC (Linux / macOS) exports the effective port, for example:
 
 ```bash
 export HEADROOM_PORT=8787
@@ -399,27 +395,39 @@ $env:OPENAI_BASE_URL = "http://127.0.0.1:8787/v1"
 $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8787"
 ```
 
-On start, DWYT runs `headroom wrap` for each eligible enabled AI client, configuring their proxy settings natively. Codex with ChatGPT/OAuth login is skipped; Codex Headroom setup only runs for API-key login. On stop, `headroom unwrap` cleans up. **Automatic fallback**: if Headroom goes down, clients fall back to direct API endpoints.
+After the proxy is healthy, DWYT runs Headroom's non-interactive durable setup for the selected eligible clients. It does **not** use `headroom wrap` or `headroom unwrap`, because `wrap` starts its own interactive proxy and CLI process. Codex with ChatGPT/OAuth login is skipped; Codex setup only runs for API-key login.
 
-### Headroom wrap mapping
+### Headroom client setup
 
-| DWYT client | Headroom command |
-|-------------|-----------------|
-| Claude Code | `headroom wrap claude` |
-| Codex (API-key login) | `headroom wrap codex` |
-| Cursor | `headroom wrap cursor` |
-| GitHub Copilot | `headroom wrap copilot` |
-| Kiro / OpenCode | env vars only (no native wrap) |
+| DWYT client | Headroom setup |
+|-------------|----------------|
+| Claude Code | `headroom init --port <effective-port> claude` |
+| Codex (API-key login) | `headroom init --port <effective-port> codex` |
+| GitHub Copilot | `headroom init --global --port <effective-port> copilot` |
+| Cursor | Set its base URL manually to `http://127.0.0.1:<effective-port>/v1`; Headroom has no durable Cursor `init` command. |
+| Kiro / OpenCode / Windsurf / Continue | Managed environment variables only; no native Headroom `init` command. |
+
+### Startup healthcheck and timeout
+
+The dashboard daemon and managed HTTP services make a probe immediately, then retry every 500 ms until their total startup budget expires. Each HTTP attempt is limited to 2 seconds and cannot extend that total budget. An HTTP 200 is enough to mark the configured endpoint ready; for Headroom, an optional degraded component such as `kompress` does not block readiness.
+
+`DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` sets the total budget for both daemon and managed-service startup. The default is 60 seconds on Linux/macOS and 120 seconds on Windows. Set a positive integer in seconds to override it for the process, for example:
+
+```bash
+DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS=180 dwyt .
+```
+
+On a daemon startup timeout, DWYT logs the tested URL, child PID, last HTTP/connection error, and elapsed wait. It then terminates the daemon tree: a dedicated process group on Linux/macOS and `taskkill /F /T` on Windows. This prevents Headroom launcher and Python descendants from being orphaned.
 
 ---
 
 ## Codebase — technical details
 
 Managed by the internal **ProcessManager**:
-- **Start**: healthcheck with retry (5 attempts, exponential backoff, 30s timeout for Codebase)
-- **Stop**: `SIGTERM` → wait 5s → `SIGKILL`
+- **Start**: immediate healthcheck followed by 500 ms polling, using the shared 60 s (Linux/macOS) or 120 s (Windows) startup budget
+- **Stop**: terminates the managed process tree; Windows uses `taskkill /F /T`
 - **Logs**: `~/.dwyt/logs/codebase-stdout.log` + `codebase-stderr.log`
-- **Dynamic port**: if 9749 is occupied, tries 9750, 9751, 9752
+- **Dynamic port**: if 9749 is occupied, tries 9750 through 9753
 - **stdin**: kept open via pipe (Codebase is an MCP server, exits on EOF)
 
 **Indexing**: on-demand only. Click "Index" in the UI. Progress is polled every 2 seconds.

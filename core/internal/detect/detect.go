@@ -65,6 +65,14 @@ func Detect() *Env {
 	} else {
 		e.DwytHome = filepath.Join(e.HomeDir, ".dwyt")
 	}
+	// Keep every command (including reinstall/uninstall) on the same state
+	// directory as the daemon when the user opts into DWYT_HOME. Previously
+	// only the root command applied this override, so maintenance commands
+	// could clean the platform default while the active installation lived
+	// somewhere else.
+	if override := strings.TrimSpace(os.Getenv("DWYT_HOME")); override != "" {
+		e.DwytHome = override
+	}
 
 	e.DwytBin = filepath.Join(e.DwytHome, "bin")
 	e.DwytData = filepath.Join(e.DwytHome, "data")

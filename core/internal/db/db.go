@@ -14,14 +14,14 @@ import (
 )
 
 type Project struct {
-	ID        string    `json:"id"`
-	Path      string    `json:"path"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	LastOpen  time.Time `json:"last_open"`
+	ID        string     `json:"id"`
+	Path      string     `json:"path"`
+	Name      string     `json:"name"`
+	CreatedAt time.Time  `json:"created_at"`
+	LastOpen  time.Time  `json:"last_open"`
 	IndexedAt *time.Time `json:"indexed_at,omitempty"`
-	Nodes     int       `json:"nodes"`
-	Edges     int       `json:"edges"`
+	Nodes     int        `json:"nodes"`
+	Edges     int        `json:"edges"`
 }
 
 type Store struct {
@@ -130,11 +130,27 @@ func (s *Store) UpsertProject(path string) (*Project, error) {
 }
 
 func (s *Store) GetProject(id string) (*Project, error) {
+	return s.getProject(id, false)
+}
+
+// GetActiveProject returns a project only while it is present in the active
+// dashboard list. Migration uses this to avoid reviving vaults for projects
+// the user has explicitly removed, while GetProject keeps its historical-data
+// contract for callers that need the soft-deleted row.
+func (s *Store) GetActiveProject(id string) (*Project, error) {
+	return s.getProject(id, true)
+}
+
+func (s *Store) getProject(id string, activeOnly bool) (*Project, error) {
 	p := &Project{}
 	var indexedAt sql.NullString
 	var createdAt, lastOpen string
+	query := `SELECT id, path, name, created_at, last_open, indexed_at, nodes, edges FROM projects WHERE id = ?`
+	if activeOnly {
+		query += ` AND removed = 0`
+	}
 	err := s.db.QueryRow(
-		`SELECT id, path, name, created_at, last_open, indexed_at, nodes, edges FROM projects WHERE id = ?`,
+		query,
 		id,
 	).Scan(&p.ID, &p.Path, &p.Name, &createdAt, &lastOpen, &indexedAt, &p.Nodes, &p.Edges)
 	if err != nil {

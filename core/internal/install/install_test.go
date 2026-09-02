@@ -111,3 +111,14 @@ func TestObsidianMCPRemovesLegacyCopy(t *testing.T) {
 		t.Fatal("legacy dwyt-obsidian-mcp copy should be removed")
 	}
 }
+
+func TestHeadroomBatchWrapperUsesCMDPathQuoting(t *testing.T) {
+	got := headroomBatchWrapper(`C:\Users\Ana Silva\AppData\Roaming\dwyt\headroom-venv\Scripts\headroom.exe`)
+	want := "@echo off\r\n\"C:\\Users\\Ana Silva\\AppData\\Roaming\\dwyt\\headroom-venv\\Scripts\\headroom.exe\" %*\r\n"
+	if got != want {
+		t.Fatalf("batch wrapper = %q, want %q", got, want)
+	}
+	if got := headroomBatchWrapper(`C:\Users\100%\headroom.exe`); got != "@echo off\r\n\"C:\\Users\\100%%\\headroom.exe\" %*\r\n" {
+		t.Fatalf("batch wrapper must escape percent expansion, got %q", got)
+	}
+}

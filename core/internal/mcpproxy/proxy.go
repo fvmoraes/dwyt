@@ -22,6 +22,7 @@ package mcpproxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -214,16 +215,23 @@ type HTTPReporter struct {
 	url    string
 	client *http.Client
 	ch     chan UsageReport
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
 }
 
 // NewHTTPReporter builds a reporter targeting the given dashboard usage URL.
 func NewHTTPReporter(url string) *HTTPReporter {
+	ctx, cancel := context.WithCancel(context.Background())
 	r := &HTTPReporter{
 		url:    url,
 		client: &http.Client{Timeout: 2 * time.Second},
 		ch:     make(chan UsageReport, 256),
+		ctx:    ctx,
+		cancel: cancel,
+		done:   make(chan struct{}),
 	}
 	r.wg.Add(1)
 	go r.loop()
@@ -232,12 +240,31 @@ func NewHTTPReporter(url string) *HTTPReporter {
 
 func (r *HTTPReporter) loop() {
 	defer r.wg.Done()
-	for rep := range r.ch {
+	for {
+		// Prefer shutdown over a queued report. Close must not spend up to one
+		// HTTP timeout per buffered event while an MCP client is exiting.
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		var rep UsageReport
+		select {
+		case <-r.done:
+			return
+		case rep = <-r.ch:
+		}
 		body, err := json.Marshal(rep)
 		if err != nil {
 			continue
 		}
-		resp, err := r.client.Post(r.url, "application/json", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(r.ctx, http.MethodPost, r.url, bytes.NewReader(body))
+		if err != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := r.client.Do(req)
 		if err != nil {
 			continue
 		}
@@ -248,7 +275,17 @@ func (r *HTTPReporter) loop() {
 // Report enqueues a usage report, dropping it if the queue is full rather than
 // blocking the proxied stream.
 func (r *HTTPReporter) Report(rep UsageReport) {
+	// Keep the queue open permanently. Run's stdin tee goroutine can outlive
+	// the target process; it may observe another tools/call after Close, and
+	// sending to a closed channel would crash the proxy process.
 	select {
+	case <-r.done:
+		return
+	default:
+	}
+	select {
+	case <-r.done:
+		return
 	case r.ch <- rep:
 	default:
 		// Queue full: drop. Counting is best-effort and must never back-pressure
@@ -256,10 +293,13 @@ func (r *HTTPReporter) Report(rep UsageReport) {
 	}
 }
 
-// Close drains and stops the worker.
+// Close cancels in-flight reports and stops the worker without draining the
+// queue. Reporting is deliberately best-effort, so a slow/dead dashboard must
+// never delay MCP shutdown; keeping ch open also makes a late Report harmless.
 func (r *HTTPReporter) Close() {
 	r.once.Do(func() {
-		close(r.ch)
+		r.cancel()
+		close(r.done)
 		r.wg.Wait()
 	})
 }

@@ -185,9 +185,9 @@ func TestIsHashOnlyName(t *testing.T) {
 	no := []string{
 		"dwyt",
 		"abc123def456_dwyt",
-		"abc",                              // too short
-		"abcdefghijkl",                    // not hex
-		"abc123def456_dwyt-extra",         // canonical
+		"abc",                     // too short
+		"abcdefghijkl",            // not hex
+		"abc123def456_dwyt-extra", // canonical
 	}
 	for _, n := range no {
 		if isHashOnlyName(n) {
@@ -490,6 +490,30 @@ func TestMigrateVaultsIgnoresForeignDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(foreign); err != nil {
 		t.Fatalf("foreign directory was removed: %v", err)
+	}
+}
+
+func TestMigrateVaultsCanIgnorePreservedInactiveVault(t *testing.T) {
+	dwytHome := t.TempDir()
+	projectsDir := filepath.Join(dwytHome, "projects")
+	legacy := filepath.Join(projectsDir, "abcdef123456")
+	if err := os.MkdirAll(legacy, 0755); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MigrateVaultsToNamedLayout(dwytHome, MigrationOptions{
+		ProjectPathResolver: func(string) (string, string, bool) {
+			return "/tmp/removed", "removed", true
+		},
+		IgnoreHash: func(hash string) bool { return hash == "abcdef123456" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Results) != 0 || report.Migrated != 0 || report.Unidentifiable != 0 {
+		t.Fatalf("ignored vault must not appear as pending work: %+v", report)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("ignored vault must be preserved: %v", err)
 	}
 }
 

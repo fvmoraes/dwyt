@@ -20,6 +20,10 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	if err := ds.configureRegistryToolSources(reg); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
 	result := make(map[string]interface{})
 	for name, entry := range reg.MCPServers {
 		st := ds.ProcMan.Status(mcpProcessName(name))
@@ -84,6 +88,11 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 	if err != nil {
 		log.Warn("mcp configure registry load failed", log.Fields{"error": err.Error(), "stage": "registry"})
 		c.JSON(500, gin.H{"status": "error", "stage": "registry", "error": err.Error()})
+		return
+	}
+	if err := ds.configureRegistryToolSources(reg); err != nil {
+		log.Warn("mcp configure source resolution failed", log.Fields{"error": err.Error(), "stage": "source"})
+		c.JSON(500, gin.H{"status": "error", "stage": "source", "error": err.Error()})
 		return
 	}
 	clients := ds.clientsString()

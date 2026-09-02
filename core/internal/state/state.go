@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
 // ProcessInfo tracks a single managed process.
@@ -33,6 +34,7 @@ type RuntimeState struct {
 	ToolErrors         map[string]string       `json:"tool_errors"` // last error per tool
 	Projects           map[string]ProjectEntry `json:"projects"`
 	Clients            []string                `json:"clients"`
+	ToolSources        map[string]toolsource.Selection `json:"tool_sources,omitempty"`
 	Path               string                  `json:"-"` // state.json path
 }
 
@@ -59,6 +61,7 @@ func Init(dwytHome string) *RuntimeState {
 		Processes:  make(map[string]ProcessInfo),
 		ToolErrors: make(map[string]string),
 		Projects:   make(map[string]ProjectEntry),
+		ToolSources: make(map[string]toolsource.Selection),
 		Path:       p,
 	}
 
@@ -73,6 +76,9 @@ func Init(dwytHome string) *RuntimeState {
 	}
 	if s.Projects == nil {
 		s.Projects = make(map[string]ProjectEntry)
+	}
+	if s.ToolSources == nil {
+		s.ToolSources = make(map[string]toolsource.Selection)
 	}
 	if s.Version == "" {
 		s.Version = "dev"
@@ -215,6 +221,31 @@ func (s *RuntimeState) SetClients(clients []string) {
 	s.maybeSave()
 }
 
+// SetToolSources persists the ownership and resolved local path of each Hub
+// tool. Copy input values so a request-owned map cannot race with runtime
+// readers after setup has completed.
+func (s *RuntimeState) SetToolSources(sources map[string]toolsource.Selection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ToolSources = make(map[string]toolsource.Selection, len(sources))
+	for tool, source := range sources {
+		s.ToolSources[tool] = source
+	}
+	s.maybeSave()
+}
+
+// ToolSourcesSnapshot returns a copy suitable for source resolution without
+// exposing the mutable state map to callers.
+func (s *RuntimeState) ToolSourcesSnapshot() map[string]toolsource.Selection {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make(map[string]toolsource.Selection, len(s.ToolSources))
+	for tool, source := range s.ToolSources {
+		result[tool] = source
+	}
+	return result
+}
+
 // ── Persistence ───────────────────────────────────────────────────────────
 
 // Save persists the state to disk.
@@ -276,5 +307,6 @@ func (s *RuntimeState) Snapshot() map[string]interface{} {
 		"processes":            processes,
 		"tool_errors":          s.ToolErrors,
 		"clients":              s.Clients,
+		"tool_sources":         s.ToolSources,
 	}
 }

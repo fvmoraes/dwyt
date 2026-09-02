@@ -48,6 +48,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.POST("/codebase/index", ds.apiCodebaseIndex)
 		api.GET("/codebase/index/status", ds.apiCodebaseIndexStatus)
 		api.POST("/setup/save", ds.apiSetupSave)
+		api.POST("/tool-source/detect", ds.apiToolSourceDetect)
 		api.GET("/setup/load", ds.apiSetupLoad)
 		api.GET("/setup/status", ds.apiSetupStatus)
 		api.GET("/fs/browse", ds.apiFsBrowse)

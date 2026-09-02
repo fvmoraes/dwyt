@@ -7,6 +7,25 @@ import (
 	"strings"
 )
 
+// pythonCommand is an interpreter together with arguments that must precede
+// the regular Python arguments.  Windows' py launcher needs this shape: the
+// requested interpreter version (for example -3.12) is an argument to py,
+// not part of the executable name.
+type pythonCommand struct {
+	bin        string
+	prefixArgs []string
+}
+
+func (p pythonCommand) String() string {
+	return strings.TrimSpace(strings.Join(append([]string{p.bin}, p.prefixArgs...), " "))
+}
+
+func (p pythonCommand) commandArgs(args ...string) []string {
+	full := make([]string, 0, len(p.prefixArgs)+len(args))
+	full = append(full, p.prefixArgs...)
+	return append(full, args...)
+}
+
 // isWindowsStorePythonStub reports whether path is a Microsoft Store
 // "App Execution Alias" for Python rather than a real interpreter. These stubs
 // live under ...\AppData\Local\Microsoft\WindowsApps\ and, when executed
@@ -30,90 +49,156 @@ func isWindowsStorePythonStub(path string) bool {
 // que `xml.parsers.expat` carrega — em macOS+Homebrew o pyexpat às vezes
 // fica linkado ao libexpat do sistema e quebra o pip silenciosamente.
 //
-// Quando NENHUM Python é encontrado, tenta uma instalação automática
-// best-effort (winget/brew/gerenciador de pacotes) e refaz a busca. Se a
-// instalação não for possível, retorna o erro original com a dica de
-// remediação manual — nunca trava em prompts.
+// Quando nenhum Python compatível é encontrado, tenta uma instalação
+// automática best-effort (winget/brew/gerenciador de pacotes) e refaz a
+// busca. Se a instalação não for possível, retorna o erro original com a dica
+// de remediação manual — nunca trava em prompts.
 func findCompatiblePython() (string, error) {
-	path, anyFound, err := lookupCompatiblePython()
-	if err == nil {
-		return path, nil
+	python, err := findCompatiblePythonCommand()
+	if err != nil {
+		return "", err
 	}
-	// Só tenta instalar quando nada foi achado. Se um Python existe mas falhou
-	// no pre-flight (ex.: pyexpat quebrado), instalar outro provavelmente não
-	// resolve e a dica de remediação é mais útil que uma reinstalação.
-	if !anyFound {
-		if instErr := tryInstallPython(); instErr != nil {
-			fmt.Printf("  ⚠ headroom: instalação automática do Python falhou (%v)\n", instErr)
-		} else if path, _, reErr := lookupCompatiblePython(); reErr == nil {
-			return path, nil
-		}
-	}
-	return "", err
+	return python.bin, nil
 }
 
-// lookupCompatiblePython percorre os candidatos e devolve o primeiro
-// interpretador que passa no pre-flight. anyFound indica se ao menos um Python
-// real (não stub da Store) foi localizado, mesmo que tenha reprovado — isso
-// permite ao chamador decidir entre tentar instalar (nada achado) ou apenas
-// orientar o usuário (achado mas inválido).
-func lookupCompatiblePython() (string, bool, error) {
-	candidates := []string{"python3.12", "python3.11", "python3.10", "python3", "python"}
-	if runtime.GOOS == "windows" {
-		// Windows rarely has versioned python3.x on PATH; the "py" launcher is
-		// the most reliable real interpreter, while "python"/"python3" on PATH
-		// are frequently the Microsoft Store alias stubs.
-		candidates = []string{"py", "python", "python3"}
+// findCompatiblePythonCommand is the command-aware counterpart to
+// findCompatiblePython.  Headroom uses it so Windows can invoke the py
+// launcher as `py -3.12`, rather than accidentally accepting py's default
+// interpreter (which may be Python 3.13+).
+func findCompatiblePythonCommand() (pythonCommand, error) {
+	python, anyCompatible, err := lookupCompatiblePythonCommand()
+	if err == nil {
+		return python, nil
 	}
+	// Só evita reinstalar quando uma versão compatível já foi localizada, mas
+	// falhou no pre-flight (ex.: pyexpat quebrado). Um Python 3.13+ instalado
+	// não é compatível para este bootstrap e deve permitir a tentativa de
+	// instalar o 3.12 automaticamente.
+	if !anyCompatible {
+		if instErr := tryInstallPython(); instErr != nil {
+			fmt.Printf("  ⚠ headroom: instalação automática do Python falhou (%v)\n", instErr)
+		} else if python, _, reErr := lookupCompatiblePythonCommand(); reErr == nil {
+			return python, nil
+		} else {
+			err = reErr
+		}
+	}
+	return pythonCommand{}, err
+}
+
+// lookupCompatiblePython preserves the older string-returning helper for
+// callers that only need the executable path. Headroom itself must use
+// lookupCompatiblePythonCommand to retain py's version selector.
+func lookupCompatiblePython() (string, bool, error) {
+	python, compatible, err := lookupCompatiblePythonCommand()
+	return python.bin, compatible, err
+}
+
+// lookupCompatiblePythonCommand percorre os candidatos e devolve o primeiro
+// interpretador 3.10–3.12 que passa no pre-flight. anyCompatible indica se
+// uma versão suportada foi localizada, mesmo que seu pre-flight falhe; isso
+// evita reinstalar um Python 3.12 local que precisa de reparo. Interpreters
+// 3.13+ não contam como compatíveis, para que o bootstrap possa instalar 3.12.
+func lookupCompatiblePythonCommand() (pythonCommand, bool, error) {
+	return lookupCompatiblePythonCandidates(
+		pythonCandidatesForOS(runtime.GOOS),
+		exec.LookPath,
+		isWindowsStorePythonStub,
+		pythonCommandMajorMinor,
+		validatePythonCommand,
+	)
+}
+
+func pythonCandidatesForOS(goos string) []pythonCommand {
+	if goos == "windows" {
+		// py is the most reliable launcher on Windows, but it must be told to
+		// select 3.12. Invoking bare `py` silently chooses the user's default
+		// Python, which is commonly 3.13+ after a system upgrade.
+		return []pythonCommand{
+			{bin: "py", prefixArgs: []string{"-3.12"}},
+			{bin: "python3.12"},
+			{bin: "python"},
+			{bin: "python3"},
+		}
+	}
+	return []pythonCommand{
+		{bin: "python3.12"},
+		{bin: "python3.11"},
+		{bin: "python3.10"},
+		{bin: "python3"},
+		{bin: "python"},
+	}
+}
+
+// lookupCompatiblePythonCandidates contains the decision logic separately
+// from process discovery so the Windows launcher selection can be tested
+// without depending on the machine's installed Pythons.
+func lookupCompatiblePythonCandidates(
+	candidates []pythonCommand,
+	lookPath func(string) (string, error),
+	isStoreStub func(string) bool,
+	version func(pythonCommand) (int, int, bool),
+	validate func(pythonCommand) error,
+) (pythonCommand, bool, error) {
 	var lastErr error
-	var anyFound bool
-	for _, name := range candidates {
-		path, err := exec.LookPath(name)
+	var anyCompatible bool
+	for _, candidate := range candidates {
+		path, err := lookPath(candidate.bin)
 		if err != nil {
 			continue
 		}
-		if isWindowsStorePythonStub(path) {
+		if isStoreStub(path) {
 			// Not a real interpreter — the Store alias stub. Skip it without
-			// marking anyFound, so the user gets the "install Python" hint.
+			// marking anyCompatible, so the automatic 3.12 install can run.
 			fmt.Printf("  ⚠ headroom: ignorando alias da Microsoft Store %s (não é um Python real)\n", path)
 			continue
 		}
-		anyFound = true
-		warnIfNewerPython(path)
-		if err := validatePython(path); err != nil {
-			lastErr = fmt.Errorf("%s: %w", path, err)
-			fmt.Printf("  ⚠ headroom: pulando %s (%v)\n", path, err)
+		candidate.bin = path
+		maj, min, ok := version(candidate)
+		if !ok {
+			lastErr = fmt.Errorf("%s: não foi possível determinar a versão do Python", candidate)
+			fmt.Printf("  ⚠ headroom: pulando %s (%v)\n", candidate, lastErr)
 			continue
 		}
-		return path, true, nil
+		if err := validatePythonVersion(maj, min); err != nil {
+			lastErr = fmt.Errorf("%s: %w", candidate, err)
+			fmt.Printf("  ⚠ headroom: pulando %s (%v)\n", candidate, err)
+			continue
+		}
+		anyCompatible = true
+		if err := validate(candidate); err != nil {
+			lastErr = fmt.Errorf("%s: %w", candidate, err)
+			fmt.Printf("  ⚠ headroom: pulando %s (%v)\n", candidate, err)
+			continue
+		}
+		return candidate, true, nil
 	}
-	if anyFound && lastErr != nil {
-		return "", true, fmt.Errorf("nenhum Python encontrado passou no pre-flight: %w\n%s",
+	if lastErr != nil {
+		return pythonCommand{}, anyCompatible, fmt.Errorf("nenhum Python compatível encontrado passou no pre-flight: %w\n%s",
 			lastErr, pythonRemediationHint())
 	}
-	return "", false, fmt.Errorf("python não encontrado no PATH (instale Python 3.10–3.12)\n%s", pythonRemediationHint())
+	return pythonCommand{}, false, fmt.Errorf("python 3.10–3.12 não encontrado no PATH\n%s", pythonRemediationHint())
 }
 
-// warnIfNewerPython emite um aviso para Python 3.13+, mas segue tentando —
-// algumas dependências do headroom têm wheels pra 3.13 enquanto outras não.
-func warnIfNewerPython(path string) {
-	maj, min, ok := pythonMajorMinor(path)
-	if !ok {
-		return
+func validatePythonVersion(major, minor int) error {
+	if major != 3 || minor < 10 || minor > 12 {
+		return fmt.Errorf("Python %d.%d não suportado para Headroom (requer 3.10–3.12)", major, minor)
 	}
-	if maj > 3 || (maj == 3 && min >= 13) {
-		fmt.Printf("  ⚠ headroom: %s reportou Python %d.%d — pode não ter wheels para todas as dependências; recomendado 3.10–3.12\n", path, maj, min)
-	}
+	return nil
 }
 
 // validatePython garante que o interpretador tem ensurepip e que pyexpat
 // carrega corretamente. Sem isso o `python -m venv` cria um venv quebrado
 // que aparece muito depois, no `pip install`.
 func validatePython(bin string) error {
-	if out, err := exec.Command(bin, "-m", "ensurepip", "--version").CombinedOutput(); err != nil {
+	return validatePythonCommand(pythonCommand{bin: bin})
+}
+
+func validatePythonCommand(python pythonCommand) error {
+	if out, err := exec.Command(python.bin, python.commandArgs("-m", "ensurepip", "--version")...).CombinedOutput(); err != nil {
 		return fmt.Errorf("ensurepip indisponível: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.Command(bin, "-c", "from xml.parsers import expat").CombinedOutput(); err != nil {
+	if out, err := exec.Command(python.bin, python.commandArgs("-c", "from xml.parsers import expat")...).CombinedOutput(); err != nil {
 		return fmt.Errorf("pyexpat quebrado (provável dessincronia libexpat ↔ Python): %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -139,7 +224,11 @@ func pythonRemediationHint() string {
 }
 
 func pythonMajorMinor(bin string) (int, int, bool) {
-	out, err := exec.Command(bin, "-c", "import sys;print(sys.version_info[0],sys.version_info[1])").Output()
+	return pythonCommandMajorMinor(pythonCommand{bin: bin})
+}
+
+func pythonCommandMajorMinor(python pythonCommand) (int, int, bool) {
+	out, err := exec.Command(python.bin, python.commandArgs("-c", "import sys;print(sys.version_info[0],sys.version_info[1])")...).Output()
 	if err != nil {
 		return 0, 0, false
 	}

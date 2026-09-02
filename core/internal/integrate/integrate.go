@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -13,11 +12,12 @@ import (
 	"github.com/fvmoraes/dwyt/internal/workspace"
 )
 
-func Project(projectPath, clients, dwytBin string) {
-	if dwytBin == "" {
-		dwytBin = filepath.Join(os.Getenv("HOME"), ".dwyt", "bin")
-	}
-
+// Project writes only DWYT-managed project instructions and workspace state.
+// MCP client configuration belongs exclusively to mcpregistry: it owns the
+// canonical server wiring, merges existing client JSON, and preserves the
+// codebase proxy. Keeping it there prevents this integration pass from
+// rewriting an already-configured client with stale direct-binary entries.
+func Project(projectPath, clients, _ string) {
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
 	clientList := normalizeClients(clients)
 
@@ -25,81 +25,40 @@ func Project(projectPath, clients, dwytBin string) {
 	// configs is the team's call — paths are absolute per machine, so most
 	// teams either ignore them or rewrite them at clone time.
 
-	// ── Generated configs use absolute, runtime-resolved paths ─────────
-	cbmcpBin := filepath.Join(dwytBin, "codebase-memory-mcp")
-	obsidianMCPBin := filepath.Join(dwytBin, "dwyt")
-	rtkBin := filepath.Join(dwytBin, "rtk")
-	if runtime.GOOS == "windows" {
-		cbmcpBin += ".exe"
-		obsidianMCPBin += ".exe"
-		rtkBin += ".exe"
-	}
-	obsidianMCPArgs := []string{"obsidian-mcp"}
-
-	// Only touch files for clients the user explicitly selected. Nothing
-	// here runs when clientList is empty — DWYT never installs configs for
-	// clients that were left unchecked in setup.
-
-	// .mcp.json at the project root is the de-facto standard read by Claude
-	// Code and Codex. Write it only when one of those clients is selected.
-	if containsClient(clientList, "claude") || containsClient(clientList, "codex") {
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
-	}
-
 	if containsClient(clientList, "claude") {
 		cp := filepath.Join(projectPath, "CLAUDE.md")
 		writeOrUpdateInstructionFile(cp, claudeMDTemplate())
-		os.MkdirAll(filepath.Join(projectPath, ".claude"), 0755)
-		// Claude Code also reads .claude/mcp.json
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".claude", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
 	}
 
 	if containsClient(clientList, "cursor") {
 		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, cursorRuleTemplate())
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".cursor", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
 	}
 
 	if containsClient(clientList, "kiro") {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, kiroSteeringTemplate())
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "settings", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".kiro", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
 	}
 
 	if containsClient(clientList, "copilot") {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
-		// Copilot in VS Code reads MCP servers from .vscode/mcp.json.
-		writeOrMergeVSCodeMCPJSON(filepath.Join(projectPath, ".vscode", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
-	}
-
-	if containsClient(clientList, "opencode") {
-		writeOrMergeOpenCodeJSON(filepath.Join(projectPath, "opencode.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs, rtkBin)
 	}
 
 	if containsClient(clientList, "windsurf") {
-		// Windsurf reads project-scoped MCP configs from .windsurf/ and
-		// markdown rules from .windsurf/rules/ — mirror the other clients.
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".windsurf", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
 		cp := filepath.Join(projectPath, ".windsurf", "rules", "dwyt.md")
 		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, windsurfRuleTemplate())
-	}
-
-	if containsClient(clientList, "continue") {
-		// Continue (vscode/jetbrains) reads .continue/mcp.json at the project root.
-		writeOrMergeMCPJSON(filepath.Join(projectPath, ".continue", "mcp.json"), cbmcpBin, obsidianMCPBin, obsidianMCPArgs)
 	}
 
 	// AGENTS.md is the convention shared by Codex and OpenCode. Respect the
 	// client toggles: only create/update it when one of those clients is on.
 	// Disabling every AGENTS.md client means DWYT leaves the file untouched.
 	if containsClient(clientList, "codex") || containsClient(clientList, "opencode") {
-		writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(rtkBin))
+		writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(""))
 	}
 
 	// ── Per-project workspace state ─────────────────────────────────────
@@ -131,174 +90,6 @@ func containsClient(clients []string, client string) bool {
 		}
 	}
 	return false
-}
-
-func writeOrMergeMCPJSON(path, cbmcpBin, obsidianMCPBin string, obsidianMCPArgs []string) {
-	config := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &config)
-	}
-	servers, _ := config["mcpServers"].(map[string]interface{})
-	if servers == nil {
-		servers = map[string]interface{}{}
-	}
-	removeLegacyMCPKeys(servers)
-	servers["codebase"] = stdioMCPConfig(cbmcpBin, nil, false)
-	servers["obsidian"] = stdioMCPConfig(obsidianMCPBin, obsidianMCPArgs, false)
-	config["mcpServers"] = servers
-	writeJSON(path, config)
-}
-
-func writeOrMergeVSCodeMCPJSON(path, cbmcpBin, obsidianMCPBin string, obsidianMCPArgs []string) {
-	config := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &config)
-	}
-	servers, _ := config["servers"].(map[string]interface{})
-	if servers == nil {
-		servers = map[string]interface{}{}
-	}
-	removeLegacyMCPKeys(servers)
-	servers["codebase"] = stdioMCPConfig(cbmcpBin, nil, true)
-	servers["obsidian"] = stdioMCPConfig(obsidianMCPBin, obsidianMCPArgs, true)
-	config["inputs"] = []interface{}{}
-	config["servers"] = servers
-	delete(config, "mcpServers")
-	writeJSON(path, config)
-}
-
-func writeOrMergeOpenCodeJSON(path, cbmcpBin, obsidianMCPBin string, obsidianMCPArgs []string, _ string) {
-	config := map[string]interface{}{}
-	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &config)
-	}
-	if _, ok := config["$schema"]; !ok {
-		config["$schema"] = "https://opencode.ai/config.json"
-	}
-	config["instructions"] = ensureStringItem(config["instructions"], "AGENTS.md")
-
-	mcp, _ := config["mcp"].(map[string]interface{})
-	if mcp == nil {
-		mcp = map[string]interface{}{}
-	}
-	removeLegacyMCPKeys(mcp)
-	mcp["codebase"] = map[string]interface{}{
-		"type":        "local",
-		"command":     []interface{}{cbmcpBin},
-		"environment": mcpEnvForCommand(cbmcpBin, nil),
-	}
-	mcp["obsidian"] = map[string]interface{}{
-		"type":        "local",
-		"command":     append([]interface{}{obsidianMCPBin}, stringArgsToInterface(obsidianMCPArgs)...),
-		"environment": mcpEnvForCommand(obsidianMCPBin, obsidianMCPArgs),
-	}
-	config["mcp"] = mcp
-
-	permission, _ := config["permission"].(map[string]interface{})
-	if permission == nil {
-		permission = map[string]interface{}{}
-	}
-	for _, k := range []string{"bash", "edit", "webfetch", "skill"} {
-		if _, ok := permission[k]; !ok {
-			permission[k] = "allow"
-		}
-	}
-	config["permission"] = permission
-
-	writeJSON(path, config)
-}
-
-// stringArgsToInterface converts a []string into the []interface{} slice
-// expected by the OpenCode "command" field. Empty inputs become empty
-// slices so the marshalled config stays stable.
-func stringArgsToInterface(args []string) []interface{} {
-	if len(args) == 0 {
-		return []interface{}{}
-	}
-	out := make([]interface{}, len(args))
-	for i, a := range args {
-		out[i] = a
-	}
-	return out
-}
-
-func stdioMCPConfig(command string, args []string, includeType bool) map[string]interface{} {
-	if args == nil {
-		args = []string{}
-	}
-	argsIface := make([]interface{}, len(args))
-	for i, a := range args {
-		argsIface[i] = a
-	}
-	cfg := map[string]interface{}{
-		"command": command,
-		"args":    argsIface,
-		"type":    "stdio",
-	}
-	_ = includeType
-	if env := mcpEnvForCommand(command, args); len(env) > 0 {
-		cfg["env"] = env
-	}
-	return cfg
-}
-
-func mcpEnvForCommand(command string, args []string) map[string]interface{} {
-	env := map[string]interface{}{}
-	base := filepath.Base(command)
-	if strings.Contains(base, "codebase-memory-mcp") {
-		env["CBM_CACHE_DIR"] = filepath.Join(projectDwytHome(), "codebase")
-	}
-	// The Obsidian MCP is now launched through the main `dwyt` binary with
-	// the `obsidian-mcp` subcommand. Detect it by either the legacy
-	// `dwyt-obsidian-mcp` filename (still possible during a migration) or
-	// the presence of `obsidian-mcp` in the args.
-	isObsidian := false
-	for _, a := range args {
-		if a == "obsidian-mcp" {
-			isObsidian = true
-			break
-		}
-	}
-	if !isObsidian {
-		lower := strings.ToLower(base)
-		isObsidian = strings.Contains(lower, "dwyt-obsidian-mcp") || lower == "dwyt-obsidian"
-	}
-	if isObsidian {
-		env["DWYT_API_URL"] = "http://localhost:2737/api"
-	}
-	return env
-}
-
-func projectDwytHome() string {
-	if h := os.Getenv("DWYT_HOME"); h != "" {
-		return h
-	}
-	return filepath.Join(os.Getenv("HOME"), ".dwyt")
-}
-
-func removeLegacyMCPKeys(m map[string]interface{}) {
-	for _, key := range []string{"dwyt", "dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
-		delete(m, key)
-	}
-}
-
-func ensureStringItem(value interface{}, item string) []interface{} {
-	list := []interface{}{}
-	if existing, ok := value.([]interface{}); ok {
-		list = append(list, existing...)
-	}
-	for _, v := range list {
-		if s, ok := v.(string); ok && s == item {
-			return list
-		}
-	}
-	return append(list, item)
-}
-
-func writeJSON(path string, value interface{}) {
-	os.MkdirAll(filepath.Dir(path), 0755)
-	data, _ := json.MarshalIndent(value, "", "  ")
-	os.WriteFile(path, append(data, '\n'), 0644)
 }
 
 // ── Templates with absolute binary paths ──────────────────────────────────────

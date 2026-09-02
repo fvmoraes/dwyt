@@ -36,6 +36,53 @@ dwyt stop
 dwyt .
 ```
 
+## `daemon healthcheck timeout`
+
+DWYT probes the dashboard immediately and then every 500 ms. On Windows the
+total startup budget is **120 seconds** (60 seconds on Linux/macOS); an HTTP
+request is limited to 2 seconds and cannot extend that overall deadline. The
+same budget is used while managed services such as Headroom start.
+
+If this machine needs a longer one-time budget, set a positive value in seconds
+before running DWYT:
+
+```powershell
+$env:DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS = '180'
+dwyt .
+```
+
+To make it the default for new terminals, set a user environment variable and
+restart Windows Terminal:
+
+```powershell
+[Environment]::SetEnvironmentVariable('DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS', '180', 'User')
+```
+
+On expiry, `%APPDATA%\dwyt\dwyt.log` records the tested URL, child PID, last
+HTTP/connection error, and elapsed wait. DWYT then uses `taskkill /F /T` to
+terminate the daemon/service tree, including Headroom's `.bat` launcher and
+Python descendants, so a failed startup should not leave orphan processes.
+
+For Headroom, a `GET /health` response with HTTP 200 is ready. An optional
+degraded field such as `kompress` does not make the proxy unready.
+
+## Headroom selected another port
+
+Headroom requests port 8787 first. If it is in use, DWYT tries 8788 through
+8791 and publishes the first free port to the dashboard, runtime state, and
+`%APPDATA%\dwyt\env.ps1`. A terminal that was already open keeps its old
+environment values; refresh it after `dwyt .` selects a fallback:
+
+```powershell
+. "$env:APPDATA\dwyt\env.ps1"
+$env:HEADROOM_PORT
+Invoke-RestMethod "http://127.0.0.1:$env:HEADROOM_PORT/health"
+```
+
+Open a new Windows Terminal instead if preferred; the DWYT-managed PowerShell
+profile sources `env.ps1` automatically. The health request should return HTTP
+200 before a compatible client uses the proxy.
+
 ## Port 2737 already in use
 
 Another process holds the dashboard port. Find and stop it:
@@ -89,4 +136,5 @@ dwyt stop
 ```
 
 This terminates the daemon and managed services by PID
-(`%APPDATA%\dwyt\run\*.pid`) using `taskkill`.
+(`%APPDATA%\dwyt\run\*.pid`) using `taskkill /F /T`, including each managed
+child process tree.

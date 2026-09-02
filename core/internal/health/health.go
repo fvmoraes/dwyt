@@ -2,6 +2,7 @@ package health
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"time"
@@ -120,13 +121,16 @@ func ProbeURL(url string) bool {
 }
 
 func IsPortOccupied(port int) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
+	// A health endpoint is not a port-availability check: a stale process or
+	// an unrelated local service may own the TCP port without serving HTTP.
+	// Binding and immediately closing the exact loopback address Headroom uses
+	// is the portable way to decide whether a new listener can start there.
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		return false
+		return true
 	}
-	resp.Body.Close()
-	return true
+	_ = listener.Close()
+	return false
 }
 
 func FindFreePort(defaultPort int) int {

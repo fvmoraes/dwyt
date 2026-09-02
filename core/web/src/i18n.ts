@@ -83,6 +83,8 @@ export const T = {
     setupTitle: 'DWYT Setup', install: 'Install →', installing: 'Installing...',
     dashboard: 'Dashboard →', loading: 'Loading...', starting: 'Starting...',
     tools: 'Tools', clients: 'AI Clients', project: 'Project',
+    toolSource: 'Source', toolSourceManaged: 'DWYT managed', toolSourceExternal: 'External/local',
+    toolSourcePath: 'Local executable path (optional: search PATH)',
     selected: 'selected', of: 'of', noneSelected: 'None selected',
     selectAtLeastOneClient: 'Select at least one AI client to install.',
     projectPlaceholder: 'Project path...', selectDir: 'Select this directory',
@@ -100,6 +102,7 @@ export const T = {
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
     windsurfDesc: '.windsurf/rules/dwyt.md',
+    continueDesc: '.continue/mcp.json',
     // Project menu
     projectMenu: 'Project options',
     removeProject: 'Remove project',
@@ -186,6 +189,8 @@ export const T = {
     setupTitle: 'DWYT Setup', install: 'Instalar →', installing: 'Instalando...',
     dashboard: 'Dashboard →', loading: 'Carregando...', starting: 'Iniciando...',
     tools: 'Ferramentas', clients: 'IAs / Clientes', project: 'Projeto',
+    toolSource: 'Origem', toolSourceManaged: 'Gerenciado pelo DWYT', toolSourceExternal: 'Externo/local',
+    toolSourcePath: 'Caminho local do executável (opcional: buscar no PATH)',
     selected: 'selecionadas', of: 'de', noneSelected: 'Nenhum selecionado',
     selectAtLeastOneClient: 'Selecione ao menos um cliente de IA para instalar.',
     projectPlaceholder: 'Caminho do projeto...', selectDir: 'Selecionar este diretório',
@@ -202,6 +207,7 @@ export const T = {
     cursorDesc: '.cursor/rules/dwyt.mdc',
     opencodeDesc: 'opencode.json + AGENTS.md',
     windsurfDesc: '.windsurf/rules/dwyt.md',
+    continueDesc: '.continue/mcp.json',
     // Menu do projeto
     projectMenu: 'Opções do projeto',
     removeProject: 'Remover projeto',

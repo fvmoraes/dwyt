@@ -1,14 +1,13 @@
 package integrate
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
+func TestProjectGeneratesClientInstructionsOnly(t *testing.T) {
 	projectPath := t.TempDir()
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
@@ -22,124 +21,31 @@ func TestProjectGeneratesClientMCPConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, tc := range []struct {
-		path string
-		key  string
-	}{
-		{".mcp.json", "mcpServers"},
-		{filepath.Join(".claude", "mcp.json"), "mcpServers"},
-		{filepath.Join(".cursor", "mcp.json"), "mcpServers"},
-		{filepath.Join(".kiro", "settings", "mcp.json"), "mcpServers"},
-		{filepath.Join(".kiro", "mcp.json"), "mcpServers"},
-		{filepath.Join(".windsurf", "mcp.json"), "mcpServers"},
-		{filepath.Join(".continue", "mcp.json"), "mcpServers"},
-	} {
-		assertMCPServers(t, filepath.Join(projectPath, tc.path), tc.key)
-	}
-
-	var vscode map[string]interface{}
-	readJSON(t, filepath.Join(projectPath, ".vscode", "mcp.json"), &vscode)
-	assertServerMap(t, filepath.Join(projectPath, ".vscode", "mcp.json"), vscode, "servers")
-	if _, legacy := vscode["mcpServers"]; legacy {
-		t.Fatalf("did not expect legacy mcpServers in VS Code config: %#v", vscode)
-	}
-
-	var opencode map[string]interface{}
-	readJSON(t, filepath.Join(projectPath, "opencode.json"), &opencode)
-	assertServerMap(t, filepath.Join(projectPath, "opencode.json"), opencode, "mcp")
-	if instructions := opencode["instructions"].([]interface{}); len(instructions) != 1 || instructions[0] != "AGENTS.md" {
-		t.Fatalf("expected OpenCode to reference AGENTS.md: %#v", opencode)
-	}
-
 	for _, path := range []string{
 		"AGENTS.md",
 		"CLAUDE.md",
 		filepath.Join(".cursor", "rules", "dwyt.mdc"),
 		filepath.Join(".kiro", "steering", "dwyt.md"),
 		filepath.Join(".github", "copilot-instructions.md"),
+		filepath.Join(".windsurf", "rules", "dwyt.md"),
 	} {
 		assertEnglishInstructionFile(t, filepath.Join(projectPath, path))
 	}
 
-	assertCanonicalObsidianCommand(t, projectPath)
+	assertProjectDoesNotWriteMCPConfigs(t, projectPath)
 }
 
-func TestProjectPerClientUsesCanonicalObsidianCommand(t *testing.T) {
+func TestProjectDoesNotWriteMCPConfigs(t *testing.T) {
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
 	dwytBin := filepath.Join(dwytHome, "bin")
 
-	cases := []struct {
-		client string
-		paths  []string
-	}{
-		{"claude", []string{".mcp.json", filepath.Join(".claude", "mcp.json")}},
-		{"codex", []string{".mcp.json"}},
-		{"cursor", []string{filepath.Join(".cursor", "mcp.json")}},
-		{"kiro", []string{filepath.Join(".kiro", "settings", "mcp.json"), filepath.Join(".kiro", "mcp.json")}},
-		{"copilot", []string{filepath.Join(".vscode", "mcp.json")}},
-		{"windsurf", []string{filepath.Join(".windsurf", "mcp.json")}},
-		{"continue", []string{filepath.Join(".continue", "mcp.json")}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.client, func(t *testing.T) {
-			projectPath := t.TempDir()
-			Project(projectPath, tc.client, dwytBin)
-			for _, p := range tc.paths {
-				data, err := os.ReadFile(filepath.Join(projectPath, p))
-				if err != nil {
-					t.Fatalf("%s: missing config: %v", p, err)
-				}
-				text := string(data)
-				if strings.Contains(text, "dwyt-obsidian-mcp") {
-					t.Fatalf("%s: legacy binary name must not appear: %s", p, text)
-				}
-				if !strings.Contains(text, "obsidian-mcp") {
-					t.Fatalf("%s: expected canonical subcommand arg: %s", p, text)
-				}
-				if !strings.Contains(text, "DWYT_API_URL") {
-					t.Fatalf("%s: expected DWYT_API_URL env: %s", p, text)
-				}
-			}
-		})
-	}
-}
-
-func TestProjectOpenCodeUsesCanonicalObsidianCommand(t *testing.T) {
 	projectPath := t.TempDir()
-	dwytHome := t.TempDir()
-	t.Setenv("DWYT_HOME", dwytHome)
-	dwytBin := filepath.Join(dwytHome, "bin")
-
-	Project(projectPath, "opencode", dwytBin)
-	data, err := os.ReadFile(filepath.Join(projectPath, "opencode.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatal(err)
-	}
-	mcp, _ := cfg["mcp"].(map[string]interface{})
-	obsidian, _ := mcp["obsidian"].(map[string]interface{})
-	cmd, _ := obsidian["command"].([]interface{})
-	if len(cmd) < 2 {
-		t.Fatalf("expected command array with binary + arg, got %#v", cmd)
-	}
-	base := filepath.Base(cmd[0].(string))
-	if base != "dwyt" && base != "dwyt.exe" {
-		t.Fatalf("expected dwyt binary, got %q", cmd[0])
-	}
-	if cmd[1] != "obsidian-mcp" {
-		t.Fatalf("expected obsidian-mcp arg, got %#v", cmd)
-	}
-	env, _ := obsidian["environment"].(map[string]interface{})
-	if env["DWYT_API_URL"] != "http://localhost:2737/api" {
-		t.Fatalf("expected DWYT_API_URL env, got %#v", env)
-	}
+	Project(projectPath, "claude,codex,copilot,kiro,cursor,opencode,windsurf,continue", dwytBin)
+	assertProjectDoesNotWriteMCPConfigs(t, projectPath)
 }
 
-func assertCanonicalObsidianCommand(t *testing.T, projectPath string) {
+func assertProjectDoesNotWriteMCPConfigs(t *testing.T, projectPath string) {
 	t.Helper()
 	for _, path := range []string{
 		".mcp.json",
@@ -150,13 +56,12 @@ func assertCanonicalObsidianCommand(t *testing.T, projectPath string) {
 		filepath.Join(".windsurf", "mcp.json"),
 		filepath.Join(".continue", "mcp.json"),
 		filepath.Join(".vscode", "mcp.json"),
+		"opencode.json",
 	} {
-		data, err := os.ReadFile(filepath.Join(projectPath, path))
-		if err != nil {
-			t.Fatalf("missing %s: %v", path, err)
-		}
-		if strings.Contains(string(data), "dwyt-obsidian-mcp") {
-			t.Fatalf("%s: legacy binary name must not appear", path)
+		if _, err := os.Stat(filepath.Join(projectPath, path)); err == nil {
+			t.Fatalf("%s must be written only by mcpregistry", path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
 		}
 	}
 }
@@ -207,52 +112,6 @@ func TestProjectMigratesLegacyInstructionBlockMarkers(t *testing.T) {
 	}
 	if strings.Count(content, instructionMarkerStart) != 1 || strings.Count(content, instructionMarkerEnd) != 1 {
 		t.Fatalf("expected one new DWYT block:\n%s", content)
-	}
-}
-
-func readJSON(t *testing.T, path string, out interface{}) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		t.Fatalf("%s: %v", path, err)
-	}
-}
-
-func assertMCPServers(t *testing.T, path, key string) {
-	t.Helper()
-	var config map[string]interface{}
-	readJSON(t, path, &config)
-	assertServerMap(t, path, config, key)
-}
-
-func assertServerMap(t *testing.T, path string, config map[string]interface{}, key string) {
-	t.Helper()
-	servers, ok := config[key].(map[string]interface{})
-	if !ok {
-		t.Fatalf("%s: expected %s config: %#v", path, key, config)
-	}
-	for _, name := range []string{"codebase", "obsidian"} {
-		server, ok := servers[name].(map[string]interface{})
-		if !ok {
-			t.Fatalf("%s: expected %s server in %#v", path, name, servers)
-		}
-		env, _ := server["env"].(map[string]interface{})
-		if env == nil {
-			env, _ = server["environment"].(map[string]interface{})
-		}
-		switch name {
-		case "codebase":
-			if env["CBM_CACHE_DIR"] == "" {
-				t.Fatalf("%s: expected codebase CBM_CACHE_DIR env in %#v", path, server)
-			}
-		case "obsidian":
-			if env["DWYT_API_URL"] != "http://localhost:2737/api" {
-				t.Fatalf("%s: expected obsidian DWYT_API_URL env in %#v", path, server)
-			}
-		}
 	}
 }
 

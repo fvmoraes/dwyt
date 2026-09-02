@@ -2,13 +2,44 @@ package procman
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestWaitForHealthAllowsServiceReadyAfterThreeSeconds(t *testing.T) {
+	readyAt := time.Now().Add(3200 * time.Millisecond)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if time.Now().Before(readyAt) {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	if err := waitForHealth(server.URL, 5*time.Second); err != nil {
+		t.Fatalf("healthcheck should wait for slow service: %v", err)
+	}
+}
+
+func TestWaitForHealthReportsLastErrorOnTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "starting", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	err := waitForHealth(server.URL, 200*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 503") || !strings.Contains(err.Error(), server.URL) {
+		t.Fatalf("timeout error must retain URL and last HTTP error, got %v", err)
+	}
+}
 
 // longRunningCmd returns a process that stays alive for ~10 seconds on any
 // platform. /bin/sleep does not exist on Windows; one ping per second is
@@ -100,6 +131,10 @@ func TestProcessManager_StartStop(t *testing.T) {
 }
 
 func TestProcessManager_HealthcheckFailure(t *testing.T) {
+	// Production intentionally waits up to 60s (120s on Windows) for a slow
+	// service. Keep this negative-path test fast by exercising the supported
+	// timeout override instead of changing the production startup budget.
+	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
 	bin, args := failingCmd()

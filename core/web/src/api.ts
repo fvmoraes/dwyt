@@ -1,13 +1,19 @@
 const API = 'http://localhost:2737/api'
 
+async function jsonOrThrow(r: Response) {
+  const body = await r.json()
+  if (!r.ok) throw new Error(body?.error || `Request failed (${r.status})`)
+  return body
+}
+
 export async function getStatus() {
   const r = await fetch(`${API}/status`)
-  return r.json()
+  return jsonOrThrow(r)
 }
 
 export async function getMetrics() {
   const r = await fetch(`${API}/metrics`)
-  return r.json()
+  return jsonOrThrow(r)
 }
 
 export async function getSetupStatus() {
@@ -26,7 +32,7 @@ export async function saveSetup(config: object) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   })
-  return r.json()
+  return jsonOrThrow(r)
 }
 
 export async function browseFs(path: string, depth: number = 1) {
@@ -74,7 +80,7 @@ export async function installSetup(config: object) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   })
-  return r.json()
+  return jsonOrThrow(r)
 }
 
 export async function getToolDetails(projectPath?: string, window?: string) {

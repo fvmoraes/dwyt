@@ -10,14 +10,13 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
-	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
 
 func (ds *DashboardServer) apiHealth(c *gin.Context) {
 	tools := make(map[string]status.ServiceState)
-	for _, tool := range status.PollAll(ds.DwytBin, ds.projectObsidian() != nil).Tools {
+	for _, tool := range status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil).Tools {
 		tools[tool.Name] = tool.Status
 	}
 	c.JSON(200, gin.H{
@@ -29,7 +28,7 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
-	c.JSON(200, status.PollAll(ds.DwytBin, ds.projectObsidian() != nil))
+	c.JSON(200, status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil))
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {
@@ -39,7 +38,7 @@ func (ds *DashboardServer) apiMetrics(c *gin.Context) {
 	}
 	details := ds.toolDetails(projectPath, c.Query("window"))
 	c.JSON(200, gin.H{
-		"rtk":          status.GetRTKMetrics(ds.DwytBin),
+		"rtk":          status.GetRTKMetricsForBinary(ds.rtkPath()),
 		"headroom":     status.GetHeadroomMetrics(),
 		"codebase":     details["codebase-memory-mcp"],
 		"obsidian":     details["obsidian"],
@@ -49,11 +48,11 @@ func (ds *DashboardServer) apiMetrics(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiRTKGain(c *gin.Context) {
-	c.JSON(200, status.GetRTKMetrics(ds.DwytBin))
+	c.JSON(200, status.GetRTKMetricsForBinary(ds.rtkPath()))
 }
 
 func (ds *DashboardServer) apiServicesStatus(c *gin.Context) {
-	all := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
+	all := status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil)
 	c.JSON(200, all)
 }
 
@@ -61,8 +60,8 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	service := c.Query("service")
 	logs := make(map[string]string)
 
-	pollLog := func(label, bin, procName, healthURL string, onDemand bool) string {
-		binPath := platform.DWYTLauncherPath(ds.DwytBin, bin)
+	pollLog := func(label, tool, procName, healthURL string, onDemand bool) string {
+		binPath := ds.toolPath(tool)
 		if _, err := os.Stat(binPath); err != nil {
 			return fmt.Sprintf("%s: não instalado", label)
 		}
@@ -84,13 +83,13 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "codebase-memory-mcp", "codebase", "http://127.0.0.1:9749/health", true)
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "cbmcp", "codebase", "http://127.0.0.1:9749/health", true)
 	}
 	if service == "" || service == "headroom" {
-		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort), false)
+		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.headroomPort()), false)
 	}
 	if service == "" || service == "rtk" {
-		if _, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, "rtk")); err == nil {
+		if _, err := os.Stat(ds.rtkPath()); err == nil {
 			logs["rtk"] = "rtk: disponível (ferramenta CLI)"
 		} else {
 			logs["rtk"] = "rtk: não instalado"
@@ -387,7 +386,7 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 	if projectPath != "" {
 		d.Repos = []string{projectPath}
 	}
-	bin := platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")
+	bin := ds.codebasePath()
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
@@ -417,7 +416,7 @@ func (ds *DashboardServer) detailCBMCP(projectPath string) *ToolDetail {
 
 func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	d := &ToolDetail{}
-	bin := platform.DWYTLauncherPath(ds.DwytBin, "rtk")
+	bin := ds.rtkPath()
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
@@ -430,12 +429,12 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 	scope := "project"
 	if projectPath != "" {
 		// Strictly project-scoped first.
-		m = status.GetRTKMetricsForPath(ds.DwytBin, projectPath)
+		m = status.GetRTKMetricsForPathBinary(ds.rtkPath(), projectPath)
 	}
 	if m == nil {
 		// The project isn't RTK-initialized (no .rtk) — show the global RTK
 		// totals so the card isn't empty, clearly labelled as global scope.
-		m = status.GetRTKMetrics(ds.DwytBin)
+		m = status.GetRTKMetricsForBinary(ds.rtkPath())
 		scope = "global"
 	}
 	if m != nil {
@@ -451,8 +450,9 @@ func (ds *DashboardServer) detailRTK(projectPath string) *ToolDetail {
 }
 
 func (ds *DashboardServer) detailHeadroom() *ToolDetail {
-	d := &ToolDetail{ProxyPort: ds.HeadroomPort, Scope: "global"}
-	bin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
+	port := ds.headroomPort()
+	d := &ToolDetail{ProxyPort: port, Scope: "global"}
+	bin := ds.headroomPath()
 	if _, err := os.Stat(bin); err != nil {
 		d.UptimeSecs = -1
 		return d
@@ -467,7 +467,7 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	}
 
 	// Headroom is a single shared proxy; its /stats counters are global.
-	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", ds.HeadroomPort)
+	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, err := client.Get(statsURL); err == nil {
 		defer resp.Body.Close()

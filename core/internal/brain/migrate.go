@@ -56,21 +56,21 @@ const (
 // names are reported so the UI can render "renamed A -> B" without having
 // to look at the filesystem again.
 type MigrationResult struct {
-	Hash            string          `json:"hash"`
-	LegacyName      string          `json:"legacy_name"`
-	CanonicalName   string          `json:"canonical_name"`
-	ResolvedName    string          `json:"resolved_name,omitempty"`
-	Status          MigrationStatus `json:"status"`
-	Source          string          `json:"source,omitempty"`
-	Reason          string          `json:"reason,omitempty"`
+	Hash          string          `json:"hash"`
+	LegacyName    string          `json:"legacy_name"`
+	CanonicalName string          `json:"canonical_name"`
+	ResolvedName  string          `json:"resolved_name,omitempty"`
+	Status        MigrationStatus `json:"status"`
+	Source        string          `json:"source,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
 }
 
 // MigrationReport aggregates the per-vault outcomes of a migration pass.
 type MigrationReport struct {
-	Results       []MigrationResult `json:"results"`
-	Migrated      int               `json:"migrated"`
-	Unidentifiable int              `json:"unidentifiable"`
-	AlreadyCanonical int           `json:"already_canonical"`
+	Results          []MigrationResult `json:"results"`
+	Migrated         int               `json:"migrated"`
+	Unidentifiable   int               `json:"unidentifiable"`
+	AlreadyCanonical int               `json:"already_canonical"`
 }
 
 // MigrationOptions drives project-name resolution when the vault has no
@@ -80,6 +80,10 @@ type MigrationOptions struct {
 	// ProjectPathResolver returns the canonical project path for a given
 	// vault hash. The DB and runtime-state lookups go through this.
 	ProjectPathResolver func(hash string) (path string, name string, ok bool)
+	// IgnoreHash suppresses a vault from the report and migration pass while
+	// preserving it on disk. The dashboard uses this for soft-removed projects:
+	// their history remains recoverable, but they are not active migration work.
+	IgnoreHash func(hash string) bool
 	// ActiveProjectPath, when set, is treated as a fallback when the
 	// resolver yields nothing. Used for "the user is currently inside
 	// project X" hints.
@@ -147,8 +151,8 @@ func MigrateVaultsToNamedLayout(dwytHome string, opts MigrationOptions) (Migrati
 // so it can be unit-tested with controlled filesystem fixtures.
 func migrateOneVault(projectsDir, dirName string, opts MigrationOptions) MigrationResult {
 	result := MigrationResult{
-		Hash:         "", // set later when the shape is confirmed to be a hash
-		LegacyName:   dirName,
+		Hash:          "", // set later when the shape is confirmed to be a hash
+		LegacyName:    dirName,
 		CanonicalName: dirName,
 	}
 
@@ -170,6 +174,9 @@ func migrateOneVault(projectsDir, dirName string, opts MigrationOptions) Migrati
 	}
 	hash := dirName
 	result.Hash = hash
+	if opts.IgnoreHash != nil && opts.IgnoreHash(hash) {
+		return MigrationResult{}
+	}
 
 	// Look for an existing vault.json — it's the fastest, most reliable
 	// signal that we know who owns this vault.

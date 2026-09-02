@@ -36,6 +36,110 @@ function Get-Arch {
   }
 }
 
+# Test-DwytDaemonProcess deliberately validates both the executable path and
+# the `daemon` argument before taskkill is used. PID files can become stale and
+# Windows can reuse a PID, so a numeric match alone is not safe enough.
+function Test-DwytDaemonProcess {
+  param(
+    [Parameter(Mandatory = $true)]$Process,
+    [Parameter(Mandatory = $true)][string]$DaemonPath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Process.ExecutablePath) -or [string]::IsNullOrWhiteSpace($Process.CommandLine)) {
+    return $false
+  }
+  try {
+    $actualPath = [IO.Path]::GetFullPath([string]$Process.ExecutablePath)
+    $expectedPath = [IO.Path]::GetFullPath($DaemonPath)
+  }
+  catch {
+    return $false
+  }
+  if (-not [string]::Equals($actualPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+    return $false
+  }
+  return [string]$Process.CommandLine -match '(?i)(^|\s)daemon(\s|$)'
+}
+
+# Stop-DwytDaemon stops only the daemon launched from the binary that this
+# installer is about to replace. taskkill /T is essential: Headroom can spawn
+# children of the daemon and Windows otherwise leaves them orphaned. The
+# operation is idempotent: missing/stale PID files and already-exited daemons
+# are both successful no-ops.
+function Stop-DwytDaemon {
+  param(
+    [Parameter(Mandatory = $true)][string]$DaemonPath,
+    [Parameter(Mandatory = $true)][string]$DwytHome
+  )
+
+  if (-not (Test-Path -LiteralPath $DaemonPath)) { return }
+
+  $pidFile = Join-Path $DwytHome "run\daemon.pid"
+  $candidatePids = @()
+  if (Test-Path -LiteralPath $pidFile) {
+    $pidText = [string](Get-Content -LiteralPath $pidFile -Raw -ErrorAction SilentlyContinue)
+    $pidText = $pidText.Trim()
+    if ($pidText -match '^\d+$') {
+      $candidatePids += [int]$pidText
+    }
+  }
+
+  # The PID file is the primary source. Enumerating the exact executable path
+  # also repairs the rare case where a previous release crashed before writing
+  # it, without ever touching a different application's process.
+  try {
+    $running = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'dwyt.exe'" -ErrorAction Stop
+    foreach ($process in $running) {
+      if (Test-DwytDaemonProcess -Process $process -DaemonPath $DaemonPath) {
+        $candidatePids += [int]$process.ProcessId
+      }
+    }
+  }
+  catch {
+    # A constrained PowerShell session may deny CIM inspection. The PID-file
+    # path below still works when it can be validated, otherwise Copy-Item
+    # reports the locked target instead of risking an unrelated process.
+  }
+
+  foreach ($daemonPid in ($candidatePids | Select-Object -Unique)) {
+    try {
+      $process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $daemonPid" -ErrorAction Stop
+    }
+    catch {
+      continue
+    }
+    if ($null -eq $process) {
+      continue
+    }
+    if (-not (Test-DwytDaemonProcess -Process $process -DaemonPath $DaemonPath)) {
+      continue
+    }
+
+    Write-Step "Stopping running DWYT daemon (PID $daemonPid) ..."
+    & taskkill.exe /F /T /PID $daemonPid | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "could not stop the running DWYT daemon (PID $daemonPid) before updating"
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+      Start-Sleep -Milliseconds 200
+      try {
+        $stillRunning = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $daemonPid" -ErrorAction Stop
+      }
+      catch {
+        $stillRunning = $null
+      }
+    } while ($stillRunning -and [DateTime]::UtcNow -lt $deadline)
+    if ($stillRunning) {
+      throw "DWYT daemon (PID $daemonPid) did not exit before updating"
+    }
+  }
+
+  # It is safe to clear a stale DWYT daemon record after the process check.
+  Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host ""
 Write-Host "  DWYT - Don't Waste Your Tokens (Windows installer)" -ForegroundColor Cyan
 Write-Host ""
@@ -77,6 +181,7 @@ try {
   if (-not $exe) { throw "dwyt.exe not found in archive" }
 
   $dest = Join-Path $binDir "dwyt.exe"
+  Stop-DwytDaemon -DaemonPath $dest -DwytHome $dwytHome
   Copy-Item -Path $exe.FullName -Destination $dest -Force
   Write-Ok "Installed: $dest"
 

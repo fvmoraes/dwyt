@@ -32,6 +32,25 @@ func TestClientsStringReflectsSavedSelection(t *testing.T) {
 	}
 }
 
+// Legacy setup records used `clients`; retain that choice when background
+// startup later decides which client integrations (including Headroom wraps)
+// to activate.
+func TestClientsStringMigratesLegacyClientsSelection(t *testing.T) {
+	store, err := db.New(filepath.Join(t.TempDir(), "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.SetConfig("setup", `{"clients":["continue","cursor"]}`); err != nil {
+		t.Fatal(err)
+	}
+	ds := &DashboardServer{Store: store}
+	if got, want := ds.clientsString(), "continue,cursor"; got != want {
+		t.Fatalf("expected legacy selection %q, got %q", want, got)
+	}
+}
+
 // A nil Store must also yield an empty selection rather than all clients.
 func TestClientsStringNilStoreReturnsEmpty(t *testing.T) {
 	ds := &DashboardServer{}

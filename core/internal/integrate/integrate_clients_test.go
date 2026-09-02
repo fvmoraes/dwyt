@@ -125,8 +125,8 @@ func TestProjectWritesAgentsWhenOpenCodeEnabled(t *testing.T) {
 	}
 }
 
-// Windsurf follows the same pattern as the other clients: a markdown rules
-// file plus its project-scoped MCP config.
+// Windsurf gets its DWYT-managed markdown rules here; the MCP JSON itself is
+// owned by mcpregistry so this pass cannot overwrite canonical server wiring.
 func TestProjectGeneratesWindsurfRulesWhenEnabled(t *testing.T) {
 	projectPath := t.TempDir()
 	dwytHome := t.TempDir()
@@ -141,7 +141,7 @@ func TestProjectGeneratesWindsurfRulesWhenEnabled(t *testing.T) {
 	}
 	assertEnglishInstructionFile(t, rules)
 
-	if !fileExists(t, filepath.Join(projectPath, ".windsurf", "mcp.json")) {
-		t.Fatalf("expected windsurf mcp.json")
+	if fileExists(t, filepath.Join(projectPath, ".windsurf", "mcp.json")) {
+		t.Fatal("windsurf mcp.json must be written only by mcpregistry")
 	}
 }

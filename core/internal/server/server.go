@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
+	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
@@ -24,6 +26,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,6 +42,16 @@ func launcherCommand(bin string, args ...string) *exec.Cmd {
 	}
 	return exec.Command(bin, args...)
 }
+
+func (ds *DashboardServer) headroomPath() string {
+	return ds.toolPath(toolsource.ToolHeadroom)
+}
+
+func (ds *DashboardServer) codebasePath() string {
+	return ds.toolPath(toolsource.ToolCodebase)
+}
+
+func (ds *DashboardServer) rtkPath() string { return ds.toolPath(toolsource.ToolRTK) }
 
 func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	cwd, _ := os.Getwd()
@@ -62,24 +75,26 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	rs.SetCurrentProject(project, filepath.Base(project))
 	var setupCfg Config
 	hasSetupCfg := false
+	if store != nil {
+		if raw, err := store.GetConfig("setup"); err == nil {
+			var cfg Config
+			if json.Unmarshal([]byte(raw), &cfg) == nil {
+				normalizeSetupConfig(&cfg)
+				setupCfg = cfg
+				hasSetupCfg = true
+				rs.SetClients(cfg.Ias)
+				rs.SetToolSources(cfg.ToolSources)
+			}
+		}
+	}
 
 	pb, brainErr := brain.NewProjectObsidian(dwytHome, project)
 	if brainErr != nil {
 		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
 		rs.ToolErrors["obsidian"] = brainErr.Error()
 	} else {
-		if store != nil {
-			if raw, err := store.GetConfig("setup"); err == nil {
-				var cfg Config
-				if json.Unmarshal([]byte(raw), &cfg) == nil {
-					setupCfg = cfg
-					hasSetupCfg = true
-					pb.SetConfig(cfg.Ias, cfg.Tools)
-					if len(cfg.Ias) > 0 {
-						rs.SetClients(cfg.Ias)
-					}
-				}
-			}
+		if hasSetupCfg {
+			pb.SetConfig(setupCfg.Ias, setupCfg.Tools)
 		}
 		stats := pb.Stats()
 		if c, ok := stats["total_files"].(int); ok {
@@ -88,7 +103,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 
 	procmanInstance := procman.New(dwytHome)
-	codebaseBin := platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp")
+	sources := rs.ToolSourcesSnapshot()
+	codebaseBin := toolPathFor(dwytBin, toolsource.ToolCodebase, sources)
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
 
 	// The Obsidian MCP runs over stdio and is spawned on demand by each AI
@@ -112,13 +128,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// unidentifiable directories are left alone for the user to resolve.
 	runVaultMigration(dwytHome, store)
 
-	headroomPort := 8787
-	if hp := os.Getenv("DWYT_HEADROOM_PORT"); hp != "" {
-		fmt.Sscanf(hp, "%d", &headroomPort)
-	}
-	status.SetHeadroomPort(headroomPort)
-
-	headroomBin := platform.DWYTLauncherPath(dwytBin, "headroom")
+	headroomPort := configuredHeadroomPort()
+	headroomBin := toolPathFor(dwytBin, toolsource.ToolHeadroom, sources)
 	procmanInstance.Register("headroom", headroomBin, "/health", headroomPort, "proxy", "--port", "{port}")
 
 	headroomHealthURL := fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)
@@ -141,6 +152,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
 	}
+	ds.setHeadroomPort(headroomPort)
 
 	if store != nil {
 		store.TouchProject(project)
@@ -158,6 +170,48 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	return ds
 }
 
+func configuredHeadroomPort() int {
+	const defaultPort = 8787
+	raw := strings.TrimSpace(os.Getenv("DWYT_HEADROOM_PORT"))
+	if raw == "" {
+		return defaultPort
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		log.Warn("invalid requested Headroom port; using default", log.Fields{"value": raw, "default": defaultPort})
+		return defaultPort
+	}
+	return port
+}
+
+// headroomPort returns the currently effective proxy port. ProcessManager may
+// move the service to a free fallback port, so callers must not read the field
+// directly once the daemon has started servicing requests.
+func (ds *DashboardServer) headroomPort() int {
+	ds.headroomMu.RLock()
+	defer ds.headroomMu.RUnlock()
+	return ds.HeadroomPort
+}
+
+// setHeadroomPort publishes a ProcessManager-selected port to every consumer
+// of the shared Headroom proxy (status, stats, wrapping and dashboard APIs).
+func (ds *DashboardServer) setHeadroomPort(port int) {
+	if port <= 0 {
+		return
+	}
+	ds.headroomMu.Lock()
+	ds.HeadroomPort = port
+	ds.headroomMu.Unlock()
+	status.SetHeadroomPort(port)
+	if err := dwytenv.SetHeadroomPort(ds.DwytHome, port); err != nil {
+		log.Warn("failed to persist selected Headroom port", log.Fields{"port": port, "error": err.Error()})
+	}
+	// The daemon's descendants (including `headroom init`) inherit these
+	// values. Override a stale requested port when ProcessManager had to use a
+	// free fallback.
+	_ = os.Setenv("DWYT_HEADROOM_PORT", strconv.Itoa(port))
+}
+
 // runVaultMigration adopts the canonical "<hash>_<name>" vault layout for
 // every directory in ~/.dwyt/projects/ that is still in the legacy
 // "<hash>" form. It is fully idempotent and never deletes content; a
@@ -169,11 +223,21 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 			if store == nil {
 				return "", "", false
 			}
-			p, err := store.GetProject(hash)
+			p, err := store.GetActiveProject(hash)
 			if err != nil || p == nil {
 				return "", "", false
 			}
 			return p.Path, p.Name, true
+		},
+		IgnoreHash: func(hash string) bool {
+			if store == nil {
+				return false
+			}
+			if _, err := store.GetProject(hash); err != nil {
+				return false
+			}
+			_, err := store.GetActiveProject(hash)
+			return err != nil
 		},
 	}
 	report, err := brain.MigrateVaultsToNamedLayout(dwytHome, opts)
@@ -184,9 +248,9 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 	if report.Migrated > 0 || report.Unidentifiable > 0 {
 		log.Info("vault migration: completed",
 			log.Fields{
-				"migrated":        report.Migrated,
+				"migrated":          report.Migrated,
 				"already_canonical": report.AlreadyCanonical,
-				"unidentifiable":  report.Unidentifiable,
+				"unidentifiable":    report.Unidentifiable,
 			})
 	}
 	for _, r := range report.Results {
@@ -341,21 +405,22 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 	ds.headroomStartMu.Lock()
 	defer ds.headroomStartMu.Unlock()
 
-	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
+	headroomBin := ds.headroomPath()
 	if _, err := os.Stat(headroomBin); err != nil {
 		return
 	}
 
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)
+	port := ds.headroomPort()
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
 	if health.ProbeURL(healthURL) {
-		log.Info("headroom already running", log.Fields{"port": ds.HeadroomPort})
+		log.Info("headroom already running", log.Fields{"port": port})
 		return
 	}
 
 	go func() {
-		status, err := ds.ProcMan.Start("headroom")
+		status, err := ds.startHeadroom()
 		if err != nil {
-			log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": ds.HeadroomPort})
+			log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": port})
 			ds.RuntimeState.SetProcessHealthy("headroom", false, err.Error())
 			return
 		}
@@ -365,9 +430,9 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 		log.Info("headroom spawned by daemon", log.Fields{"pid": status.PID, "port": status.Port})
 
 		if status.Healthy {
-			ds.runHeadroomWrap(ds.DefaultProject)
+			ds.configureHeadroomClients(ds.DefaultProject)
 		} else {
-			log.Warn("headroom started but not healthy", log.Fields{"port": ds.HeadroomPort})
+			log.Warn("headroom started but not healthy", log.Fields{"port": status.Port})
 		}
 	}()
 }
@@ -376,7 +441,7 @@ func (ds *DashboardServer) startMCPsIfNeeded() {
 	go func() {
 		time.Sleep(2 * time.Second)
 
-		if _, err := os.Stat(platform.DWYTLauncherPath(ds.DwytBin, "codebase-memory-mcp")); err == nil {
+		if _, err := os.Stat(ds.codebasePath()); err == nil {
 			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
 				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
 				ds.RuntimeState.RegisterProcess("codebase", st.PID, st.Port)
@@ -402,6 +467,7 @@ func (ds *DashboardServer) clientsString() string {
 	if json.Unmarshal([]byte(raw), &cfg) != nil {
 		return ""
 	}
+	normalizeSetupConfig(&cfg)
 	clients := strings.Join(cfg.Ias, ",")
 	if clients == "" {
 		clients = strings.Join(cfg.Clients, ",")
@@ -422,11 +488,27 @@ func splitClients(clients string) []string {
 	return out
 }
 
-var headroomWrapMap = map[string]string{
-	"claude":  "claude",
-	"codex":   "codex",
-	"cursor":  "cursor",
-	"copilot": "copilot",
+var headroomEligibleClientMap = map[string]bool{
+	"claude":  true,
+	"codex":   true,
+	"cursor":  true,
+	"copilot": true,
+}
+
+type headroomInitTarget struct {
+	name   string
+	global bool
+}
+
+// Headroom 0.37's `wrap` commands are interactive: they start their own
+// proxy and launch the selected CLI. The daemon owns the proxy through
+// ProcessManager, so it must use the non-interactive durable `init` command
+// instead. Cursor is intentionally absent because Headroom has no durable
+// init command for it; it requires the user to set its UI base URL.
+var headroomInitTargets = map[string]headroomInitTarget{
+	"claude":  {name: "claude"},
+	"codex":   {name: "codex"},
+	"copilot": {name: "copilot", global: true},
 }
 
 func shouldInstallHeadroom(cfg Config) bool {
@@ -448,7 +530,7 @@ func headroomEligibleClients(cfg Config) []string {
 		if c == "" || seen[c] {
 			continue
 		}
-		if _, ok := headroomWrapMap[c]; !ok {
+		if !headroomEligibleClientMap[c] {
 			continue
 		}
 		if c == "codex" && codexauth.UsesChatGPTLogin() {
@@ -460,62 +542,78 @@ func headroomEligibleClients(cfg Config) []string {
 	return result
 }
 
-func (ds *DashboardServer) runHeadroomWrap(projectPath string) {
-	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
-	if _, err := os.Stat(headroomBin); err != nil {
-		return
+// headroomInitArgs returns the safe, non-interactive durable setup command
+// for a client. Its explicit port keeps a client from being configured for
+// 8787 after ProcessManager selected a fallback.
+func headroomInitArgs(client string, port int) ([]string, bool) {
+	target, ok := headroomInitTargets[client]
+	if !ok || port < 1 || port > 65535 {
+		return nil, false
 	}
-	clients := ds.clientsString()
-	for _, c := range strings.Split(clients, ",") {
-		c = strings.TrimSpace(c)
-		if c == "codex" && codexauth.UsesChatGPTLogin() {
-			log.Info("headroom wrap skipped for Codex ChatGPT login", log.Fields{"client": c})
-			continue
-		}
-		if hrName, ok := headroomWrapMap[c]; ok {
-			cmd := launcherCommand(headroomBin, "wrap", hrName)
-			cmd.Dir = projectPath
-			if out, err := cmd.CombinedOutput(); err != nil {
-				msg := "headroom wrap failed"
-				if c == "codex" {
-					msg = "Codex uses OAuth login — headroom wrap not applicable"
-				}
-				log.Warn(msg, log.Fields{"client": c, "error": err.Error(), "output": string(out)})
-			} else {
-				log.Info("headroom wrap", log.Fields{"client": c})
+	args := []string{"init"}
+	if target.global {
+		args = append(args, "--global")
+	}
+	args = append(args, "--port", strconv.Itoa(port), target.name)
+	return args, true
+}
+
+// headroomCommandEnv replaces all proxy endpoint variables in an inherited
+// environment. This is required even though `init` receives --port: helpers
+// invoked by Headroom and client-specific setup read these variables too.
+func headroomCommandEnv(base []string, port int) []string {
+	values := map[string]string{
+		"DWYT_HEADROOM_PORT": strconv.Itoa(port),
+		"HEADROOM_PORT":      strconv.Itoa(port),
+		"OPENAI_BASE_URL":    fmt.Sprintf("http://127.0.0.1:%d/v1", port),
+		"ANTHROPIC_BASE_URL": fmt.Sprintf("http://127.0.0.1:%d", port),
+	}
+	result := make([]string, 0, len(base)+len(values))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, replaced := values[strings.ToUpper(key)]; replaced {
+				continue
 			}
 		}
+		result = append(result, entry)
 	}
+	for _, key := range []string{"DWYT_HEADROOM_PORT", "HEADROOM_PORT", "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"} {
+		result = append(result, key+"="+values[key])
+	}
+	return result
 }
 
-func (ds *DashboardServer) runHeadroomUnwrap(projectPath string) {
-	headroomBin := platform.DWYTLauncherPath(ds.DwytBin, "headroom")
+func (ds *DashboardServer) configureHeadroomClients(projectPath string) {
+	headroomBin := ds.headroomPath()
 	if _, err := os.Stat(headroomBin); err != nil {
 		return
 	}
-	clients := ds.clientsString()
-	for _, c := range strings.Split(clients, ",") {
-		c = strings.TrimSpace(c)
-		if _, ok := headroomWrapMap[c]; ok {
-			cmd := launcherCommand(headroomBin, "unwrap", c)
-			cmd.Dir = projectPath
-			cmd.Run()
-			log.Info("headroom unwrap", log.Fields{"client": c})
-		}
-	}
-}
-
-func (ds *DashboardServer) headroomWrapClients() []string {
-	clients := strings.Split(ds.clientsString(), ",")
-	var result []string
-	for _, c := range clients {
-		c = strings.TrimSpace(c)
-		if c == "codex" && codexauth.UsesChatGPTLogin() {
+	port := ds.headroomPort()
+	seen := make(map[string]bool)
+	for _, c := range splitClients(ds.clientsString()) {
+		if seen[c] {
 			continue
 		}
-		if _, ok := headroomWrapMap[c]; ok {
-			result = append(result, c)
+		seen[c] = true
+		if c == "codex" && codexauth.UsesChatGPTLogin() {
+			log.Info("headroom init skipped for Codex ChatGPT login", log.Fields{"client": c})
+			continue
+		}
+		args, ok := headroomInitArgs(c, port)
+		if !ok {
+			if c == "cursor" {
+				log.Info("Headroom Cursor setup requires manual base URL", log.Fields{"client": c, "url": fmt.Sprintf("http://127.0.0.1:%d/v1", port)})
+			}
+			continue
+		}
+		cmd := launcherCommand(headroomBin, args...)
+		cmd.Dir = projectPath
+		cmd.Env = headroomCommandEnv(os.Environ(), port)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Warn("headroom durable init failed", log.Fields{"client": c, "port": port, "error": err.Error(), "output": string(out)})
+		} else {
+			log.Info("headroom durable init", log.Fields{"client": c, "port": port})
 		}
 	}
-	return result
 }

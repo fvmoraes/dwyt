@@ -8,6 +8,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
 type Config struct {
@@ -16,6 +17,7 @@ type Config struct {
 	Clients     []string `json:"clients"`
 	Ias         []string `json:"ias"`
 	Providers   []string `json:"providers"`
+	ToolSources map[string]toolsource.Selection `json:"tool_sources,omitempty"`
 	ProjectPath string   `json:"project_path"`
 	LastSetup   string   `json:"last_setup"`
 }
@@ -62,6 +64,7 @@ type DashboardServer struct {
 	ProcMan          *procman.ProcessManager
 	RuntimeState     *state.RuntimeState
 	HeadroomPort     int
+	headroomMu       sync.RWMutex
 	projectMu        sync.RWMutex
 	sseClients       map[chan string]bool
 	sseMu            sync.Mutex

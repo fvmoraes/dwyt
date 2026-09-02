@@ -65,16 +65,17 @@ func makeExecutable(t *testing.T, dir, name string) string {
 	return path
 }
 
-func TestDWYTLauncherPath_PrefersExternalHeadroomOnPATH(t *testing.T) {
+func TestDWYTLauncherPathNeverPrefersExternalHeadroomOnPATH(t *testing.T) {
 	binDir := t.TempDir()
 	externalDir := t.TempDir()
-	external := makeExecutable(t, externalDir, "headroom")
+	_ = makeExecutable(t, externalDir, "headroom")
 
 	t.Setenv("PATH", externalDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	got := DWYTLauncherPath(binDir, "headroom")
-	if got != external {
-		t.Fatalf("expected external headroom %q, got %q", external, got)
+	want := filepath.Join(binDir, DWYTLauncherName("headroom"))
+	if got != want {
+		t.Fatalf("expected DWYT-managed headroom %q, got %q", want, got)
 	}
 }
 
@@ -87,20 +88,6 @@ func TestDWYTLauncherPath_FallsBackToEmbeddedWhenNoneOnPATH(t *testing.T) {
 	want := filepath.Join(binDir, DWYTLauncherName("headroom"))
 	if got != want {
 		t.Fatalf("expected embedded fallback %q, got %q", want, got)
-	}
-}
-
-func TestDWYTLauncherPath_IgnoresOwnEmbeddedCopyOnPATH(t *testing.T) {
-	binDir := t.TempDir()
-	makeExecutable(t, binDir, "headroom")
-
-	// dwyt's own bin dir happens to be on PATH too (common after install).
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	got := DWYTLauncherPath(binDir, "headroom")
-	want := filepath.Join(binDir, DWYTLauncherName("headroom"))
-	if got != want {
-		t.Fatalf("expected embedded path %q, got %q (should not treat its own wrapper as external)", want, got)
 	}
 }
 

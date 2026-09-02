@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -82,6 +83,73 @@ func TestAPIMCPConfigureReturnsStructuredPayload(t *testing.T) {
 	}
 	if _, ok := payload["migrated"]; !ok {
 		t.Fatal("expected migrated flag in response")
+	}
+}
+
+// TestAPIMCPConfigureKeepsCodebaseProxyCanonical guards the ordering between
+// registry configuration and project integration. The registry deliberately
+// routes Codebase through `dwyt mcp-proxy`; a later integration pass must not
+// rewrite the same client JSON back to the raw codebase binary.
+func TestAPIMCPConfigureKeepsCodebaseProxyCanonical(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	dwytBin := filepath.Join(dwytHome, "bin")
+	projectPath := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutableForMCP(t, filepath.Join(dwytBin, "dwyt"))
+	touchExecutableForMCP(t, filepath.Join(dwytBin, "codebase-memory-mcp"))
+
+	store, err := db.New(filepath.Join(dwytHome, "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetConfig("setup", `{"ias":["claude"],"tools":["cbmcp"]}`); err != nil {
+		t.Fatal(err)
+	}
+	ds := &DashboardServer{
+		DwytBin:        dwytBin,
+		DwytHome:       dwytHome,
+		DefaultProject: projectPath,
+		Store:          store,
+		ProcMan:        procman.New(dwytHome),
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/mcp/configure", bytes.NewReader([]byte(`{"name":"codebase","project_path":`+strconv.Quote(projectPath)+`}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	ds.apiMCPConfigure(c)
+	if rec.Code != 200 {
+		t.Fatalf("expected HTTP 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var config map[string]any
+	data, err := os.ReadFile(filepath.Join(projectPath, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected mcpServers, got %#v", config)
+	}
+	codebase, ok := servers["codebase"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected codebase server, got %#v", servers)
+	}
+	command, _ := codebase["command"].(string)
+	if base := strings.ToLower(filepath.Base(command)); base != "dwyt" && base != "dwyt.exe" {
+		t.Fatalf("codebase must retain the dwyt proxy command, got %q", command)
+	}
+	args, _ := codebase["args"].([]any)
+	if len(args) < 5 || args[0] != "mcp-proxy" || args[1] != "--target" || args[3] != "--name" || args[4] != "codebase" {
+		t.Fatalf("codebase must retain canonical proxy args, got %#v", args)
 	}
 }
 
@@ -246,6 +314,9 @@ func TestAPIMCPConfigureIdempotent(t *testing.T) {
 
 func touchExecutableForMCP(t *testing.T, path string) {
 	t.Helper()
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
+		path += ".exe"
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +324,3 @@ func touchExecutableForMCP(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
-
-// keep the import of runtime referenced; the canonical command is platform
-// dependent but the test bodies are platform-agnostic.
-var _ = runtime.GOOS
