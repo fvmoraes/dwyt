@@ -39,6 +39,25 @@ func TestResolveExternalUsesExplicitExecutableWithoutDWYTFallback(t *testing.T) 
 	}
 }
 
+func TestResolveExternalPreservesExplicitSymlinkPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable symlink behavior differs on Windows")
+	}
+	target := writeExternalExecutable(t, "headroom-versioned")
+	link := filepath.Join(t.TempDir(), "headroom")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Resolve(t.TempDir(), ToolHeadroom, Selection{Mode: ModeExternal, Path: link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != link {
+		t.Fatalf("Resolve external symlink = %q, want stable selected path %q", got, link)
+	}
+}
+
 func TestResolveExternalRejectsMissingPathInsteadOfUsingManagedBinary(t *testing.T) {
 	if _, err := Resolve(t.TempDir(), ToolRTK, Selection{Mode: ModeExternal, Path: filepath.Join(t.TempDir(), "missing")}); err == nil {
 		t.Fatal("external mode must reject a missing path instead of falling back to DWYT")

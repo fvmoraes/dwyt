@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
@@ -23,6 +25,11 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
+	previousSources := ds.configuredToolSources()
+	if err := ds.applyToolSourceProcesses(previousSources, config); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
 
 	data, _ := json.Marshal(config)
 	if ds.Store != nil {
@@ -32,10 +39,6 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 		ds.RuntimeState.SetToolSources(config.ToolSources)
 	}
 	ds.syncSetupClients(config)
-	if err := ds.applyToolSourceProcesses(config); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
 	c.JSON(200, gin.H{"status": "saved", "tool_sources": config.ToolSources})
 }
 
@@ -133,15 +136,24 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiServicesStopAll(c *gin.Context) {
-	if _, err := ds.ProcMan.Stop("codebase"); err == nil && ds.RuntimeState != nil {
-		ds.RuntimeState.RemoveProcess("codebase")
-	} else if err != nil && ds.RuntimeState != nil {
-		ds.RuntimeState.SetToolError("codebase", err.Error())
+	failures := make(map[string]string)
+	var stopErrors []error
+	for _, service := range []string{"codebase", "headroom"} {
+		if _, err := ds.ProcMan.Stop(service); err != nil {
+			failures[service] = err.Error()
+			stopErrors = append(stopErrors, fmt.Errorf("stopping %s: %w", service, err))
+			if ds.RuntimeState != nil {
+				ds.RuntimeState.SetToolError(service, err.Error())
+			}
+			continue
+		}
+		if ds.RuntimeState != nil {
+			ds.RuntimeState.RemoveProcess(service)
+		}
 	}
-	if _, err := ds.ProcMan.Stop("headroom"); err == nil && ds.RuntimeState != nil {
-		ds.RuntimeState.RemoveProcess("headroom")
-	} else if err != nil && ds.RuntimeState != nil {
-		ds.RuntimeState.SetToolError("headroom", err.Error())
+	if err := errors.Join(stopErrors...); err != nil {
+		c.JSON(500, gin.H{"status": "error", "error": err.Error(), "errors": failures})
+		return
 	}
 	c.JSON(200, gin.H{"status": "stopped"})
 }

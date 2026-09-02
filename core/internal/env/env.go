@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -56,7 +57,7 @@ func unixEnvContent(dwytHome, dwytBin, dwytData string, headroomPort int) string
 		headroomPort,
 		posixShellLiteral(fmt.Sprintf("http://127.0.0.1:%d/v1", headroomPort)),
 		posixShellLiteral(fmt.Sprintf("http://127.0.0.1:%d", headroomPort)),
-		posixShellLiteral(filepath.Join(dwytHome, "codebase")),
+		posixShellLiteral(path.Join(dwytHome, "codebase")),
 	)
 }
 

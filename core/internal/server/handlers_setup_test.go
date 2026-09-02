@@ -11,11 +11,13 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
+	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
 
@@ -92,6 +94,65 @@ func TestSetupSaveCanonicalizesLegacyClients(t *testing.T) {
 	}
 	if want := []string{"continue"}; !reflect.DeepEqual(state.Init(home).Clients, want) {
 		t.Fatalf("legacy clients selection was not persisted to runtime state: got %#v, want %#v", state.Init(home).Clients, want)
+	}
+}
+
+func TestSetupSaveFailedToolSourceHandoffKeepsPreviousConfiguration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	oldMarker := filepath.Join(t.TempDir(), "old-starts")
+	failingMarker := filepath.Join(t.TempDir(), "failing-starts")
+	oldPath := writeToolSourceTestLauncher(t, "old-headroom", oldMarker, false)
+	failingPath := writeToolSourceTestLauncher(t, "failing-headroom", failingMarker, true)
+	ds, previousSources := startToolSourceTestServer(t, oldPath)
+
+	store, err := db.New(filepath.Join(t.TempDir(), "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	previousConfig, err := json.Marshal(Config{Configured: true, ToolSources: previousSources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetConfig("setup", string(previousConfig)); err != nil {
+		t.Fatal(err)
+	}
+	ds.Store = store
+
+	nextSources := toolsource.NormalizeAll(map[string]toolsource.Selection{
+		toolsource.ToolHeadroom: {Mode: toolsource.ModeExternal, Path: failingPath},
+	})
+	body, err := json.Marshal(Config{ToolSources: nextSources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/setup/save", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ds.apiSetupSave(ctx)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("failed handoff status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
+	}
+	raw, err := store.GetConfig("setup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted Config
+	if err := json.Unmarshal([]byte(raw), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if got := toolSourceFor(persisted, toolsource.ToolHeadroom).Path; got != oldPath {
+		t.Fatalf("failed handoff persisted path = %q, want previous %q", got, oldPath)
+	}
+	if got := ds.RuntimeState.ToolSourcesSnapshot()[toolsource.ToolHeadroom].Path; got != oldPath {
+		t.Fatalf("failed handoff runtime path = %q, want previous %q", got, oldPath)
+	}
+	status := ds.ProcMan.Status("headroom")
+	if !status.Running || !status.Healthy {
+		t.Fatalf("previous headroom process was not restored: %+v", status)
 	}
 }
 
@@ -172,8 +233,12 @@ func TestRunInstallMigratesLegacyClientsIntoRuntimeState(t *testing.T) {
 	}
 
 	ds.runInstall(Config{Clients: []string{"continue", "cursor"}}, false)
-	if want := []string{"continue", "cursor"}; !reflect.DeepEqual(state.Init(home).Clients, want) {
-		t.Fatalf("installer did not persist migrated clients to state: got %#v, want %#v", state.Init(home).Clients, want)
+	persistedState := state.Init(home)
+	if want := []string{"continue", "cursor"}; !reflect.DeepEqual(persistedState.Clients, want) {
+		t.Fatalf("installer did not persist migrated clients to state: got %#v, want %#v", persistedState.Clients, want)
+	}
+	if source := toolsource.Normalize(persistedState.ToolSourcesSnapshot()[toolsource.ToolHeadroom]); source.Mode != toolsource.ModeDWYT {
+		t.Fatalf("installer did not persist normalized tool sources to state: %+v", persistedState.ToolSourcesSnapshot())
 	}
 }
 
@@ -222,6 +287,48 @@ func TestAPIServicesStartStopAllUpdatesRuntimeState(t *testing.T) {
 	for _, name := range []string{"codebase", "headroom"} {
 		if _, ok := runtimeState.GetProcess(name); ok {
 			t.Fatalf("%s still present in runtime state after stop", name)
+		}
+	}
+}
+
+func TestAPIServicesStopAllReportsStopErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	home := t.TempDir()
+	runtimeState := state.Init(home)
+	for _, service := range []string{"codebase", "headroom"} {
+		runtimeState.RegisterProcess(service, 4242, 8787)
+	}
+	ds := &DashboardServer{
+		ProcMan:      procman.New(home),
+		RuntimeState: runtimeState,
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/services/stop-all", nil)
+	ds.apiServicesStopAll(c)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("stop-all status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status string            `json:"status"`
+		Error  string            `json:"error"`
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "error" || len(body.Errors) != 2 ||
+		!strings.Contains(body.Error, "codebase") || !strings.Contains(body.Error, "headroom") {
+		t.Fatalf("stop-all response = %+v, want both stop errors", body)
+	}
+	for _, service := range []string{"codebase", "headroom"} {
+		if body.Errors[service] == "" {
+			t.Fatalf("stop-all response omitted %s error: %+v", service, body)
+		}
+		if _, ok := runtimeState.GetProcess(service); !ok {
+			t.Fatalf("failed stop must not remove %s from runtime state", service)
 		}
 	}
 }

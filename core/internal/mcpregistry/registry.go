@@ -528,6 +528,7 @@ func (r *Registry) syncCodexGlobal(names []string) error {
 	if len(names) > 0 {
 		return r.syncScopedCodexGlobal(configPath, original, names)
 	}
+	lineEnding := preferredLineEnding(original)
 	content := removeManagedBlock(original, "# dwyt:mcp:start", "# dwyt:mcp:end")
 
 	block := r.codexTOMLBlock()
@@ -541,12 +542,12 @@ func (r *Registry) syncCodexGlobal(names []string) error {
 		return os.WriteFile(configPath, []byte(content), 0644)
 	}
 	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
+		content += lineEnding
 	}
 	if strings.TrimSpace(content) != "" {
-		content += "\n"
+		content += lineEnding
 	}
-	content += block
+	content += withLineEnding(block, lineEnding)
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
@@ -596,14 +597,13 @@ func (r *Registry) codexTOMLTables(names []string) string {
 func (r *Registry) syncScopedCodexGlobal(configPath, original string, names []string) error {
 	startMarker := "# dwyt:mcp:start"
 	endMarker := "# dwyt:mcp:end"
+	lineEnding := preferredLineEnding(original)
 	start := strings.Index(original, startMarker)
 	end := -1
 	if start >= 0 {
 		if relative := strings.Index(original[start:], endMarker); relative >= 0 {
 			end = start + relative + len(endMarker)
-			if end < len(original) && original[end] == '\n' {
-				end++
-			}
+			end = consumeLineEnding(original, end)
 		}
 	}
 
@@ -616,12 +616,12 @@ func (r *Registry) syncScopedCodexGlobal(configPath, original string, names []st
 		}
 		content := original
 		if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
-			content += "\n"
+			content += lineEnding
 		}
 		if strings.TrimSpace(content) != "" {
-			content += "\n"
+			content += lineEnding
 		}
-		content += startMarker + "\n" + tables + endMarker + "\n"
+		content += startMarker + lineEnding + withLineEnding(tables, lineEnding) + endMarker + lineEnding
 		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 			return fmt.Errorf("create Codex config directory %s: %w", filepath.Dir(configPath), err)
 		}
@@ -635,7 +635,7 @@ func (r *Registry) syncScopedCodexGlobal(configPath, original string, names []st
 	if tables := r.codexTOMLTables(names); tables != "" {
 		marker := strings.Index(block, endMarker)
 		if marker >= 0 {
-			block = block[:marker] + tables + block[marker:]
+			block = block[:marker] + withLineEnding(tables, lineEnding) + block[marker:]
 		}
 	}
 
@@ -845,14 +845,48 @@ func removeManagedBlock(content, start, end string) string {
 			return content
 		}
 		endPos := startIdx + endIdx + len(end)
-		if endPos < len(content) && content[endPos] == '\n' {
-			endPos++
-		}
-		if startIdx > 0 && content[startIdx-1] == '\n' {
-			startIdx--
-		}
+		endPos = consumeLineEnding(content, endPos)
+		startIdx = trimPreviousLineEnding(content, startIdx)
 		content = content[:startIdx] + content[endPos:]
 	}
+}
+
+func preferredLineEnding(content string) string {
+	newline := strings.IndexByte(content, '\n')
+	if newline > 0 && content[newline-1] == '\r' {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func withLineEnding(content, lineEnding string) string {
+	if lineEnding == "\n" {
+		return content
+	}
+	return strings.ReplaceAll(content, "\n", lineEnding)
+}
+
+func consumeLineEnding(content string, position int) int {
+	if position >= len(content) {
+		return position
+	}
+	if strings.HasPrefix(content[position:], "\r\n") {
+		return position + 2
+	}
+	if content[position] == '\r' || content[position] == '\n' {
+		return position + 1
+	}
+	return position
+}
+
+func trimPreviousLineEnding(content string, position int) int {
+	if position >= 2 && content[position-2:position] == "\r\n" {
+		return position - 2
+	}
+	if position > 0 && (content[position-1] == '\r' || content[position-1] == '\n') {
+		return position - 1
+	}
+	return position
 }
 
 // ConfigureMCPByName writes MCP configuration for a specific MCP server only,

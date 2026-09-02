@@ -168,9 +168,6 @@ func validateExecutable(tool, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s path: %w", tool, err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		return "", fmt.Errorf("%s path %q is unavailable: %w", tool, abs, err)

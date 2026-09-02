@@ -134,13 +134,23 @@ func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
 		// ProcessManager owns the actual port selection. Updating through start is
 		// intentionally avoided here; the returned URL is advisory for the browser.
 	}
-	ds.ProcMan.Stop("codebase")
+	if !ds.stopCodebaseForOpenUI(c) {
+		return
+	}
 	time.Sleep(50 * time.Millisecond)
 
 	go func() {
 		ds.ProcMan.Start("codebase")
 	}()
 	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "starting": true})
+}
+
+func (ds *DashboardServer) stopCodebaseForOpenUI(c *gin.Context) bool {
+	if _, err := ds.ProcMan.Stop("codebase"); err != nil {
+		c.JSON(500, gin.H{"status": "error", "error": err.Error(), "url": ""})
+		return false
+	}
+	return true
 }
 
 // creditCodebaseUsage records one real codebase MCP interaction (a (re)index

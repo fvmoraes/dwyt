@@ -41,8 +41,16 @@ func (ds *DashboardServer) apiHeadroomStartPM(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiHeadroomStopPM(c *gin.Context) {
-	ds.ProcMan.Stop("headroom")
-	ds.RuntimeState.RemoveProcess("headroom")
+	if _, err := ds.ProcMan.Stop("headroom"); err != nil {
+		if ds.RuntimeState != nil {
+			ds.RuntimeState.SetToolError("headroom", err.Error())
+		}
+		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
+		return
+	}
+	if ds.RuntimeState != nil {
+		ds.RuntimeState.RemoveProcess("headroom")
+	}
 
 	c.JSON(200, gin.H{"status": "stopped"})
 }

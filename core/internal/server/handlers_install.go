@@ -102,15 +102,13 @@ func (ds *DashboardServer) runInstall(config Config, headroomSkipped bool) {
 		setStatus("setup", "error: "+err.Error())
 		return
 	}
-	ds.syncSetupClients(config)
-	if err := ds.applyToolSourceProcesses(config); err != nil {
-		// Keep the selected source persisted for the next daemon restart, but
-		// surface a live-process handoff failure instead of replacing ProcMan's
-		// entry and losing its PID.
-		setStatus("services", "error: "+err.Error())
-	}
-
+	previousSources := ds.configuredToolSources()
 	ds.installTools(config, headroomSkipped, setStatus)
+	if err := ds.applyToolSourceProcesses(previousSources, config); err != nil {
+		setStatus("services", "error: "+err.Error())
+		return
+	}
+	ds.syncSetupClients(config)
 	if config.ProjectPath != "" {
 		ds.integrateProject(config, setStatus)
 	}
@@ -121,7 +119,6 @@ func (ds *DashboardServer) runInstall(config Config, headroomSkipped bool) {
 	if ds.Store != nil {
 		ds.Store.SetConfig("setup", string(data))
 	}
-	ds.syncSetupClients(config)
 }
 
 func (ds *DashboardServer) installTools(config Config, headroomSkipped bool, setStatus func(string, string)) {

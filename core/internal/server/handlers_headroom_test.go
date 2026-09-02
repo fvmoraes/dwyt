@@ -99,6 +99,39 @@ func TestHeadroomLifecycleUsesSelectedExternalToolPath(t *testing.T) {
 	}
 }
 
+func TestAPIHeadroomStopPMKeepsRuntimeStateOnStopError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	home := t.TempDir()
+	runtimeState := state.Init(home)
+	runtimeState.RegisterProcess("headroom", 4242, 8787)
+	ds := &DashboardServer{
+		ProcMan:      procman.New(home),
+		RuntimeState: runtimeState,
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/headroom/stop", nil)
+	ds.apiHeadroomStopPM(c)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("stop status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "error" || body.Error == "" {
+		t.Fatalf("stop response = %+v, want explicit error", body)
+	}
+	if _, ok := runtimeState.GetProcess("headroom"); !ok {
+		t.Fatal("failed stop must not remove headroom from runtime state")
+	}
+}
+
 // TestAPIHeadroomStatsURLUsesRegisteredProcessManager proves that the legacy
 // direct `bin/headroom` launcher is not used. The configured DWYT bin is
 // intentionally empty; only the registered managed service can satisfy this

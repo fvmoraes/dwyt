@@ -3,6 +3,7 @@ package env
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -78,6 +79,39 @@ func TestUnixEnvContentQuotesShellPaths(t *testing.T) {
 	}
 	if got, want := unixSourceLine(`/tmp/O'Brien $home/dwyt/env.sh`), `[[ -f '/tmp/O'"'"'Brien $home/dwyt/env.sh' ]] && source '/tmp/O'"'"'Brien $home/dwyt/env.sh'`; got != want {
 		t.Fatalf("Unix source line = %q, want %q", got, want)
+	}
+}
+
+func TestUnixEnvContentCanBeSourcedByPOSIXShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell is not available on the Windows runner")
+	}
+
+	dwytHome := `/tmp/O'Brien $home/dwyt`
+	dwytBin := `/tmp/O'Brien $home/dwyt/bin dir`
+	file := filepath.Join(t.TempDir(), "env.sh")
+	if err := os.WriteFile(file, []byte(unixEnvContent(dwytHome, dwytBin, "/tmp/data", 8788)), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", `. "$1"; printf '%s\n%s\n%s\n' "$DWYT_HOME" "$PATH" "$CBM_CACHE_DIR"`, "sh", file)
+	cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("source generated env.sh: %v\n%s", err, output)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("sourced values = %q, want three lines", output)
+	}
+	if lines[0] != dwytHome {
+		t.Fatalf("DWYT_HOME = %q, want %q", lines[0], dwytHome)
+	}
+	if lines[1] != dwytBin+":/usr/bin:/bin" {
+		t.Fatalf("PATH = %q, want generated bin prepended", lines[1])
+	}
+	if lines[2] != dwytHome+"/codebase" {
+		t.Fatalf("CBM_CACHE_DIR = %q, want POSIX path", lines[2])
 	}
 }
 

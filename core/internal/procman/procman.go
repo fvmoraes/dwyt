@@ -46,19 +46,25 @@ type ManagedProcess struct {
 }
 
 type ProcessManager struct {
-	processes map[string]*ManagedProcess
-	mu        sync.RWMutex
-	logDir    string
-	dwytHome  string
+	processes     map[string]*ManagedProcess
+	mu            sync.RWMutex
+	logDir        string
+	dwytHome      string
+	terminateTree func(int) error
+	stopTimeout   time.Duration
 }
+
+const defaultProcessStopTimeout = 6 * time.Second
 
 func New(dwytHome string) *ProcessManager {
 	logDir := filepath.Join(dwytHome, "logs")
 	os.MkdirAll(logDir, 0755)
 	return &ProcessManager{
-		processes: make(map[string]*ManagedProcess),
-		logDir:    logDir,
-		dwytHome:  dwytHome,
+		processes:     make(map[string]*ManagedProcess),
+		logDir:        logDir,
+		dwytHome:      dwytHome,
+		terminateTree: procutil.TerminateTree,
+		stopTimeout:   defaultProcessStopTimeout,
 	}
 }
 
@@ -214,6 +220,34 @@ func (mp *ManagedProcess) closeLogFiles() {
 	mp.logFiles = nil
 }
 
+func (pm *ProcessManager) terminateProcessTree(pid int) error {
+	if pm.terminateTree != nil {
+		return pm.terminateTree(pid)
+	}
+	return procutil.TerminateTree(pid)
+}
+
+func (pm *ProcessManager) processStopTimeout() time.Duration {
+	if pm.stopTimeout > 0 {
+		return pm.stopTimeout
+	}
+	return defaultProcessStopTimeout
+}
+
+func waitForProcessExit(done <-chan struct{}, timeout time.Duration) bool {
+	if done == nil {
+		return false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 	mp := pm.get(name)
 	if mp == nil {
@@ -227,20 +261,25 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 		return pm.statusLocked(mp), nil
 	}
 
-	// Prefer the tracked child handle so we coordinate with the reaper
-	// goroutine (which owns the single Wait()). procutil.Terminate is
-	// cross-platform (SIGTERM→SIGKILL on Unix, taskkill /F /T on Windows).
+	// Coordinate with the reaper goroutine, which owns the single Wait(), and
+	// keep the process registered until that goroutine confirms its exit.
 	pid := mp.PID
 	done := mp.done
-	procutil.TerminateTree(pid)
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(6 * time.Second):
-			log.Warn("process didn't exit after terminate", log.Fields{"service": name, "pid": pid})
-			procutil.TerminateTree(pid)
-			<-done
+	if done == nil {
+		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d has no exit notification", name, pid)
+	}
+	if err := pm.terminateProcessTree(pid); err != nil {
+		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: terminate process tree %d: %w", name, pid, err)
+	}
+	timeout := pm.processStopTimeout()
+	if !waitForProcessExit(done, timeout) {
+		if err := pm.terminateProcessTree(pid); err != nil {
+			return pm.statusLocked(mp), fmt.Errorf("stopping service %s after %s timeout: terminate process tree %d: %w", name, timeout, pid, err)
 		}
+		if !waitForProcessExit(done, timeout) {
+			return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d did not exit after two %s waits", name, pid, timeout)
+		}
+		log.Warn("process required termination retry", log.Fields{"service": name, "pid": pid})
 	}
 	mp.closeLogFiles()
 
@@ -252,7 +291,10 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 }
 
 func (pm *ProcessManager) Restart(name string) (*ServiceStatus, error) {
-	pm.Stop(name)
+	status, err := pm.Stop(name)
+	if err != nil {
+		return status, fmt.Errorf("stopping service %s before restart: %w", name, err)
+	}
 	time.Sleep(500 * time.Millisecond)
 	return pm.Start(name)
 }

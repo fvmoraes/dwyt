@@ -1,15 +1,18 @@
 package procman
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -78,6 +81,21 @@ func windowsCmd() string {
 	return `C:\Windows\System32\cmd.exe`
 }
 
+func runningProcessManager(t *testing.T) (*ProcessManager, *ManagedProcess) {
+	t.Helper()
+	pm := New(t.TempDir())
+	mp := &ManagedProcess{
+		Name:      "test",
+		Bin:       os.Args[0],
+		PID:       4242,
+		StartedAt: time.Now(),
+		cmd:       &exec.Cmd{},
+		done:      make(chan struct{}),
+	}
+	pm.processes[mp.Name] = mp
+	return pm, mp
+}
+
 func TestProcessManager_StartStop(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
@@ -127,6 +145,102 @@ func TestProcessManager_StartStop(t *testing.T) {
 				t.Error("Process should be dead")
 			}
 		}
+	}
+}
+
+func TestProcessManager_StopPropagatesTerminateError(t *testing.T) {
+	pm, mp := runningProcessManager(t)
+	wantErr := errors.New("terminate failed")
+	calls := 0
+	pm.terminateTree = func(pid int) error {
+		calls++
+		if pid != mp.PID {
+			t.Fatalf("terminate PID = %d, want %d", pid, mp.PID)
+		}
+		return wantErr
+	}
+
+	status, err := pm.Stop(mp.Name)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Stop error = %v, want wrapped %v", err, wantErr)
+	}
+	if calls != 1 {
+		t.Fatalf("terminate calls = %d, want 1", calls)
+	}
+	if status == nil || !status.Running || status.PID != mp.PID {
+		t.Fatalf("failed stop must retain running status, got %+v", status)
+	}
+}
+
+func TestProcessManager_StopPropagatesRetryTerminateError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pm, mp := runningProcessManager(t)
+		pm.stopTimeout = 3 * time.Second
+		wantErr := errors.New("retry terminate failed")
+		calls := 0
+		pm.terminateTree = func(int) error {
+			calls++
+			if calls == 2 {
+				return wantErr
+			}
+			return nil
+		}
+
+		started := time.Now()
+		status, err := pm.Stop(mp.Name)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("Stop error = %v, want wrapped %v", err, wantErr)
+		}
+		if calls != 2 {
+			t.Fatalf("terminate calls = %d, want 2", calls)
+		}
+		if elapsed := time.Since(started); elapsed != pm.stopTimeout {
+			t.Fatalf("Stop elapsed = %s, want %s", elapsed, pm.stopTimeout)
+		}
+		if status == nil || !status.Running || status.PID != mp.PID {
+			t.Fatalf("failed stop must retain running status, got %+v", status)
+		}
+	})
+}
+
+func TestProcessManager_StopReturnsAfterBoundedRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pm, mp := runningProcessManager(t)
+		pm.stopTimeout = 3 * time.Second
+		calls := 0
+		pm.terminateTree = func(int) error {
+			calls++
+			return nil
+		}
+
+		started := time.Now()
+		status, err := pm.Stop(mp.Name)
+		if err == nil || !strings.Contains(err.Error(), "did not exit") {
+			t.Fatalf("Stop error = %v, want bounded exit timeout", err)
+		}
+		if calls != 2 {
+			t.Fatalf("terminate calls = %d, want 2", calls)
+		}
+		if elapsed := time.Since(started); elapsed != 2*pm.stopTimeout {
+			t.Fatalf("Stop elapsed = %s, want %s", elapsed, 2*pm.stopTimeout)
+		}
+		if status == nil || !status.Running || status.PID != mp.PID {
+			t.Fatalf("timed-out stop must retain running status, got %+v", status)
+		}
+	})
+}
+
+func TestProcessManager_RestartPropagatesStopError(t *testing.T) {
+	pm, mp := runningProcessManager(t)
+	wantErr := errors.New("terminate failed")
+	pm.terminateTree = func(int) error { return wantErr }
+
+	status, err := pm.Restart(mp.Name)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Restart error = %v, want wrapped %v", err, wantErr)
+	}
+	if status == nil || !status.Running || status.PID != mp.PID {
+		t.Fatalf("failed restart must retain running status, got %+v", status)
 	}
 }
 

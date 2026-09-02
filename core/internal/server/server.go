@@ -105,7 +105,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	procmanInstance := procman.New(dwytHome)
 	sources := rs.ToolSourcesSnapshot()
 	codebaseBin := toolPathFor(dwytBin, toolsource.ToolCodebase, sources)
-	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, "--ui=true", "--port={port}")
+	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, codebaseProcessArgs()...)
 
 	// The Obsidian MCP runs over stdio and is spawned on demand by each AI
 	// client from the command written into its config. It is intentionally

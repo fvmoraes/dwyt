@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestLoadMigratesLegacyMCPNames(t *testing.T) {
@@ -163,6 +166,76 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 		!strings.Contains(string(codex), "[mcp_servers.obsidian]") ||
 		!strings.Contains(string(codex), "[mcp_servers.obsidian.env]") {
 		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
+	}
+}
+
+func TestSyncCodexGlobalRewritesCRLFManagedBlock(t *testing.T) {
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	setTestHome(t, home)
+	t.Setenv("DWYT_HOME", dwytHome)
+
+	binDir := filepath.Join(dwytHome, "bin")
+	touchExecutable(t, filepath.Join(binDir, "dwyt"))
+	touchExecutable(t, filepath.Join(binDir, "codebase-memory-mcp"))
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.stale]",
+		`command = "C:\\Old\\stale.exe"`,
+		"args = []",
+		"# dwyt:mcp:end",
+		"",
+	}, "\r\n")
+	if err := os.WriteFile(codexPath, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reg.SyncCodexGlobal(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	withoutCRLF := strings.ReplaceAll(content, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("full Codex sync introduced mixed or malformed line endings: %q", content)
+	}
+	if strings.Count(content, "# dwyt:mcp:start") != 1 || strings.Count(content, "# dwyt:mcp:end") != 1 {
+		t.Fatalf("full Codex sync did not replace the managed block exactly once:\n%s", content)
+	}
+
+	var parsed struct {
+		Model      string `toml:"model"`
+		MCPServers map[string]struct {
+			Command string `toml:"command"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated Codex config is not valid TOML: %v\n%s", err, content)
+	}
+	if parsed.Model != "keep-user-setting" {
+		t.Fatalf("model = %q, want keep-user-setting", parsed.Model)
+	}
+	if _, ok := parsed.MCPServers["stale"]; ok {
+		t.Fatalf("stale managed table survived full sync: %#v", parsed.MCPServers)
+	}
+	for _, name := range []string{"codebase", "obsidian"} {
+		if got := parsed.MCPServers[name].Command; got != reg.MCPServers[name].Command {
+			t.Fatalf("%s command = %q, want %q", name, got, reg.MCPServers[name].Command)
+		}
 	}
 }
 
@@ -523,12 +596,28 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	windowsCommand := `C:\Program Files\DWYT\dwyt.exe`
+	obsidian := reg.MCPServers["obsidian"]
+	obsidian.Command = windowsCommand
+	reg.MCPServers["obsidian"] = obsidian
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	original := "model = \"keep-user-setting\"\n\n# dwyt:mcp:start\n[mcp_servers.codebase]\ncommand = \"/tmp/keep-codebase\"\nargs = []\nstartup_timeout_sec = 20\ntool_timeout_sec = 120\n\n# dwyt:mcp:end\n"
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.codebase]",
+		`command = "/tmp/keep-codebase"`,
+		"args = []",
+		"startup_timeout_sec = 20",
+		"tool_timeout_sec = 120",
+		"",
+		"# dwyt:mcp:end",
+		"",
+	}, "\r\n")
 	if err := os.WriteFile(codexPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -541,11 +630,71 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
+	withoutCRLF := strings.ReplaceAll(content, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("scoped Codex sync introduced mixed or malformed line endings: %q", content)
+	}
 	if !strings.Contains(content, "model = \"keep-user-setting\"") || !strings.Contains(content, "command = \"/tmp/keep-codebase\"") {
 		t.Fatalf("scoped Codex sync changed unrelated configuration:\n%s", content)
 	}
-	if !strings.Contains(content, "[mcp_servers.obsidian]") || !strings.Contains(content, reg.MCPServers["obsidian"].Command) {
+	obsidianCommand := "command = " + strconv.Quote(reg.MCPServers["obsidian"].Command)
+	if !strings.Contains(content, "[mcp_servers.obsidian]") || !strings.Contains(content, obsidianCommand) {
 		t.Fatalf("expected scoped sync to add refreshed Obsidian table:\n%s", content)
+	}
+
+	var parsed struct {
+		Model      string `toml:"model"`
+		MCPServers map[string]struct {
+			Command string `toml:"command"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("generated Codex config is not valid TOML: %v\n%s", err, content)
+	}
+	if parsed.Model != "keep-user-setting" {
+		t.Fatalf("model = %q, want keep-user-setting", parsed.Model)
+	}
+	if got := parsed.MCPServers["codebase"].Command; got != "/tmp/keep-codebase" {
+		t.Fatalf("codebase command = %q, want /tmp/keep-codebase", got)
+	}
+	if got := parsed.MCPServers["obsidian"].Command; got != windowsCommand {
+		t.Fatalf("obsidian command = %q, want %q", got, windowsCommand)
+	}
+}
+
+func TestRemoveManagedBlockPreservesCRLFBoundaries(t *testing.T) {
+	original := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"# dwyt:mcp:start",
+		"[mcp_servers.codebase]",
+		`command = "C:\\Program Files\\DWYT\\codebase.exe"`,
+		"args = []",
+		"# dwyt:mcp:end",
+		"",
+		"[profiles.keep]",
+		`model = "keep-profile"`,
+		"",
+	}, "\r\n")
+	want := strings.Join([]string{
+		`model = "keep-user-setting"`,
+		"",
+		"[profiles.keep]",
+		`model = "keep-profile"`,
+		"",
+	}, "\r\n")
+
+	got := removeManagedBlock(original, "# dwyt:mcp:start", "# dwyt:mcp:end")
+	if got != want {
+		t.Fatalf("removeManagedBlock() = %q, want %q", got, want)
+	}
+	withoutCRLF := strings.ReplaceAll(got, "\r\n", "")
+	if strings.ContainsAny(withoutCRLF, "\r\n") {
+		t.Fatalf("removeManagedBlock left a partial line ending: %q", got)
+	}
+	var parsed map[string]interface{}
+	if err := toml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("TOML after managed block removal is invalid: %v\n%s", err, got)
 	}
 }
 
