@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Health reports the Brain's state for the DWYT MCP (`dwyt_memory_health`) and
@@ -14,38 +15,95 @@ import (
 // number here would make the housekeeper's decisions look wrong.
 func (pb *ProjectObsidian) Health() map[string]interface{} {
 	pb.mu.RLock()
-	defer pb.mu.RUnlock()
+	brainDir := pb.brainDir
+	projectID := pb.ProjectID
+	projectName := pb.ProjectName
+	pb.mu.RUnlock()
 
 	counts := map[string]int{}
 	var totalBytes int64
 	totalNotes := 0
+	canonicalNotes := 0
+	compactSessions := 0
+	staleNotes := 0
+	expiringSoon := 0
+	unmanagedNotes := 0
+	now := time.Now()
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
 			return nil
 		}
-		rel, relErr := filepath.Rel(pb.brainDir, path)
+		rel, relErr := filepath.Rel(brainDir, path)
 		if relErr != nil {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
 		totalNotes++
 		totalBytes += info.Size()
-		counts[healthBucket(rel)]++
+		area := healthBucket(rel)
+		counts[area]++
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		lc := ParseLifecycle(string(data))
+		if !lc.Managed {
+			unmanagedNotes++
+		}
+		if lc.State == NoteStale {
+			staleNotes++
+		}
+		if lc.Managed && !lc.ExpiresAt.IsZero() &&
+			lc.ExpiresAt.After(now) && lc.ExpiresAt.Before(now.Add(24*time.Hour)) {
+			expiringSoon++
+		}
+		if isCanonicalArea(rel) {
+			canonicalNotes++
+		}
+		if strings.HasPrefix(rel, "90-sessions/") && filepath.Base(rel) != "index.md" {
+			compactSessions++
+		}
 		return nil
 	})
 
 	return map[string]interface{}{
-		"project_id":    pb.ProjectID,
-		"project_name":  pb.ProjectName,
-		"vault_dir":     pb.brainDir,
+		"project_id":    projectID,
+		"project_name":  projectName,
+		"vault_dir":     brainDir,
 		"total_notes":   totalNotes,
 		"total_bytes":   totalBytes,
 		"notes_by_area": counts,
+		// Canonical vs session is the health signal that matters: a Brain whose
+		// knowledge lives in session transcripts rather than canonical notes is
+		// the pre-v5 failure mode the spec set out to fix.
+		"canonical_notes":     canonicalNotes,
+		"compact_sessions":    compactSessions,
+		"stale_notes":         staleNotes,
+		"expiring_within_24h": expiringSoon,
+		"unmanaged_notes":     unmanagedNotes,
 	}
+}
+
+// isCanonicalArea reports whether a vault-relative path lives in one of the
+// canonical knowledge areas.
+func isCanonicalArea(rel string) bool {
+	for _, prefix := range []string{
+		string(AreaProject) + "/",
+		string(AreaArchitecture) + "/",
+		string(AreaDecisions) + "/",
+		string(AreaModules) + "/",
+		string(AreaKnowledge) + "/",
+	} {
+		if strings.HasPrefix(rel, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // healthBucket maps a vault-relative note path to a reporting area. It

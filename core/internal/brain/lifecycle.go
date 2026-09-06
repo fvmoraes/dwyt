@@ -506,3 +506,13 @@ func replaceFrontmatterFields(content string, fields map[string]string) (string,
 	}
 	return content[:idx] + newFM + content[idx+len(fm):], true
 }
+
+// ReplaceFrontmatterField upserts a single scalar field in a note's
+// frontmatter, preserving every other line byte-for-byte. It is exported for
+// the housekeeper, which needs to flip `state:` without rewriting notes.
+//
+// Returns false when the document has no frontmatter to update — the signal that
+// the note is not DWYT-shaped and must be left alone.
+func ReplaceFrontmatterField(content, key, value string) (string, bool) {
+	return replaceFrontmatterFields(content, map[string]string{key: value})
+}

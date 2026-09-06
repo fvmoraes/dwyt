@@ -182,6 +182,28 @@ func (gt *GovernorTools) HousekeeperStatus(args map[string]interface{}) (string,
 	return gt.getJSON("/governor/housekeeper", nil)
 }
 
+// HousekeeperRun implements dwyt_housekeeper_run.
+//
+// It defaults to a dry run. A housekeeping pass deletes notes, and an agent
+// should have to opt in explicitly before that happens rather than discovering
+// it after the fact.
+func (gt *GovernorTools) HousekeeperRun(args map[string]interface{}) (string, error) {
+	query := url.Values{}
+	if v, ok := args["depth"].(string); ok && v != "" {
+		query.Set("depth", v)
+	}
+	apply, _ := args["apply"].(bool)
+	if !apply {
+		query.Set("dry_run", "true")
+	}
+	resp, err := gt.client.Post(dwytAPI+"/housekeeper/run?"+query.Encode(), "application/json", nil)
+	if err != nil {
+		return "", fmt.Errorf("housekeeper run failed: %w", err)
+	}
+	defer resp.Body.Close()
+	return decodeGovernorResponse(resp, "/housekeeper/run")
+}
+
 // MemoryHealth implements dwyt_memory_health.
 func (gt *GovernorTools) MemoryHealth(args map[string]interface{}) (string, error) {
 	return gt.getJSON("/governor/memory-health", nil)
@@ -324,6 +346,18 @@ func RegisterGovernorTools(s *Server) {
 		map[string]Property{},
 		nil,
 		gt.HousekeeperStatus,
+	)
+
+	s.RegisterTool("dwyt_housekeeper_run",
+		"Run a Brain retention pass. Defaults to a dry run that reports what would be removed and "+
+			"changes nothing; pass apply=true to commit. Reusable knowledge is always promoted to "+
+			"canonical memory before anything is deleted.",
+		map[string]Property{
+			"depth": {Type: "string", Description: "light (bookkeeping only) or deep (session limit, TTLs, dedup, raw pruning)"},
+			"apply": {Type: "boolean", Description: "Commit the pass. Omit or set false to preview only"},
+		},
+		nil,
+		gt.HousekeeperRun,
 	)
 
 	s.RegisterTool("dwyt_memory_health",

@@ -19,6 +19,7 @@ import (
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
@@ -160,6 +161,17 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// governor). Wiring it through narrow interfaces keeps the dependency
 	// one-directional.
 	ds.Governor.SetMemoryHealthProvider(ds)
+
+	// The Brain gains the v5 canonical layout on first run. Failure is
+	// non-fatal: the vault still works with the pre-v5 folders, and the next
+	// startup retries.
+	if pb != nil {
+		if err := pb.EnsureCanonicalLayout(); err != nil {
+			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
+		}
+	}
+	ds.Housekeeper = housekeeper.New(housekeeper.DefaultConfig(), pb, ds.Governor.RawStore())
+	ds.Governor.SetHousekeeperStatusProvider(ds.Housekeeper)
 
 	if store != nil {
 		store.TouchProject(project)
@@ -319,6 +331,11 @@ func (ds *DashboardServer) Start() error {
 
 	ds.startHeadroomIfNeeded()
 	ds.startMCPsIfNeeded()
+	if ds.Housekeeper != nil {
+		// Runs a deep pass now and then on the configured interval. Both are
+		// goroutines, so a large vault never delays the daemon coming up.
+		ds.Housekeeper.Start()
+	}
 
 	return r.Run(addr)
 }

@@ -100,11 +100,22 @@ func (ds *DashboardServer) projectObsidian() *brain.ProjectObsidian {
 	return ds.ProjectObsidian
 }
 
-// setProjectObsidian swaps the active vault pointer under a write lock.
+// setProjectObsidian swaps the active vault pointer under a write lock and
+// repoints the housekeeper at the new vault, so a project switch never leaves
+// retention passes running against the previous project's notes.
 func (ds *DashboardServer) setProjectObsidian(pb *brain.ProjectObsidian) {
 	ds.projectMu.Lock()
-	defer ds.projectMu.Unlock()
 	ds.ProjectObsidian = pb
+	ds.projectMu.Unlock()
+
+	if ds.Housekeeper != nil {
+		ds.Housekeeper.SetVault(pb)
+	}
+	if pb != nil {
+		if err := pb.EnsureCanonicalLayout(); err != nil {
+			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
+		}
+	}
 }
 
 // apiProjectRemove performs a logical removal: the project leaves the active
