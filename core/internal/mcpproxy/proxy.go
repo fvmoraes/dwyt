@@ -68,6 +68,13 @@ type Config struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// Mode selects transparent (default, byte-exact) or governed (opt-in
+	// response compaction). See governed.go for the bypass rules.
+	Mode Mode
+	// Compactor performs the compaction in governed mode. When nil, governed
+	// mode degrades to transparent rather than failing to start.
+	Compactor CompactClient
 }
 
 // Run spawns the target, transparently bridges stdio, counts tools/call
@@ -90,10 +97,46 @@ func Run(cfg Config) (int, error) {
 
 	cmd := exec.Command(cfg.Target, cfg.Args...)
 	cmd.Env = os.Environ()
-	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
 	counter := &callCounter{server: cfg.Name, reporter: cfg.Reporter}
+
+	// Governed mode needs to see the server→client stream, which means giving up
+	// the byte-exact fd wiring. It is therefore strictly opt-in, and it silently
+	// degrades to transparent when no compactor was supplied: a misconfiguration
+	// must never turn into a broken MCP server.
+	governed := cfg.Mode == ModeGoverned && cfg.Compactor != nil
+	var respGov *responseGovernor
+	var childStdout *os.File
+	var stdoutDone chan struct{}
+
+	if governed {
+		pending := newPendingCalls()
+		counter.pending = pending
+		respGov = newResponseGovernor(cfg.Name, cfg.Compactor, pending, stdout)
+
+		rOut, wOut, err := os.Pipe()
+		if err != nil {
+			// Falling back to transparent is better than refusing to run.
+			governed = false
+			cmd.Stdout = stdout
+		} else {
+			cmd.Stdout = wOut
+			childStdout = wOut
+			stdoutDone = make(chan struct{})
+			go func() {
+				defer close(stdoutDone)
+				// A copy error here means the client went away; the deferred
+				// close and the Wait below tear the session down.
+				_, _ = io.Copy(respGov, rOut)
+				_ = respGov.Flush()
+				_ = rOut.Close()
+			}()
+		}
+	}
+	if cmd.Stdout == nil {
+		cmd.Stdout = stdout
+	}
 
 	// Bridge stdin through our own OS pipe and hand the child a real *os.File.
 	// This is deliberate: if we set cmd.Stdin to a non-*os.File reader, os/exec
@@ -141,6 +184,12 @@ func Run(cfg Config) (int, error) {
 	close(done)
 	signal.Stop(sigCh)
 	_ = pr.Close()
+	if childStdout != nil {
+		// Closing our copy of the write end lets the reader see EOF, so the
+		// governor can flush a trailing partial frame before we return.
+		_ = childStdout.Close()
+		<-stdoutDone
+	}
 	if cfg.Reporter != nil {
 		cfg.Reporter.Close()
 	}
@@ -160,10 +209,14 @@ type callCounter struct {
 	server   string
 	reporter Reporter
 	buf      []byte
+	// pending, when set (governed mode), records request id → tool name so the
+	// response governor can match a response to the tool that produced it.
+	pending *pendingCalls
 }
 
 type rpcPeek struct {
-	Method string `json:"method"`
+	ID     json.RawMessage `json:"id,omitempty"`
+	Method string          `json:"method"`
 	Params struct {
 		Name string `json:"name"`
 	} `json:"params"`
@@ -190,7 +243,10 @@ func (c *callCounter) Write(p []byte) (int, error) {
 
 func (c *callCounter) inspect(line []byte) {
 	line = bytes.TrimSpace(line)
-	if len(line) == 0 || c.reporter == nil {
+	if len(line) == 0 {
+		return
+	}
+	if c.reporter == nil && c.pending == nil {
 		return
 	}
 	// Cheap guard before paying for JSON parsing.
@@ -205,7 +261,12 @@ func (c *callCounter) inspect(line []byte) {
 		return
 	}
 	tool := strings.TrimSpace(peek.Params.Name)
-	c.reporter.Report(UsageReport{Server: c.server, Tool: tool})
+	if c.pending != nil {
+		c.pending.record(idKey(peek.ID), tool)
+	}
+	if c.reporter != nil {
+		c.reporter.Report(UsageReport{Server: c.server, Tool: tool})
+	}
 }
 
 // HTTPReporter posts usage reports to the dashboard on a single background
