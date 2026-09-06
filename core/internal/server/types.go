@@ -6,20 +6,21 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
 type Config struct {
-	Configured  bool     `json:"configured"`
-	Tools       []string `json:"tools"`
-	Clients     []string `json:"clients"`
-	Ias         []string `json:"ias"`
-	Providers   []string `json:"providers"`
+	Configured  bool                            `json:"configured"`
+	Tools       []string                        `json:"tools"`
+	Clients     []string                        `json:"clients"`
+	Ias         []string                        `json:"ias"`
+	Providers   []string                        `json:"providers"`
 	ToolSources map[string]toolsource.Selection `json:"tool_sources,omitempty"`
-	ProjectPath string   `json:"project_path"`
-	LastSetup   string   `json:"last_setup"`
+	ProjectPath string                          `json:"project_path"`
+	LastSetup   string                          `json:"last_setup"`
 }
 
 type FsNode struct {
@@ -53,16 +54,20 @@ type ToolDetail struct {
 }
 
 type DashboardServer struct {
-	Port             int
-	DwytBin          string
-	DwytHome         string
-	ReleaseVersion   string
-	StartCwd         string
-	DefaultProject   string
-	Store            *db.Store
-	ProjectObsidian  *brain.ProjectObsidian
-	ProcMan          *procman.ProcessManager
-	RuntimeState     *state.RuntimeState
+	Port            int
+	DwytBin         string
+	DwytHome        string
+	ReleaseVersion  string
+	StartCwd        string
+	DefaultProject  string
+	Store           *db.Store
+	ProjectObsidian *brain.ProjectObsidian
+	ProcMan         *procman.ProcessManager
+	RuntimeState    *state.RuntimeState
+	// Governor is the DWYT v5 Context Governor. It owns the efficiency policy
+	// (budgets, retrieval ladder, output profiles, cache guidance, raw store)
+	// so instruction files can stay small and stable.
+	Governor         *governor.Governor
 	HeadroomPort     int
 	headroomMu       sync.RWMutex
 	projectMu        sync.RWMutex

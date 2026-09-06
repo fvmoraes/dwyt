@@ -105,8 +105,20 @@ func Load() (*Registry, error) {
 	}
 
 	migrated := false
+	// "dwyt" used to be the key of the Codebase MCP. In v5 the name belongs to
+	// the Governor, so a legacy "dwyt" entry must be recognised by its wiring,
+	// not by its name: an entry whose command/target points at
+	// codebase-memory-mcp is the old Codebase server and gets renamed;
+	// anything already wired to the `governor-mcp` subcommand is the v5
+	// Governor and is left alone.
+	if entry, ok := r.MCPServers["dwyt"]; ok && isLegacyCodebaseWiring(entry) {
+		if _, exists := r.MCPServers["codebase"]; !exists {
+			r.MCPServers["codebase"] = entry
+		}
+		delete(r.MCPServers, "dwyt")
+		migrated = true
+	}
 	legacyNames := map[string]string{
-		"dwyt":          "codebase",
 		"dwyt-codebase": "codebase",
 		"dwyt-obsidian": "obsidian",
 		"obsidian-mcp":  "obsidian",
@@ -153,6 +165,14 @@ func Load() (*Registry, error) {
 		"obsidian": {
 			Command: dwytShim,
 			Args:    []string{"obsidian-mcp"},
+			Enabled: true,
+		},
+		// The DWYT MCP Governor (v5). Like Obsidian it is served by the main
+		// binary through a subcommand, so it needs no separate install step
+		// and is "installed" whenever DWYT itself is.
+		"dwyt": {
+			Command: dwytShim,
+			Args:    []string{"governor-mcp"},
 			Enabled: true,
 		},
 	}
@@ -317,6 +337,13 @@ func (r *Registry) IsBinaryInstalled(name string) bool {
 			return true
 		}
 	}
+	// The Governor is served by the main `dwyt` binary through the
+	// `governor-mcp` subcommand, so it is installed exactly when DWYT is.
+	if isGovernorEntry(name, entry) {
+		if fileExists(filepath.Join(dwytHome(), "bin", exeName("dwyt"))) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -350,7 +377,10 @@ func fileExists(path string) bool {
 // canonicalDWYTMCPNames are the only server keys DWYT owns in client config
 // files. Sync may remove these stale entries when they are disabled or no
 // longer installed, but it must never remove user-managed MCP servers.
-var canonicalDWYTMCPNames = []string{"codebase", "obsidian"}
+// The three official v5 MCPs (spec §3): the Governor, the Brain and Code
+// Intelligence. RTK is deliberately absent — it is a terminal-output tool, not
+// an MCP (spec §31).
+var canonicalDWYTMCPNames = []string{"dwyt", "codebase", "obsidian"}
 
 func isCanonicalDWYTMCP(name string) bool {
 	for _, candidate := range canonicalDWYTMCPNames {
@@ -408,8 +438,11 @@ func removeCanonicalDWYTMCPEntries(servers map[string]interface{}, names []strin
 }
 
 func removeLegacyServerKeysFor(servers map[string]interface{}, names []string) {
+	// "dwyt" is no longer a legacy alias of codebase: in v5 it is the
+	// Governor's own canonical key, so removing it while reconciling codebase
+	// would delete the Governor from the client config on every sync.
 	legacyByCanonical := map[string][]string{
-		"codebase": {"dwyt", "dwyt-codebase"},
+		"codebase": {"dwyt-codebase"},
 		"obsidian": {"dwyt-obsidian", "obsidian-mcp"},
 	}
 	for _, canonical := range canonicalNamesForSync(names) {
@@ -718,10 +751,48 @@ func mcpServerEnv(name string, entry MCPServerEntry) map[string]interface{} {
 	if isCodebaseEntry(name, entry) {
 		env["CBM_CACHE_DIR"] = filepath.Join(dwytHome(), "codebase")
 	}
-	if isObsidianEntry(name, entry) {
+	// Both DWYT-owned MCP servers are stdio shims over the daemon HTTP API, so
+	// both need to know where the daemon lives.
+	if isObsidianEntry(name, entry) || isGovernorEntry(name, entry) {
 		env["DWYT_API_URL"] = "http://localhost:2737/api"
 	}
 	return env
+}
+
+// isGovernorEntry reports whether an entry is the DWYT MCP Governor. The
+// canonical signal is the `governor-mcp` subcommand, because the command path
+// is the shared `dwyt` binary that every DWYT-owned MCP uses.
+func isGovernorEntry(name string, entry MCPServerEntry) bool {
+	if name == "dwyt" {
+		return true
+	}
+	for _, a := range entry.Args {
+		if a == "governor-mcp" {
+			return true
+		}
+	}
+	return false
+}
+
+// isLegacyCodebaseWiring reports whether a registry entry keyed "dwyt" is in
+// fact the pre-v5 Codebase server. Checked by wiring rather than by key so a
+// v5 Governor entry is never mistaken for a legacy alias.
+func isLegacyCodebaseWiring(entry MCPServerEntry) bool {
+	for _, a := range entry.Args {
+		if a == "governor-mcp" {
+			return false
+		}
+	}
+	if strings.Contains(filepath.Base(entry.Target), "codebase-memory-mcp") {
+		return true
+	}
+	if strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp") {
+		return true
+	}
+	// An entry with neither marker is ambiguous. Treating it as legacy is the
+	// safe reading: the v5 Governor is always written with the subcommand, so
+	// an entry lacking it cannot be a valid Governor.
+	return true
 }
 
 func isCodebaseEntry(name string, entry MCPServerEntry) bool {

@@ -125,26 +125,50 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 	if strings.Count(content, instructionMarkerStart) != 1 || strings.Count(content, instructionMarkerEnd) != 1 {
 		t.Fatalf("%s: expected one DWYT instruction block:\n%s", path, content)
 	}
+	// v5 entry contract (spec §4): the block names the three MCPs, points at
+	// the governor, and states the retrieval preferences — nothing more.
 	for _, want := range []string{
-		"Always use the DWYT Codebase MCP",
-		"Always use the DWYT Obsidian MCP",
-		"Before every final response",
+		"**DWYT MCP** — context governor",
+		"**Obsidian MCP** — persistent project memory",
+		"**Codebase MCP** — structural code retrieval",
+		"`dwyt_context_plan`",
 		"`obsidian_save_context`",
-		"`mcp__obsidian__obsidian_save_context`",
-		"`codex`, `opencode`, `claude`, `cursor`, `kiro`, `copilot`, `windsurf`, or `continue`",
-		"This rule applies to Codex, OpenCode, Claude, Cursor, Kiro, Copilot, Windsurf, and Continue.",
-		"Never rely only on grep/glob",
-		"Keep project context under `~/.dwyt`",
-		"Never hardcode machine-specific absolute paths",
-		"`~/.dwyt/projects/<id>_<project-name>/`",
+		"`dwyt_get_raw`",
+		"codex, opencode, claude, cursor, kiro, copilot,\nwindsurf, continue",
+		"symbols and line ranges over full files",
+		"canonical memory over old sessions",
+		"reusing context already obtained over retrieving it again",
+		"RTK reduces terminal output; it is not an MCP.",
+		"Do not truncate an artifact the user asked for.",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("%s: expected generated instructions to contain %q:\n%s", path, want, content)
 		}
 	}
-	for _, forbidden := range []string{"Lei do", "Ordem de Prioridade", "Configuracoes", "~/.dwyt/projects/<id>/" + "obsidian/"} {
+	// The v5 contract must not re-state the policy the Governor owns. Each of
+	// these strings marks a whole section that was deliberately moved into the
+	// DWYT MCP; their reappearance means the duplication regressed.
+	for _, forbidden := range []string{
+		"Lei do", "Ordem de Prioridade", "Configuracoes",
+		"~/.dwyt/projects/<id>/" + "obsidian/",
+		"Priority Order",
+		"## Codebase Law",
+		"## Obsidian Law",
+		"Minimum payload for saving context",
+		"OPENAI_BASE_URL",
+	} {
 		if strings.Contains(content, forbidden) {
 			t.Fatalf("%s: generated instructions contain %q:\n%s", path, forbidden, content)
 		}
+	}
+	// Size guard: the contract lives in the cacheable prefix of every request,
+	// so growth here is multiplied by every call the user ever makes. 2500
+	// bytes is roughly a quarter of the pre-v5 block and leaves room for
+	// wording changes without inviting a new policy section.
+	const maxContractBytes = 2500
+	if len(content) > maxContractBytes {
+		t.Fatalf("%s: DWYT instruction block grew to %d bytes (max %d); "+
+			"detailed policy belongs in the DWYT MCP, not in instruction files",
+			path, len(content), maxContractBytes)
 	}
 }

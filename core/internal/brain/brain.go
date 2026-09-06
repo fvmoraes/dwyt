@@ -604,6 +604,12 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 	}
 }
 
+// SaveContextSnapshot writes the full "rich handoff" note.
+//
+// In v5 this is no longer the default end-of-task save — SaveCompactSnapshot is
+// (spec §19). It remains available for the case the spec explicitly reserves it
+// for: a complex handoff where the commands, actions and prose genuinely need to
+// survive. Callers reach it through `POST /api/obsidian/context?rich=true`.
 func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string, error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
@@ -734,6 +740,14 @@ func appendFile(path, content string) error {
 	return err
 }
 
+// Search is the pre-v5 broad substring search: every matching note, ordered by
+// modification time, capped at 30.
+//
+// SearchV2 is the v5 default for agent-facing retrieval (spec §27) because this
+// shape is the wrong one for a token budget — the newest 30 notes are mostly
+// session history and the caller cannot ask for the two decisions it needed.
+// Search stays for local tooling and diagnostics that genuinely want "every
+// note containing this string".
 func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
@@ -1058,13 +1072,20 @@ func AutoSaveCommand(pb *ProjectObsidian, command string) error {
 	return pb.SaveEntry("note", content, []string{"dwyt", "command"})
 }
 
+// writeFrontmatter emits the note header, including the v5 lifecycle block
+// (spec §22, §25) so the housekeeper can classify retention, detect staleness
+// and apply usage-aware retention without reading the body.
+//
+// The legacy `date` field is kept alongside `created_at` because existing
+// Obsidian views and user queries reference it; dropping it would break vaults
+// silently.
 func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Time) {
 	allTags := []string{"dwyt", entryType}
 	allTags = append(allTags, tags...)
 	fmt.Fprintf(f, "---\n")
 	fmt.Fprintf(f, "tags: [%s]\n", strings.Join(allTags, ", "))
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprintf(f, "type: %s\n", entryType)
+	fmt.Fprint(f, NewLifecycle(entryType, date).Render())
 	fmt.Fprintf(f, "---\n\n")
 }
 
@@ -1072,7 +1093,7 @@ func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectOb
 	fmt.Fprintf(f, "---\n")
 	fmt.Fprintf(f, "tags: [dwyt, context, session, conversation]\n")
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprintf(f, "type: context\n")
+	fmt.Fprint(f, NewLifecycle("context", date).Render())
 	fmt.Fprintf(f, "client: %q\n", snapshot.Client)
 	fmt.Fprintf(f, "project: %q\n", pb.ProjectName)
 	fmt.Fprintf(f, "project_path: %q\n", pb.ProjectPath)

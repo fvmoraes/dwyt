@@ -39,10 +39,97 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 	if _, ok := reg.MCPServers["obsidian"]; !ok {
 		t.Fatal("expected canonical obsidian entry")
 	}
-	for _, legacyName := range []string{"dwyt", "dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
+	// v5: "dwyt" is the Governor's canonical key, seeded on every Load.
+	gov, ok := reg.MCPServers["dwyt"]
+	if !ok {
+		t.Fatal("expected canonical dwyt governor entry")
+	}
+	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
+		t.Fatalf("expected governor args [governor-mcp], got %#v", gov.Args)
+	}
+	for _, legacyName := range []string{"dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
 		if _, ok := reg.MCPServers[legacyName]; ok {
 			t.Fatalf("legacy MCP key still present: %s", legacyName)
 		}
+	}
+}
+
+// A pre-v5 registry stored the Codebase server under the "dwyt" key. Load must
+// rename it to "codebase" (recognising it by its wiring, not its name) and then
+// seed the v5 Governor under "dwyt" without inheriting the old command.
+func TestLoadRenamesLegacyDwytCodebaseKeyAndSeedsGovernor(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Registry{MCPServers: map[string]MCPServerEntry{
+		"dwyt": {Command: filepath.Join(dwytHome, "bin", "codebase-memory-mcp"), Enabled: true},
+	}}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if _, ok := reg.MCPServers["codebase"]; !ok {
+		t.Fatal("legacy dwyt entry should have been renamed to codebase")
+	}
+	gov, ok := reg.MCPServers["dwyt"]
+	if !ok {
+		t.Fatal("expected the v5 governor to be seeded under dwyt")
+	}
+	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
+		t.Fatalf("governor entry inherited legacy wiring: %#v", gov)
+	}
+	if !reg.MigrationPerformed() {
+		t.Fatal("expected MigrationPerformed to report the rename")
+	}
+}
+
+// An already-migrated registry must be left alone: a v5 Governor entry keyed
+// "dwyt" must never be mistaken for the legacy Codebase alias.
+func TestLoadPreservesGovernorEntry(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := Registry{MCPServers: map[string]MCPServerEntry{
+		"dwyt": {
+			Command: filepath.Join(dwytHome, "bin", exeName("dwyt")),
+			Args:    []string{"governor-mcp"},
+			Enabled: false,
+		},
+	}}
+	data, _ := json.Marshal(existing)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	gov, ok := reg.MCPServers["dwyt"]
+	if !ok {
+		t.Fatal("governor entry disappeared")
+	}
+	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
+		t.Fatalf("governor wiring changed: %#v", gov)
+	}
+	// The user-tunable Enabled flag must survive a heal pass.
+	if gov.Enabled {
+		t.Fatal("Load must not re-enable a server the user disabled")
+	}
+	if _, ok := reg.MCPServers["codebase"]; !ok {
+		t.Fatal("expected codebase to be seeded alongside the governor")
 	}
 }
 

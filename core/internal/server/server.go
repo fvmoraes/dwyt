@@ -17,6 +17,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
+	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
@@ -148,11 +149,17 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		ProjectObsidian: pb,
 		ProcMan:         procmanInstance,
 		RuntimeState:    rs,
+		Governor:        governor.New(governor.DefaultConfig(), dwytHome),
 		HeadroomPort:    headroomPort,
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
 	}
 	ds.setHeadroomPort(headroomPort)
+	// The Governor reports Brain health and housekeeping state, but must not
+	// import the brain package (the brain's handlers already call into the
+	// governor). Wiring it through narrow interfaces keeps the dependency
+	// one-directional.
+	ds.Governor.SetMemoryHealthProvider(ds)
 
 	if store != nil {
 		store.TouchProject(project)

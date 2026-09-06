@@ -164,86 +164,61 @@ func windsurfRuleTemplate() string {
 	return dwytInstructions()
 }
 
+// dwytInstructions returns the DWYT entry contract that is injected into
+// client instruction files (AGENTS.md, CLAUDE.md, Cursor rules, Kiro steering,
+// Copilot, Windsurf).
+//
+// From v5.0.0 this is deliberately *small and stable* (spec §4). The detailed
+// efficiency policy — budgets, TTLs, retrieval ladders, cache classes, output
+// profiles — lives inside the DWYT MCP Governor and is fetched on demand, not
+// pasted into every request. Two reasons:
+//
+//   - Duplicating the full policy here would cost thousands of tokens on every
+//     single call, which is exactly the waste DWYT exists to remove.
+//   - This block must change rarely. A stable block sits in the cacheable
+//     prefix of a prompt; a block that changes every release does not.
+//
+// Any change to this text invalidates provider prefix caches for every user,
+// so treat it as a versioned contract, not as a place to document features.
 func dwytInstructions() string {
 	return `# DWYT - Don't Waste Your Tokens
 
-DWYT coordinates RTK, Codebase MCP, Obsidian MCP, and Headroom without overwriting user-managed files.
+This project uses DWYT for context and token optimization.
 
-## Required Rules
+## Available MCPs
 
-Always use the DWYT Codebase MCP to understand the real repository structure before making changes.
-Always use the DWYT Obsidian MCP to read and persist project context.
-Always save relevant decisions, findings, fixes, and summaries into the project brain.
-Before every final response, save a session context snapshot with the Obsidian MCP.
-Never rely only on grep/glob when MCP tools are available.
-Keep project context under ` + "`~/.dwyt`" + `.
-Never hardcode machine-specific absolute paths in shared markdown instructions.
+- **DWYT MCP** — context governor and efficiency policy.
+- **Obsidian MCP** — persistent project memory and canonical knowledge.
+- **Codebase MCP** — structural code retrieval.
 
-## Priority Order
+## Entry Contract
 
-1. RTK
-   - Prefix shell commands with ` + "`rtk`" + `: ` + "`rtk git status`" + `, ` + "`rtk go test ./...`" + `, ` + "`rtk npm run build`" + `.
-   - In command chains, prefix each segment.
+Before broad repository or memory retrieval, call the DWYT MCP
+(` + "`dwyt_context_plan`" + `) to obtain a context plan, then stay inside its
+budget and retrieval boundaries.
 
-2. Codebase MCP
-   - Before diagnosing, refactoring, or editing structural code, validate that the project is indexed.
-   - Use ` + "`search_graph`" + ` to locate symbols, routes, handlers, components, modules, and relationships.
-   - Use ` + "`trace_path`" + ` for calls, flows, dependencies, and impact.
-   - Use ` + "`get_code_snippet`" + ` before applying changes.
-   - Avoid grep/glob/find as the first strategy when MCP tools are available.
+Prefer:
 
-3. Obsidian MCP
-   - Before relevant work, search notes and rebuild or read the summary:
-     ` + "`GET http://localhost:2737/api/obsidian/search?q=<query>`" + `
-     ` + "`POST http://localhost:2737/api/obsidian/summarize`" + `
-   - During the work, save decisions, findings, and tasks:
-     ` + "`POST http://localhost:2737/api/obsidian/save {\"type\":\"decision\",\"content\":\"[[decisions]] ...\"}`" + `
-     ` + "`POST http://localhost:2737/api/obsidian/save {\"type\":\"task\",\"content\":\"[[tasks]] ...\"}`" + `
-   - At the end of every task/session, save complete context before the final answer.
-     Prefer the MCP tool ` + "`obsidian_save_context`" + `; in Codex it may appear as ` + "`mcp__obsidian__obsidian_save_context`" + `.
-     Set ` + "`client`" + ` to the current client: ` + "`codex`" + `, ` + "`opencode`" + `, ` + "`claude`" + `, ` + "`cursor`" + `, ` + "`kiro`" + `, ` + "`copilot`" + `, ` + "`windsurf`" + `, or ` + "`continue`" + `.
-     This rule applies to Codex, OpenCode, Claude, Cursor, Kiro, Copilot, Windsurf, and Continue.
-     If the MCP tool is unavailable, fall back to:
-     ` + "`POST http://localhost:2737/api/obsidian/context`" + `
-     If saving fails, mention the failure in the final response.
+- canonical memory over old sessions;
+- symbols and line ranges over full files;
+- summaries over raw output;
+- incremental retrieval over bulk context loading;
+- reusing context already obtained over retrieving it again.
 
-4. Headroom
-   - Use Headroom only when ` + "`OPENAI_BASE_URL`" + ` or ` + "`ANTHROPIC_BASE_URL`" + ` points to the compatible local proxy.
-   - Never route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
-   - If Headroom is inactive or unavailable, use the standard endpoints.
+Use Obsidian as the project brain and Codebase as the source of current code
+structure. Request raw or full data only when the compact context is
+insufficient; raw output stays retrievable by reference
+(` + "`dwyt_get_raw`" + `).
 
-## Codebase Law
+Prefix shell commands with ` + "`rtk`" + ` where supported
+(` + "`rtk go test ./...`" + `). RTK reduces terminal output; it is not an MCP.
 
-When you need to understand, validate, diagnose, or change the real code structure, consult the DWYT Codebase MCP. The indexed graph is the primary source for files, symbols, dependencies, calls, paths, and impact. Do not create duplicate code, remove files, or move components without checking graph relationships and impact.
+At the end of a task, persist a compact context snapshot with
+` + "`obsidian_save_context`" + ` when the task state changed. Set ` + "`client`" + `
+to the current client (codex, opencode, claude, cursor, kiro, copilot,
+windsurf, continue). If saving fails, say so in the final response.
 
-## Obsidian Law
-
-The Obsidian vault at ` + "`~/.dwyt/projects/<id>_<project-name>/`" + ` (e.g. 1597b5fc9bfb_dwyt) is the official durable memory for the project. Keep notes with internal links such as ` + "`[[index]]`" + `, ` + "`[[maps/project-map]]`" + `, ` + "`[[instructions/obsidian-law]]`" + `, and ` + "`[[instructions/codebase-law]]`" + `. Never delete vaults, projects, notes, or history as an automatic repair step.
-
-Minimum payload for saving context:
-
-` + "```json" + `
-{
-  "client": "<client>",
-  "user_request": "...",
-  "summary": "...",
-  "files": ["..."],
-  "decisions": ["..."],
-  "actions": ["..."],
-  "commands": ["..."],
-  "errors": ["..."],
-  "outcome": "...",
-  "next_steps": ["..."],
-  "context": "..."
-}
-` + "```" + `
-
-## User Files
-
-Treat instruction files as safe append-only files: create the DWYT block if missing, update only the DWYT-managed block, and preserve all content outside that block.
-
-## Validation
-
-Before completing changes, run the relevant validation: Go tests, frontend build/lint when available, and manual checks for installed, inactive, and launch-on-demand states.
+Keep operational answers short: status, changed files, validation, blockers.
+Do not truncate an artifact the user asked for.
 `
 }

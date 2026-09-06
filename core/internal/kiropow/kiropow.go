@@ -116,26 +116,37 @@ func IsKiroEnabled(setupConfig map[string]interface{}) bool {
 }
 
 func ValidateMCPBinaries(dwytBin string) map[string]bool {
-	// The Obsidian MCP is now served by the main `dwyt` binary via the
-	// `obsidian-mcp` subcommand, so presence of the main binary is the
-	// canonical signal. A legacy `dwyt-obsidian-mcp` copy (left over from
-	// older installs) is also accepted so the Kiro Power keeps listing it
-	// during the migration window.
+	// Both DWYT-owned MCPs — the Governor (`dwyt governor-mcp`) and the Brain
+	// (`dwyt obsidian-mcp`) — are served by the main `dwyt` binary, so its
+	// presence is the canonical signal for both. A legacy
+	// `dwyt-obsidian-mcp` copy (left over from older installs) is also
+	// accepted so the Kiro Power keeps listing Obsidian during the migration
+	// window.
 	dwyt := executableName("dwyt")
 	obsidianLegacy := executableName("dwyt-obsidian-mcp")
+	mainPresent := fileExists(filepath.Join(dwytBin, dwyt))
 	return map[string]bool{
+		"dwyt":     mainPresent,
 		"codebase": fileExists(filepath.Join(dwytBin, executableName("codebase-memory-mcp"))),
-		"obsidian": fileExists(filepath.Join(dwytBin, dwyt)) || fileExists(filepath.Join(dwytBin, obsidianLegacy)),
+		"obsidian": mainPresent || fileExists(filepath.Join(dwytBin, obsidianLegacy)),
 	}
 }
 
+// GeneratePowerMD renders the Kiro Power description.
+//
+// Like the instruction files, this is the v5 *entry contract* and not the
+// policy itself (spec §4, §60.3). Shipping the full policy here as well as in
+// the DWYT MCP would duplicate thousands of tokens per request and reduce cache
+// reuse — the exact failure the spec calls out. The Power points Kiro at the
+// Governor; the Governor supplies the rules on demand.
 func GeneratePowerMD(dwytBin, projectPath string, mcps map[string]bool) string {
 	return fmt.Sprintf(`---
 name: dwyt-power
 displayName: DWYT Project Context
-description: DWYT integration for Codebase MCP, Obsidian memory, RTK command compression and compatible Headroom usage.
+description: DWYT context governor plus Obsidian project memory and the Codebase graph, with RTK terminal compression.
 keywords:
   - dwyt
+  - context governor
   - codebase
   - obsidian
   - mcp
@@ -153,31 +164,32 @@ author: DWYT
 
 # DWYT Project Context
 
-DWYT (Don't Waste Your Tokens) is a local orchestrator that reduces AI token consumption by combining RTK terminal compression, the Codebase graph, Obsidian project memory, and compatible Headroom API proxy usage.
+DWYT (Don't Waste Your Tokens) governs how much context a task loads, so the
+model receives the minimum sufficient context instead of the maximum available.
 
-## Priority Order
+## Three MCPs
 
-1. RTK - prefix shell commands with `+"`rtk`"+` when terminal output enters the conversation.
-2. Codebase MCP - before technical diagnosis, refactors, or edits that depend on real code structure, validate/index the project and use `+"`search_graph`"+`, `+"`trace_path`"+`, and `+"`get_code_snippet`"+`.
-3. Obsidian MCP - before relevant work, search/summarize the project vault; during work save decisions/tasks; at the end save complete context.
-4. Headroom - use only when the client supports proxy/base-url configuration. Never route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
+- **dwyt** — the Context Governor: budgets, retrieval boundaries, output
+  profiles, cache guidance, tool-output compaction and raw retrieval.
+- **obsidian** — the Brain: canonical project knowledge and compact sessions.
+- **codebase** — Code Intelligence: symbols, references, dependencies, ranges.
 
-## Codebase Law
+RTK compresses terminal output. It is a CLI tool, not a fourth MCP.
 
-When you need to understand, validate, diagnose, or alter code structure, use the Codebase MCP as the primary source of truth. Do not rely on file names or memory alone. Prefer graph tools over manual grep/glob for symbols, relationships, dependencies, calls, and impact analysis.
+## Entry Contract
 
-## Obsidian Law
+Before broad repository or memory retrieval, call `+"`dwyt_context_plan`"+` and
+stay inside the returned budget and retrieval level. Prefer canonical memory
+over old sessions, symbols and ranges over full files, summaries over raw
+output, and reuse over re-retrieval. Compact large tool output with
+`+"`dwyt_compact_tool_output`"+` and pull the full bytes back only with
+`+"`dwyt_get_raw`"+` when the summary is insufficient.
 
-The Obsidian vault is the official durable memory for this project. Save notes with internal links such as `+"`[[decisions]]`"+`, `+"`[[tasks]]`"+`, `+"`[[instructions/obsidian-law]]`"+`, and `+"`[[instructions/codebase-law]]`"+`.
+At the end of a task, persist a compact snapshot with
+`+"`obsidian_save_context`"+` (client: kiro) when the task state changed.
 
-Required completion payload for `+"`POST http://localhost:2737/api/obsidian/context`"+`: user request, summary, files, decisions, actions, commands, errors, outcome, next steps, and context for future agents.
-
-## Tools
-
-- RTK: `+"`rtk git status`"+`, `+"`rtk go test ./...`"+`, `+"`rtk npm run build`"+`
-- Codebase MCP: `+"`search_graph`"+`, `+"`trace_path`"+`, `+"`get_code_snippet`"+`
-- Obsidian MCP: `+"`/api/obsidian/search`"+`, `+"`/api/obsidian/summarize`"+`, `+"`/api/obsidian/save`"+`, `+"`/api/obsidian/context`"+`
-- Headroom: active only when compatible env vars point to the local proxy.
+Keep operational answers to status, changed files, validation and blockers.
+Never truncate an artifact the user asked for.
 
 ## Project
 
@@ -186,17 +198,21 @@ DWYT bin: %s
 
 ## MCP Availability
 
+- dwyt: %t
 - codebase: %t
 - obsidian: %t
-
-## Completion
-
-Never finish a task without saving complete context to Obsidian with the user request, summary, files changed/read, decisions, actions, commands, errors, outcome, next steps, and context for future agents.
-`, projectPath, dwytBin, mcps["codebase"], mcps["obsidian"])
+`, projectPath, dwytBin, mcps["dwyt"], mcps["codebase"], mcps["obsidian"])
 }
 
 func GenerateMCPJSON(dwytBin string, mcps map[string]bool) (string, error) {
 	servers := map[string]interface{}{}
+	if mcps["dwyt"] {
+		servers["dwyt"] = map[string]interface{}{
+			"command": filepath.Join(dwytBin, executableName("dwyt")),
+			"args":    []string{"governor-mcp"},
+			"env":     map[string]string{"DWYT_API_URL": "http://localhost:2737/api"},
+		}
+	}
 	if mcps["codebase"] {
 		servers["codebase"] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("codebase-memory-mcp")),
@@ -269,7 +285,10 @@ func NeedsUpdate(powerDir, dwytBin string) bool {
 	// still accepted while a migration is in flight, so we update when both
 	// are missing.
 	return (mcps["codebase"] && !strings.Contains(text, executableName("codebase-memory-mcp"))) ||
-		(mcps["obsidian"] && !containsObsidianMCPCommand(text))
+		(mcps["obsidian"] && !containsObsidianMCPCommand(text)) ||
+		// A Power generated before v5 has no Governor entry; regenerate so the
+		// three official MCPs are all present.
+		(mcps["dwyt"] && !strings.Contains(text, "\"governor-mcp\""))
 }
 
 // containsObsidianMCPCommand reports whether the generated Kiro Power
@@ -316,6 +335,9 @@ func kiroLinkPath() string {
 	return filepath.Join(home, ".kiro", "powers", "dwyt-power")
 }
 
+// steeringContext is the always-included steering file. It must stay small and
+// stable for the same reason the instruction contract does: it is injected into
+// every Kiro turn, so any growth here is multiplied across every request.
 func steeringContext() string {
 	return `---
 inclusion: always
@@ -323,61 +345,66 @@ inclusion: always
 
 # DWYT Context Rules
 
-## Priority Order
+Three MCPs: **dwyt** (context governor), **obsidian** (project memory),
+**codebase** (code structure). RTK compresses terminal output and is not an MCP.
 
-1. RTK - prefix shell commands with rtk whenever terminal output enters context.
-2. Codebase MCP - use the graph before diagnosing, refactoring, or editing code structure.
-3. Obsidian MCP - search/summarize memory before relevant work and save context through the task.
-4. Headroom - use only when compatible env vars point to the local proxy.
+## Order of Operations
 
-## Codebase Law
+1. Call ` + "`dwyt_context_plan`" + ` before broad repository or memory retrieval.
+   Stay inside the returned budget, retrieval level and exclusions.
+2. Load canonical memory from Obsidian before old session notes.
+3. Retrieve code from Codebase progressively: project map → module → symbol →
+   range. A full file is exceptional and needs a reason.
+4. Compact large tool output with ` + "`dwyt_compact_tool_output`" + `; resolve the
+   full bytes with ` + "`dwyt_get_raw`" + ` only when the summary is insufficient.
+5. Prefix shell commands with ` + "`rtk`" + `.
 
-When code structure matters, validate/index the project and use search_graph, trace_path, and get_code_snippet before proposing or applying changes.
+## Stop Rules
 
-## Obsidian Law
+Stop retrieving as soon as the context is sufficient to act safely. Reuse
+context already obtained instead of fetching it again. Prefer diffs over full
+state.
 
-Before relevant work:
-GET http://localhost:2737/api/obsidian/search?q=<your query>
-POST http://localhost:2737/api/obsidian/summarize
+## Completion
 
-During work, save decisions and task/status updates to Obsidian:
-POST http://localhost:2737/api/obsidian/save
-{"type":"decision","content":"..."}
-{"type":"task","content":"..."}
-
-At the end of every task, save the conversation context:
-POST http://localhost:2737/api/obsidian/context
-{"client":"kiro","user_request":"...","summary":"...","files":["..."],"decisions":["..."],"actions":["..."],"commands":["..."],"errors":["..."],"outcome":"...","next_steps":["..."],"context":"..."}
-
-Keep the vault rich and navigable with folders, internal links, templates, and instructions.
+When the task state changed, save a compact snapshot with
+` + "`obsidian_save_context`" + ` (client: kiro). Report status, changed files,
+validation and blockers. Do not narrate routine reasoning. Do not truncate an
+artifact the user asked for.
 `
 }
 
+// steeringObsidian documents the Brain. It is manual-inclusion in v5: the
+// always-included context file already states the workflow, so loading this
+// detail on every turn would be duplicated context.
 func steeringObsidian(projectPath string) string {
 	return fmt.Sprintf(`---
-inclusion: always
+inclusion: manual
 ---
 
-# Obsidian - Project Memory
+# Obsidian - Project Brain
 
 Project path: %s
 Vault root: ~/.dwyt/projects/<id>_<project-name>/  (e.g. 1597b5fc9bfb_dwyt)
 
-## API
-- Search: GET http://localhost:2737/api/obsidian/search?q=<query>
-- Summarize: POST http://localhost:2737/api/obsidian/summarize
-- Save:   POST http://localhost:2737/api/obsidian/save
-- Context: POST http://localhost:2737/api/obsidian/context
-- Status: GET http://localhost:2737/api/obsidian/status
+The Brain stores *meaning*: project identity, architecture, decisions,
+conventions, constraints, module summaries, reusable knowledge and compact
+sessions. Raw evidence lives in the raw object store, not here.
+
+## Tools
+- `+"`obsidian_search`"+` — top-k search; raw and stale notes are excluded by default.
+- `+"`obsidian_summarize`"+` — rebuild and read the vault summary.
+- `+"`obsidian_save`"+` — save a decision, task or knowledge note.
+- `+"`obsidian_save_context`"+` — persist a compact task snapshot.
+- `+"`dwyt_memory_health`"+` — note counts per area and vault size.
 
 ## Rules
-- Search and summarize Obsidian before relevant work.
-- Save important decisions as type `+"`decision`"+` during work.
-- Save task/status updates as type `+"`task`"+` during work.
-- Always save complete conversation context at the end of each task.
-- Include user request, summary, files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
-- Keep the vault rich, interlinked, and organized with folders, links such as [[index]], [[instructions/obsidian-law]], and [[instructions/codebase-law]], templates, and instructions.
-- Never delete vault files.
+- Prefer canonical memory (project, architecture, decisions, conventions,
+  constraints) over historical session notes.
+- Update canonical knowledge instead of appending a second copy of a changed
+  fact.
+- Save a snapshot only when the task state changed.
+- Never delete vault files, projects or history as a repair step.
 `, projectPath)
 }
 
@@ -388,19 +415,25 @@ inclusion: manual
 
 # Codebase - Code Knowledge Graph
 
-Use Codebase MCP whenever you need to understand, validate, diagnose, or alter real code structure. It is the source of truth for symbols, calls, dependencies, relationships, and impact.
+The Codebase MCP is the source of truth for symbols, calls, dependencies,
+relationships and impact. Retrieve progressively; never start by reading the
+repository.
+
+	project map → module map → file summary → symbol → range → dependencies/tests
+
+A full file is exceptional: justify why symbol or range is insufficient.
 
 ## MCP Tools
-- search_graph
-- trace_path
-- get_code_snippet
+- search_graph — symbols, components, handlers, routes, modules
+- trace_path — callers, dependencies, flows, blast radius
+- get_code_snippet — the exact range before applying an edit
 
 ## Rules
 - Validate whether the project is indexed before structural analysis.
-- Prefer search_graph over grep/glob for symbols, components, handlers, routes, and modules.
-- Use trace_path for callers, dependencies, flows, and blast-radius checks.
-- Use get_code_snippet before applying code edits.
-- Do not remove, rename, or move important code without tracing impact.
+- Prefer search_graph over grep/glob as the first strategy.
+- Do not remove, rename or move code without tracing impact.
+- Report retrieved blocks to ` + "`dwyt_register_context`" + ` so unchanged symbols
+  are reused instead of re-retrieved on the next turn.
 
 ## API
 - Start: POST http://localhost:2737/api/services/codebase/start
@@ -411,17 +444,21 @@ Use Codebase MCP whenever you need to understand, validate, diagnose, or alter r
 
 func steeringRTK() string {
 	return `---
-inclusion: always
+inclusion: manual
 ---
 
 # RTK - Terminal Compression
 
-RTK is a CLI tool. Prefix all shell commands with rtk.
+RTK is a CLI tool, not an MCP. Prefix shell commands with ` + "`rtk`" + `; in a
+command chain, prefix each segment.
 
 ## Usage
 rtk git status
 rtk go test ./...
 rtk npm run build
+
+When RTK has already reduced the output, pass ` + "`already_compact: true`" + ` to
+` + "`dwyt_compact_tool_output`" + ` so DWYT does not compress it twice.
 
 ## Metrics
 GET http://localhost:2737/api/rtk/gain
@@ -430,17 +467,17 @@ GET http://localhost:2737/api/rtk/gain
 
 func steeringHeadroom() string {
 	return `---
-inclusion: always
+inclusion: manual
 ---
 
 # Headroom - API Proxy
 
-Headroom compresses AI API calls automatically.
+Headroom is an auxiliary integration, not a source of DWYT policy.
 
 ## Detection
-If OPENAI_BASE_URL or ANTHROPIC_BASE_URL point to 127.0.0.1:8787, Headroom is active.
-
-Do not route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
+Active when OPENAI_BASE_URL or ANTHROPIC_BASE_URL point to the local proxy.
+Never route Codex through Headroom when Codex is authenticated through
+ChatGPT/OAuth. If Headroom is inactive, use the standard endpoints.
 
 ## Status
 GET http://localhost:2737/api/services/headroom/status
