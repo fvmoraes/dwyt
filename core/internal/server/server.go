@@ -28,6 +28,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
@@ -172,6 +173,18 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 	ds.Housekeeper = housekeeper.New(housekeeper.DefaultConfig(), pb, ds.Governor.RawStore())
 	ds.Governor.SetHousekeeperStatusProvider(ds.Housekeeper)
+
+	// Telemetry lives in the same SQLite file as the rest of DWYT's state. A
+	// failure to initialize it is non-fatal: metrics are observability, and
+	// losing them must not stop the daemon from governing context.
+	if store != nil {
+		if ts, err := telemetry.New(store.DB()); err != nil {
+			log.Warn("telemetry: init failed", log.Fields{"error": err.Error()})
+		} else {
+			ds.Telemetry = ts
+			ds.Governor.SetUsageRecorder(ds)
+		}
+	}
 
 	if store != nil {
 		store.TouchProject(project)

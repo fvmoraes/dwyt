@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,10 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -328,5 +331,112 @@ func TestSaveContextRichModeStillAvailable(t *testing.T) {
 	// The rich handoff keeps the commands a compact snapshot drops.
 	if !strings.Contains(string(data), "rtk go test") {
 		t.Fatalf("rich mode should preserve the commands:\n%s", string(data))
+	}
+}
+
+func TestTelemetrySummaryWithoutStore(t *testing.T) {
+	ds := brainServer(t)
+	rec, payload := do(t, ds, ds.apiTelemetrySummary,
+		httptest.NewRequest(http.MethodGet, "/api/telemetry/summary", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	// No telemetry store is a reportable state, not an error.
+	if available, _ := payload["available"].(bool); available {
+		t.Fatalf("expected available=false without a store: %s", rec.Body.String())
+	}
+}
+
+func TestTelemetrySummaryReportsUnmeasuredRatiosAsNull(t *testing.T) {
+	ds := brainServer(t)
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store, err := telemetry.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds.Telemetry = store
+	ds.Governor.SetUsageRecorder(ds)
+
+	// A report with only input tokens: nothing about cache or context.
+	input := 1000
+	ds.Governor.ReportUsage(governor.Usage{
+		TaskID: "t1", Provider: "openai", InputTokens: &input, Observed: true,
+	})
+
+	rec, payload := do(t, ds, ds.apiTelemetrySummary,
+		httptest.NewRequest(http.MethodGet, "/api/telemetry/summary?window=all", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	summary := payload["summary"].(map[string]interface{})
+	if summary["cache_hit_pct"] != nil {
+		t.Fatalf("an unmeasured cache ratio must be null, not 0: %v", summary["cache_hit_pct"])
+	}
+	if summary["context_reduction_pct"] != nil {
+		t.Fatalf("an unmeasured context reduction must be null: %v", summary["context_reduction_pct"])
+	}
+	if requests, _ := summary["requests"].(float64); requests != 1 {
+		t.Fatalf("the request should have been recorded: %v", summary["requests"])
+	}
+	// The panel must carry the brain and housekeeper health in one response.
+	if _, ok := payload["brain"]; !ok {
+		t.Fatalf("brain health missing: %s", rec.Body.String())
+	}
+	if _, ok := payload["housekeeper"]; !ok {
+		t.Fatalf("housekeeper status missing: %s", rec.Body.String())
+	}
+}
+
+func TestTelemetryTaskCompleteValidatesAndRecords(t *testing.T) {
+	ds := brainServer(t)
+	db, _ := sql.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	t.Cleanup(func() { db.Close() })
+	store, err := telemetry.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds.Telemetry = store
+
+	req := httptest.NewRequest(http.MethodPost, "/api/telemetry/task/complete", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec, _ := do(t, ds, ds.apiTelemetryTaskComplete, req); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a missing task id must be rejected, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/telemetry/task/complete",
+		bytes.NewBufferString(`{"task_id":"t1","success":true,"tests_pass":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec, payload := do(t, ds, ds.apiTelemetryTaskComplete, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if payload["task_id"] != "t1" {
+		t.Fatalf("unexpected payload: %s", rec.Body.String())
+	}
+}
+
+func TestWindowForMapping(t *testing.T) {
+	for name, want := range map[string]string{
+		"1h": "1h", "hour": "1h", "7d": "7d", "week": "7d",
+		"30d": "30d", "all": "all", "": "24h", "nonsense": "24h",
+	} {
+		if _, got := windowFor(name); got != want {
+			t.Fatalf("windowFor(%q) = %q, want %q", name, got, want)
+		}
+	}
+	// The "all" window must start before any plausible DWYT event.
+	since, _ := windowFor("all")
+	if since.After(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("the all-time window starts too late: %v", since)
+	}
+	// And every other window must be in the past.
+	for _, name := range []string{"1h", "24h", "7d", "30d"} {
+		if start, _ := windowFor(name); !start.Before(time.Now()) {
+			t.Fatalf("window %q does not start in the past: %v", name, start)
+		}
 	}
 }

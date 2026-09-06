@@ -399,6 +399,16 @@ func (s *Store) GetConfig(key string) (string, error) {
 	return value, err
 }
 
+// DB exposes the underlying handle so satellite packages (telemetry) can own
+// their own tables in the same file.
+//
+// Sharing one database keeps a single file to back up and one migration path,
+// instead of a second SQLite file whose lifecycle nobody manages. The satellite
+// packages create only their own tables and never touch these.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }

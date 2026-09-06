@@ -12,6 +12,7 @@
 package governor
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/outputgov"
 	"github.com/fvmoraes/dwyt/internal/provider"
 	"github.com/fvmoraes/dwyt/internal/rawstore"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolgov"
 )
 
@@ -109,6 +111,10 @@ type Governor struct {
 	capabilities *provider.Catalog
 	pricing      *provider.PricingCatalog
 
+	// tracer emits the pipeline spans from spec §54. A nil-safe no-op when no
+	// OTLP endpoint is configured.
+	tracer *telemetry.Tracer
+
 	memory      MemoryHealthProvider
 	housekeeper HousekeeperStatusProvider
 	usage       UsageRecorder
@@ -136,6 +142,7 @@ func New(cfg Config, rawHome string) *Governor {
 		loop:         map[string]*contextgov.LoopObservation{},
 		capabilities: provider.NewCatalog(),
 		pricing:      provider.NewPricingCatalog(),
+		tracer:       telemetry.NewTracer("dwyt-governor"),
 	}
 	if rawHome != "" {
 		if store, err := rawstore.New(rawHome); err == nil {
@@ -163,6 +170,19 @@ func (g *Governor) Pricing() *provider.PricingCatalog {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.pricing
+}
+
+// Tracer exposes the pipeline tracer. It is never nil, and every method on it is
+// a no-op when no OTLP endpoint is configured.
+func (g *Governor) Tracer() *telemetry.Tracer {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.tracer
+}
+
+// Close releases the governor's background workers. Safe to call more than once.
+func (g *Governor) Close() {
+	g.Tracer().Close()
 }
 
 // SetMemoryHealthProvider wires the Brain.
@@ -263,6 +283,13 @@ type PlanResponse struct {
 
 // ContextPlan is the primary governor entry point (`dwyt_context_plan`).
 func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
+	ctx, span := g.Tracer().Start(context.Background(), telemetry.SpanContextPlan, map[string]interface{}{
+		"task_type": req.Phase,
+		"phase":     req.Phase,
+	})
+	defer span.End()
+	_ = ctx
+
 	cfg := g.Config()
 
 	phase := contextgov.ParsePhase(req.Phase)
@@ -321,6 +348,14 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 		}
 	}
 	plan.Output.Structured = plan.Output.Structured && cfg.StructuredOperational
+
+	span.SetAll(map[string]interface{}{
+		"budget_total":   plan.Budget.Total,
+		"budget_reserve": plan.Budget.Reserve,
+		"level":          plan.Level,
+		"action":         plan.Action,
+		"output_target":  plan.Output.TargetTokens,
+	})
 
 	return PlanResponse{
 		TaskID:        taskID,
@@ -588,6 +623,10 @@ type CompactRequest struct {
 // still happens, and the response says so, because "we could not archive the
 // raw bytes" must not turn into "you get no tool output".
 func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, error) {
+	_, span := g.Tracer().Start(context.Background(), telemetry.SpanToolCompression,
+		map[string]interface{}{"kind": req.Kind})
+	defer span.End()
+
 	content := req.Content
 	store := g.RawStore()
 
@@ -635,6 +674,12 @@ func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, err
 		}
 		compacted.CompressionPct = float64(saved) / float64(compacted.RawTokensEst) * 100
 	}
+	span.SetAll(map[string]interface{}{
+		"raw_tokens":      compacted.RawTokensEst,
+		"sent_tokens":     compacted.SentTokensEst,
+		"compression_pct": compacted.CompressionPct,
+		"archived":        compacted.RawRef != "",
+	})
 	return compacted, nil
 }
 
@@ -715,6 +760,14 @@ type UsageResponse struct {
 // session's observed cache set and the loop counters, then re-evaluates the
 // stop conditions.
 func (g *Governor) ReportUsage(u Usage) UsageResponse {
+	_, span := g.Tracer().Start(context.Background(), telemetry.SpanLLMRequest, map[string]interface{}{
+		"provider": u.Provider,
+		"model":    u.Model,
+		"phase":    u.Phase,
+		"observed": u.Observed,
+	})
+	defer span.End()
+
 	if u.Timestamp.IsZero() {
 		u.Timestamp = time.Now()
 	}
@@ -783,6 +836,12 @@ func (g *Governor) ReportUsage(u Usage) UsageResponse {
 	recorder := g.usage
 	g.mu.Unlock()
 
+	span.SetAll(map[string]interface{}{
+		"input_tokens":  derefInt(u.InputTokens),
+		"cached_tokens": derefInt(u.CachedInputTokens),
+		"output_tokens": derefInt(u.OutputTokens),
+	})
+
 	resp := UsageResponse{Accepted: true, Stop: g.evaluateStop(taskID)}
 	if recorder == nil {
 		resp.Note = "no telemetry sink configured; report used for governance only"
@@ -792,10 +851,20 @@ func (g *Governor) ReportUsage(u Usage) UsageResponse {
 		// Telemetry is observability, not correctness. A failed write is
 		// reported but never rejects the report.
 		resp.Note = "telemetry write failed: " + err.Error()
+		span.Fail(err)
 		return resp
 	}
 	resp.Recorded = true
 	return resp
+}
+
+// derefInt renders an optional token count for a span attribute. A nil pointer
+// becomes -1 rather than 0, so a trace can tell "not reported" from "zero".
+func derefInt(v *int) int {
+	if v == nil {
+		return -1
+	}
+	return *v
 }
 
 // evaluateStop applies the configured stop limits to a task's measured loop.
@@ -825,6 +894,19 @@ func maxErrorCount(sess *contextgov.Session) int {
 		}
 	}
 	return max
+}
+
+// TraceSpan runs fn inside a named pipeline span, so the phases DWYT does not own
+// directly (retrieval, memory search, housekeeping) still appear in a trace.
+//
+// It exists so callers outside this package can contribute spans without each of
+// them having to know about the tracer's lifecycle.
+func (g *Governor) TraceSpan(name string, attrs map[string]interface{}, fn func() error) error {
+	_, span := g.Tracer().Start(context.Background(), name, attrs)
+	defer span.End()
+	err := fn()
+	span.Fail(err)
+	return err
 }
 
 // HousekeeperStatus answers `dwyt_housekeeper_status`.

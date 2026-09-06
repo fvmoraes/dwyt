@@ -10,6 +10,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
@@ -71,7 +72,9 @@ type DashboardServer struct {
 	Governor *governor.Governor
 	// Housekeeper enforces Brain retention: the 100-session limit, TTLs, stale
 	// detection and raw pruning, always promoting reusable knowledge first.
-	Housekeeper      *housekeeper.Housekeeper
+	Housekeeper *housekeeper.Housekeeper
+	// Telemetry is the request and task ledger behind cost-per-completed-task.
+	Telemetry        *telemetry.Store
 	HeadroomPort     int
 	headroomMu       sync.RWMutex
 	projectMu        sync.RWMutex

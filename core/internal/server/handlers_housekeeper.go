@@ -6,6 +6,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,11 +36,32 @@ func (ds *DashboardServer) apiHousekeeperRun(c *gin.Context) {
 		depth = housekeeper.Light
 	}
 
-	if c.Query("dry_run") == "true" {
-		c.JSON(http.StatusOK, ds.Housekeeper.RunDry(depth))
-		return
+	dryRun := c.Query("dry_run") == "true"
+
+	var report housekeeper.Report
+	run := func() error {
+		if dryRun {
+			report = ds.Housekeeper.RunDry(depth)
+			return nil
+		}
+		report = ds.Housekeeper.Run(depth)
+		return nil
 	}
-	c.JSON(http.StatusOK, ds.Housekeeper.Run(depth))
+	if ds.Governor != nil {
+		// Housekeeping is a pipeline phase (spec §54), so it belongs in a trace
+		// alongside the retrieval and LLM spans.
+		_ = ds.Governor.TraceSpan(telemetry.SpanHousekeeper,
+			map[string]interface{}{"depth": string(depth), "dry_run": dryRun}, run)
+	} else {
+		_ = run()
+	}
+
+	// Persisting the report gives the dashboard a housekeeping history rather
+	// than only the most recent in-memory pass.
+	if ds.Telemetry != nil && !dryRun {
+		_ = ds.Telemetry.RecordHousekeeperRun(ds.currentProjectID(), string(depth), report)
+	}
+	c.JSON(http.StatusOK, report)
 }
 
 // apiCanonicalList returns the canonical memory notes, HOT first (spec §17).
@@ -137,5 +159,16 @@ func (ds *DashboardServer) apiMemoryCompile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to compile"})
 		return
 	}
-	c.JSON(http.StatusOK, pb.Compile(snapshot))
+
+	var result brain.PromotionResult
+	compile := func() error {
+		result = pb.Compile(snapshot)
+		return nil
+	}
+	if ds.Governor != nil {
+		_ = ds.Governor.TraceSpan(telemetry.SpanMemoryCompile, nil, compile)
+	} else {
+		_ = compile()
+	}
+	c.JSON(http.StatusOK, result)
 }

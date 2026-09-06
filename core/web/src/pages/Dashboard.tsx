@@ -9,6 +9,7 @@ import CardCodebase from '../components/CardCodebase'
 import CardRTK from '../components/CardRTK'
 import CardHeadroom from '../components/CardHeadroom'
 import CardObsidian from '../components/CardObsidian'
+import CardGovernor from '../components/CardGovernor'
 import VaultMigrationCard from '../components/VaultMigrationCard'
 import { logColor } from '../utils'
 import { useLang } from '../LangContext'
@@ -623,6 +624,7 @@ export default function Dashboard() {
           onConfigure={() => handleConfigureMCP('obsidian')}
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
+        <CardGovernor t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} />
       </div>
     </div>
   )
