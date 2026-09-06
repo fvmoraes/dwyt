@@ -6,6 +6,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -74,7 +75,9 @@ type DashboardServer struct {
 	// detection and raw pruning, always promoting reusable knowledge first.
 	Housekeeper *housekeeper.Housekeeper
 	// Telemetry is the request and task ledger behind cost-per-completed-task.
-	Telemetry        *telemetry.Store
+	Telemetry *telemetry.Store
+	// V5Config is the consolidated DWYT v5 configuration (spec §57).
+	V5Config         dwytconfig.Config
 	HeadroomPort     int
 	headroomMu       sync.RWMutex
 	projectMu        sync.RWMutex

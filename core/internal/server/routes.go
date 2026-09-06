@@ -90,6 +90,8 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/memory/canonical", ds.apiCanonicalList)
 		api.POST("/memory/canonical", ds.apiCanonicalUpsert)
 		api.POST("/memory/compile", ds.apiMemoryCompile)
+		api.POST("/memory/migrate-v5", ds.apiBrainMigrateV5)
+		api.GET("/config/v5", ds.apiV5Config)
 		// Telemetry: the request/task ledger behind cost-per-completed-task.
 		api.GET("/telemetry/summary", ds.apiTelemetrySummary)
 		api.GET("/telemetry/requests", ds.apiTelemetryRequests)

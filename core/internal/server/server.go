@@ -16,6 +16,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/health"
@@ -70,6 +71,11 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	if err != nil {
 		log.Error("failed to open db", log.Fields{"error": err.Error()})
 	}
+
+	// The consolidated v5 configuration (spec §57). Loaded before anything that
+	// depends on it so the Governor and Housekeeper are built from the user's
+	// values rather than being reconfigured after the fact.
+	v5cfg := loadedV5Config(dwytHome)
 
 	brain.MigrateOldMemoryDirs(dwytHome)
 
@@ -151,7 +157,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		ProjectObsidian: pb,
 		ProcMan:         procmanInstance,
 		RuntimeState:    rs,
-		Governor:        governor.New(governor.DefaultConfig(), dwytHome),
+		Governor:        governor.New(v5cfg.cfg.GovernorConfig(), dwytHome),
+		V5Config:        v5cfg.cfg,
 		HeadroomPort:    headroomPort,
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
@@ -162,16 +169,36 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// governor). Wiring it through narrow interfaces keeps the dependency
 	// one-directional.
 	ds.Governor.SetMemoryHealthProvider(ds)
+	// A malformed config is surfaced but not fatal: the daemon runs on defaults
+	// rather than refusing to start, and the dashboard shows the error.
+	if v5cfg.err != nil {
+		log.Warn("config: falling back to defaults", log.Fields{"error": v5cfg.err.Error()})
+		rs.ToolErrors["config"] = v5cfg.err.Error()
+	}
 
-	// The Brain gains the v5 canonical layout on first run. Failure is
-	// non-fatal: the vault still works with the pre-v5 folders, and the next
-	// startup retries.
+	// Bring the Brain to the v5 layout. Both calls are additive and idempotent,
+	// so this is safe on every startup; a failure leaves the pre-v5 vault
+	// working and is retried next time.
 	if pb != nil {
 		if err := pb.EnsureCanonicalLayout(); err != nil {
 			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
 		}
+		report := pb.MigrateToV5(brain.V5MigrationOptions{
+			KeepLatestSessions: v5cfg.cfg.Housekeeper.Sessions.KeepLatest,
+		})
+		if report.CanonicalSeeded > 0 || report.SessionsConverted > 0 || report.SessionsCompiled > 0 {
+			log.Info("brain: migrated to the v5 layout", log.Fields{
+				"canonical_seeded":   report.CanonicalSeeded,
+				"sessions_converted": report.SessionsConverted,
+				"sessions_compiled":  report.SessionsCompiled,
+				"knowledge_promoted": len(report.KnowledgePromoted),
+			})
+		}
+		for _, e := range report.Errors {
+			log.Warn("brain: v5 migration issue", log.Fields{"error": e})
+		}
 	}
-	ds.Housekeeper = housekeeper.New(housekeeper.DefaultConfig(), pb, ds.Governor.RawStore())
+	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Governor.RawStore())
 	ds.Governor.SetHousekeeperStatusProvider(ds.Housekeeper)
 
 	// Telemetry lives in the same SQLite file as the rest of DWYT's state. A
@@ -653,4 +680,19 @@ func (ds *DashboardServer) configureHeadroomClients(projectPath string) {
 			log.Info("headroom durable init", log.Fields{"client": c, "port": port})
 		}
 	}
+}
+
+// v5ConfigResult pairs the loaded configuration with the load error, so New can
+// build everything from real values and still report a malformed file.
+type v5ConfigResult struct {
+	cfg dwytconfig.Config
+	err error
+}
+
+// loadedV5Config reads the consolidated configuration. It never fails: a missing
+// file yields the recommended defaults, and a malformed one yields the defaults
+// plus an error the caller surfaces.
+func loadedV5Config(dwytHome string) v5ConfigResult {
+	cfg, err := dwytconfig.Load(dwytHome)
+	return v5ConfigResult{cfg: cfg, err: err}
 }

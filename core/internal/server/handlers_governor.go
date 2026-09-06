@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 
+	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/rawstore"
 	"github.com/gin-gonic/gin"
@@ -202,4 +204,40 @@ func (ds *DashboardServer) apiGovernorRoute(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, ds.Governor.Route(req))
+}
+
+// apiV5Config exposes the consolidated v5 configuration and where it came from.
+//
+// Read-only on purpose: the file is the source of truth and the user edits it
+// directly. A write endpoint would create two writers for one file and an
+// obligation to preserve comments DWYT cannot see.
+func (ds *DashboardServer) apiV5Config(c *gin.Context) {
+	payload := gin.H{
+		"config": ds.V5Config,
+		"source": ds.V5Config.Source(),
+		"path":   dwytconfig.Path(ds.DwytHome),
+	}
+	if ds.RuntimeState != nil {
+		if err, ok := ds.RuntimeState.ToolErrors["config"]; ok && err != "" {
+			payload["error"] = err
+		}
+	}
+	c.JSON(http.StatusOK, payload)
+}
+
+// apiBrainMigrateV5 runs (or previews) the vault migration to the v5 layout.
+func (ds *DashboardServer) apiBrainMigrateV5(c *gin.Context) {
+	pb := ds.projectObsidian()
+	if pb == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no Obsidian vault loaded"})
+		return
+	}
+	opts := brain.V5MigrationOptions{
+		DryRun:             c.Query("dry_run") == "true",
+		KeepLatestSessions: ds.V5Config.Housekeeper.Sessions.KeepLatest,
+		// Backfilling lifecycle metadata rewrites notes the user may have
+		// authored, so it stays opt-in even here.
+		BackfillLifecycle: c.Query("backfill_lifecycle") == "true",
+	}
+	c.JSON(http.StatusOK, pb.MigrateToV5(opts))
 }
