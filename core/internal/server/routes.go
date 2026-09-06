@@ -82,6 +82,7 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.POST("/governor/usage", ds.apiGovernorUsage)
 		api.GET("/governor/housekeeper", ds.apiGovernorHousekeeper)
 		api.GET("/governor/memory-health", ds.apiGovernorMemoryHealth)
+		api.POST("/governor/route", ds.apiGovernorRoute)
 		api.GET("/governor/policy", ds.apiGovernorPolicy)
 		// Brain v5: canonical memory, the Memory Compiler and the Housekeeper.
 		api.GET("/housekeeper/status", ds.apiHousekeeperStatus)

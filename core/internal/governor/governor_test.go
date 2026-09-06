@@ -534,3 +534,73 @@ func TestReportUsageLeavesCostUnknownWithoutPricing(t *testing.T) {
 		t.Fatalf("an unknown cost must not be invented: %f", obs.CostUSD)
 	}
 }
+
+func TestRouteReturnsOneCoherentAnswer(t *testing.T) {
+	g := newGovernor(t)
+	resp := g.Route(RouteRequest{
+		TaskID: "t1", Task: "harden the delete flow", Phase: "fix",
+		Files: 3, TouchesSecurity: true, Destructive: true,
+	})
+
+	if resp.Decision.Tier != contextgov.TierPremium {
+		t.Fatalf("security plus destructive should route premium, got %s", resp.Decision.Tier)
+	}
+	// The caller must not have to ask twice: budget, output and limits come with
+	// the decision and must agree with its classification.
+	if resp.Budget.Total <= 0 {
+		t.Fatalf("the routed budget must be usable: %+v", resp.Budget)
+	}
+	if resp.Output.TargetTokens <= 0 {
+		t.Fatalf("an output profile should accompany the route: %+v", resp.Output)
+	}
+	if resp.Limits.MaxCostUSD <= 0 {
+		t.Fatalf("cost limits should accompany the route: %+v", resp.Limits)
+	}
+	if !strings.Contains(resp.Note, "recommendation") {
+		t.Fatalf("the response must state that it is advisory: %q", resp.Note)
+	}
+	if resp.Decision.Rationale == "" {
+		t.Fatal("a routing decision without a rationale is not reviewable")
+	}
+}
+
+// Failure history the governor observed outranks what the caller claims.
+func TestRouteUsesObservedFailureHistory(t *testing.T) {
+	g := newGovernor(t)
+	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "work"})
+	sess, _ := g.Session("t1")
+
+	sig := contextgov.ErrorSignature{Code: "E1", File: "a.go"}
+	for i := 0; i < 3; i++ {
+		sess.RecordError(sig)
+	}
+
+	// The caller reports nothing about failures; the session knows better.
+	resp := g.Route(RouteRequest{TaskID: "t1", Files: 1})
+	if !resp.Decision.Escalate {
+		t.Fatalf("a repeating error observed in the session must escalate: %+v", resp.Decision)
+	}
+}
+
+func TestRouteBudgetTracksClassification(t *testing.T) {
+	g := newGovernor(t)
+	small := g.Route(RouteRequest{TaskID: "a", Phase: "fix", Files: 1, DiffLines: 3})
+	big := g.Route(RouteRequest{TaskID: "b", Phase: "fix", Files: 20, Modules: 5,
+		Languages: 2, DiffLines: 900, TouchesArchitecture: true})
+
+	if big.Budget.Total <= small.Budget.Total {
+		t.Fatalf("a larger task should get a larger budget: %d vs %d",
+			big.Budget.Total, small.Budget.Total)
+	}
+}
+
+func TestRouteRespectsDisabledRoutingConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Routing.Enabled = false
+	g := New(cfg, t.TempDir())
+
+	resp := g.Route(RouteRequest{TouchesSecurity: true})
+	if resp.Decision.Tier != contextgov.TierMid {
+		t.Fatalf("disabled routing must stay neutral, got %s", resp.Decision.Tier)
+	}
+}

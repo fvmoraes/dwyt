@@ -69,6 +69,8 @@ type Config struct {
 	StructuredOperational   bool `json:"structured_operational"`
 
 	StopLimits contextgov.StopLimits `json:"stop_limits"`
+	// Routing controls deterministic model routing (spec §46).
+	Routing contextgov.RoutingConfig `json:"routing"`
 
 	// RawTTL is the retention of tool-output raw objects (spec §22 P3:
 	// 72 hours).
@@ -90,6 +92,7 @@ func DefaultConfig() Config {
 		OperationalOutputMax:    outputgov.OperationalMax,
 		StructuredOperational:   true,
 		StopLimits:              contextgov.DefaultStopLimits(),
+		Routing:                 contextgov.DefaultRoutingConfig(),
 		RawTTL:                  72 * time.Hour,
 	}
 }

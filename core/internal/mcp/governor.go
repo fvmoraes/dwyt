@@ -177,6 +177,17 @@ func (gt *GovernorTools) ReportUsage(args map[string]interface{}) (string, error
 	return gt.postJSON("/governor/usage", payload)
 }
 
+// Route implements dwyt_route.
+func (gt *GovernorTools) Route(args map[string]interface{}) (string, error) {
+	payload := map[string]interface{}{}
+	copyString(payload, args, "task_id", "task", "phase")
+	copyNumber(payload, args, "files", "modules", "languages", "diff_lines",
+		"prior_failures", "confidence")
+	copyBool(payload, args, "touches_architecture", "touches_security",
+		"touches_infrastructure", "destructive", "has_tests")
+	return gt.postJSON("/governor/route", payload)
+}
+
 // HousekeeperStatus implements dwyt_housekeeper_status.
 func (gt *GovernorTools) HousekeeperStatus(args map[string]interface{}) (string, error) {
 	return gt.getJSON("/governor/housekeeper", nil)
@@ -346,6 +357,31 @@ func RegisterGovernorTools(s *Server) {
 		map[string]Property{},
 		nil,
 		gt.HousekeeperStatus,
+	)
+
+	s.RegisterTool("dwyt_route",
+		"Classify a task by complexity and risk and get the recommended model tier "+
+			"(local, cheap, mid, frontier, premium), the matching context budget, output "+
+			"profile and cost limits. Deterministic: no auxiliary model is used. This is a "+
+			"recommendation, not an instruction, and tiers are not mapped to model names.",
+		map[string]Property{
+			"task_id":                {Type: "string", Description: "Task id, so observed failure history is taken into account"},
+			"task":                   {Type: "string", Description: "One-sentence description of the task"},
+			"phase":                  {Type: "string", Description: "classify, retrieve, tool_loop, fix, review, plan or artifact"},
+			"files":                  {Type: "number", Description: "Number of files the task touches"},
+			"modules":                {Type: "number", Description: "Number of modules the task touches"},
+			"languages":              {Type: "number", Description: "Number of languages involved"},
+			"diff_lines":             {Type: "number", Description: "Size of the change in lines, when known"},
+			"touches_architecture":   {Type: "boolean", Description: "The change alters structure, not only behaviour"},
+			"touches_security":       {Type: "boolean", Description: "Auth, crypto, secrets or access control"},
+			"touches_infrastructure": {Type: "boolean", Description: "Deployment, migrations or infrastructure code"},
+			"destructive":            {Type: "boolean", Description: "The change deletes or overwrites data"},
+			"has_tests":              {Type: "boolean", Description: "The affected area is covered by tests, which lowers risk"},
+			"prior_failures":         {Type: "number", Description: "How many times this task already failed"},
+			"confidence":             {Type: "number", Description: "0..1 confidence that you can complete the task"},
+		},
+		nil,
+		gt.Route,
 	)
 
 	s.RegisterTool("dwyt_housekeeper_run",

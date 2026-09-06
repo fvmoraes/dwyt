@@ -188,3 +188,18 @@ func (ds *DashboardServer) apiGovernorCacheGuidance(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, ds.Governor.CacheGuidance(c.Query("provider"), c.Query("model")))
 }
+
+// apiGovernorRoute serves dwyt_route: the deterministic complexity/risk
+// classification and the tier it recommends.
+func (ds *DashboardServer) apiGovernorRoute(c *gin.Context) {
+	if ds.Governor == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "governor unavailable"})
+		return
+	}
+	var req governor.RouteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, ds.Governor.Route(req))
+}
