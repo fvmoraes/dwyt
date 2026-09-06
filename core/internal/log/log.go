@@ -72,10 +72,10 @@ func (l *Logger) log(level Level, msg string, fields Fields) {
 	fmt.Fprintln(l.writer)
 }
 
-func Debug(msg string, fields ...Fields)  { std.log(DEBUG, msg, merge(fields)) }
-func Info(msg string, fields ...Fields)   { std.log(INFO, msg, merge(fields)) }
-func Warn(msg string, fields ...Fields)   { std.log(WARN, msg, merge(fields)) }
-func Error(msg string, fields ...Fields)  { std.log(ERROR, msg, merge(fields)) }
+func Debug(msg string, fields ...Fields) { std.log(DEBUG, msg, merge(fields)) }
+func Info(msg string, fields ...Fields)  { std.log(INFO, msg, merge(fields)) }
+func Warn(msg string, fields ...Fields)  { std.log(WARN, msg, merge(fields)) }
+func Error(msg string, fields ...Fields) { std.log(ERROR, msg, merge(fields)) }
 
 func merge(fields []Fields) Fields {
 	if len(fields) == 0 {

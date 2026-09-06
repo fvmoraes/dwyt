@@ -49,7 +49,7 @@ type VaultMeta struct {
 //     AUX, NUL, COM1..COM9, LPT1..LPT9), with or without extension.
 //   - Cap the basename at 64 characters to stay well below common PATH_MAX
 //     limits even after the "<hash>_" prefix is prepended (hash is 12 chars
-//     + "_" = 13 chars, leaving 64 - 13 = 51 chars for the suffix).
+//   - "_" = 13 chars, leaving 64 - 13 = 51 chars for the suffix).
 //
 // Returns an empty string when the input cannot be normalized into a usable
 // name. Callers must fall back to a hash-only layout in that case.

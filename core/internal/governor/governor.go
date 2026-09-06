@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/dwyt/internal/cacheintel"
 	"github.com/fvmoraes/dwyt/internal/contextgov"
 	"github.com/fvmoraes/dwyt/internal/outputgov"
+	"github.com/fvmoraes/dwyt/internal/provider"
 	"github.com/fvmoraes/dwyt/internal/rawstore"
 	"github.com/fvmoraes/dwyt/internal/toolgov"
 )
@@ -102,6 +104,11 @@ type Governor struct {
 
 	raw *rawstore.Store
 
+	// capabilities and pricing make cache guidance and cost estimates
+	// capability-driven instead of hardcoded (spec §38, §45).
+	capabilities *provider.Catalog
+	pricing      *provider.PricingCatalog
+
 	memory      MemoryHealthProvider
 	housekeeper HousekeeperStatusProvider
 	usage       UsageRecorder
@@ -123,17 +130,39 @@ func New(cfg Config, rawHome string) *Governor {
 		cfg = DefaultConfig()
 	}
 	g := &Governor{
-		cfg:      cfg,
-		planner:  contextgov.NewPlanner(),
-		sessions: map[string]*contextgov.Session{},
-		loop:     map[string]*contextgov.LoopObservation{},
+		cfg:          cfg,
+		planner:      contextgov.NewPlanner(),
+		sessions:     map[string]*contextgov.Session{},
+		loop:         map[string]*contextgov.LoopObservation{},
+		capabilities: provider.NewCatalog(),
+		pricing:      provider.NewPricingCatalog(),
 	}
 	if rawHome != "" {
 		if store, err := rawstore.New(rawHome); err == nil {
 			g.raw = store
 		}
+		// A user-maintained pricing catalog is optional. A malformed one is
+		// reported by the caller-facing policy endpoint rather than failing
+		// startup: cost estimates are observability, not correctness.
+		if catalog, err := provider.LoadPricing(rawHome); err == nil {
+			g.pricing = catalog
+		}
 	}
 	return g
+}
+
+// Capabilities exposes the provider capability catalog.
+func (g *Governor) Capabilities() *provider.Catalog {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.capabilities
+}
+
+// Pricing exposes the pricing catalog.
+func (g *Governor) Pricing() *provider.PricingCatalog {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.pricing
 }
 
 // SetMemoryHealthProvider wires the Brain.
@@ -698,6 +727,35 @@ func (g *Governor) ReportUsage(u Usage) UsageResponse {
 		sess.MarkCached(u.CachedHashes)
 	}
 
+	// Learn what the provider can actually do from what it just did (spec §40:
+	// seed plus dynamic discovery). Only observed reports teach anything: an
+	// estimate says nothing about provider behaviour.
+	if u.Observed && u.Provider != "" {
+		g.Capabilities().Observe(u.Provider, u.Model, provider.Observation{
+			CachedTokensReported:    u.CachedInputTokens != nil,
+			CacheWriteReported:      u.CacheWriteTokens != nil,
+			ReasoningTokensReported: u.ReasoningTokens != nil,
+		})
+	}
+
+	// Fill in a cost estimate when the caller did not supply one and the pricing
+	// catalog has data. An unknown estimate stays nil rather than becoming zero,
+	// so the dashboard can show "unknown" instead of "free" (spec §52).
+	if u.EstimatedCostUSD == nil && u.ActualCostUSD == nil && u.Provider != "" {
+		est := g.Pricing().EstimateCost(u.Provider, u.Model, provider.Usage{
+			InputTokens:         u.InputTokens,
+			UncachedInputTokens: u.UncachedInputTokens,
+			CachedInputTokens:   u.CachedInputTokens,
+			CacheWriteTokens:    u.CacheWriteTokens,
+			OutputTokens:        u.OutputTokens,
+			ReasoningTokens:     u.ReasoningTokens,
+		})
+		if est.Known && est.USD > 0 {
+			cost := est.USD
+			u.EstimatedCostUSD = &cost
+		}
+	}
+
 	g.mu.Lock()
 	obs := g.loop[taskID]
 	if obs == nil {
@@ -842,37 +900,73 @@ type CacheGuidanceResponse struct {
 	// CapabilityState is one of enforced, advised, observed, unsupported,
 	// unknown (spec §39).
 	CapabilityState string `json:"capability_state"`
+	// Capabilities is the detected provider/model capability record.
+	Capabilities provider.Capabilities `json:"capabilities"`
+	// LongContextThreshold is the token count above which the provider applies a
+	// pricing multiplier, when known.
+	LongContextThreshold int `json:"long_context_threshold,omitempty"`
 	// Note explains the capability state in one line.
 	Note string `json:"note,omitempty"`
 
-	PolicyVersion string `json:"policy_version"`
+	PolicyVersion  string `json:"policy_version"`
+	CatalogVersion string `json:"catalog_version,omitempty"`
 }
 
 // CacheGuidance returns the prompt-assembly guidance for a provider/model.
 //
-// In v5.0.0 DWYT does not own the transport for third-party clients (the IDE or
-// harness sends the request), so the honest capability state is "advised": DWYT
-// shapes the prompt but does not set provider cache headers. Reporting
-// "enforced" here would be exactly the false claim the spec forbids (§39).
-func (g *Governor) CacheGuidance(provider, model string) CacheGuidanceResponse {
+// The structural half (assembly order, what must never precede the prefix, the
+// trim order) is provider-independent and always authoritative. The capability
+// half comes from the catalog and is reported with an explicit state:
+//
+//   - `observed` once the provider has actually returned cache metrics;
+//   - `advised` when the capability is known but DWYT does not own the transport
+//     (the IDE or harness sends the request, so DWYT cannot set cache headers);
+//   - `unknown` for a provider DWYT has no data for.
+//
+// It never reports `enforced`, because in v5.0.0 DWYT does not control the
+// request for third-party clients. Claiming otherwise is the exact false claim
+// spec §39 forbids.
+func (g *Governor) CacheGuidance(providerName, model string) CacheGuidanceResponse {
+	caps := g.Capabilities().Lookup(providerName, model)
+
+	state := CapabilityUnknown
+	switch caps.CacheState {
+	case provider.StateObserved:
+		state = CapabilityObserved
+	case provider.StateAdvised:
+		state = CapabilityAdvised
+	case provider.StateUnsupported:
+		state = CapabilityUnsupported
+	}
+
+	note := "DWYT shapes prompt order and content; it does not control the " +
+		"provider request for third-party clients. Cache hits are only reported " +
+		"when the provider observes them."
+	switch {
+	case caps.CacheMode == provider.CacheUnknown:
+		note = "Caching support for this provider/model is unknown. Prefix " +
+			"ordering still applies and costs nothing; no cache claim will be made."
+	case caps.CacheMode == provider.CacheExplicit && caps.ExplicitBreakpoints:
+		note = "This provider supports explicit cache breakpoints. Mark the end " +
+			"of the long-lived span; DWYT guarantees nothing precedes it that changes."
+	}
+
 	resp := CacheGuidanceResponse{
-		Provider:       provider,
-		Model:          model,
+		Provider:       caps.Provider,
+		Model:          caps.Model,
 		Order:          contextgov.CacheClasses(),
 		PreservePrefix: g.Config().PreserveCachePrefix,
 		NeverBeforePrefix: []string{
 			"timestamps", "request_ids", "nonces", "build_ids",
 			"latest_user_message", "latest_tool_result", "volatile_metadata",
 		},
-		TrimOrder: []string{
-			"discardable", "stale", "resolved_raw", "duplicate",
-			"volatile_excess", "low_roi", "stable_last_resort",
-		},
-		CapabilityState: CapabilityAdvised,
-		Note: "DWYT shapes prompt order and content; it does not control the " +
-			"provider request for third-party clients. Cache hits are only " +
-			"reported when the provider observes them.",
-		PolicyVersion: PolicyVersion,
+		TrimOrder:            cacheintel.TrimOrder(),
+		CapabilityState:      state,
+		Capabilities:         caps,
+		LongContextThreshold: caps.LongContext.Threshold,
+		Note:                 note,
+		PolicyVersion:        PolicyVersion,
+		CatalogVersion:       g.Capabilities().Version(),
 	}
 	return resp
 }

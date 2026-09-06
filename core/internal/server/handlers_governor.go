@@ -158,9 +158,12 @@ func (ds *DashboardServer) apiGovernorPolicy(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"policy_version": governor.PolicyVersion,
-		"config":         ds.Governor.Config(),
-		"raw_store":      ds.Governor.RawUsage(),
+		"policy_version":  governor.PolicyVersion,
+		"config":          ds.Governor.Config(),
+		"raw_store":       ds.Governor.RawUsage(),
+		"catalog_version": ds.Governor.Capabilities().Version(),
+		"providers":       ds.Governor.Capabilities().Providers(),
+		"pricing":         ds.Governor.Pricing().Meta(),
 	})
 }
 

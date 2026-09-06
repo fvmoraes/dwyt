@@ -27,15 +27,15 @@ type ProcessInfo struct {
 type RuntimeState struct {
 	mu sync.RWMutex `json:"-"`
 
-	Version            string                  `json:"version"`
-	CurrentProject     string                  `json:"current_project"`
-	CurrentProjectName string                  `json:"current_project_name"`
-	Processes          map[string]ProcessInfo  `json:"processes"`
-	ToolErrors         map[string]string       `json:"tool_errors"` // last error per tool
-	Projects           map[string]ProjectEntry `json:"projects"`
-	Clients            []string                `json:"clients"`
+	Version            string                          `json:"version"`
+	CurrentProject     string                          `json:"current_project"`
+	CurrentProjectName string                          `json:"current_project_name"`
+	Processes          map[string]ProcessInfo          `json:"processes"`
+	ToolErrors         map[string]string               `json:"tool_errors"` // last error per tool
+	Projects           map[string]ProjectEntry         `json:"projects"`
+	Clients            []string                        `json:"clients"`
 	ToolSources        map[string]toolsource.Selection `json:"tool_sources,omitempty"`
-	Path               string                  `json:"-"` // state.json path
+	Path               string                          `json:"-"` // state.json path
 }
 
 // ProjectEntry tracks per-project metadata in runtime state.
@@ -57,12 +57,12 @@ func Init(dwytHome string) *RuntimeState {
 	os.MkdirAll(filepath.Dir(p), 0755)
 
 	s := &RuntimeState{
-		Version:    "dev",
-		Processes:  make(map[string]ProcessInfo),
-		ToolErrors: make(map[string]string),
-		Projects:   make(map[string]ProjectEntry),
+		Version:     "dev",
+		Processes:   make(map[string]ProcessInfo),
+		ToolErrors:  make(map[string]string),
+		Projects:    make(map[string]ProjectEntry),
 		ToolSources: make(map[string]toolsource.Selection),
-		Path:       p,
+		Path:        p,
 	}
 
 	if data, err := os.ReadFile(p); err == nil {

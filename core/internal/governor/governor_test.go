@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/provider"
 )
 
 var jsonMarshal = json.Marshal
@@ -439,4 +440,97 @@ func mustJSON(t *testing.T, v interface{}) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestCacheGuidanceIsCapabilityDriven(t *testing.T) {
+	g := newGovernor(t)
+
+	anthropic := g.CacheGuidance("anthropic", "claude-x")
+	if !anthropic.Capabilities.ExplicitBreakpoints {
+		t.Fatalf("expected explicit breakpoints for anthropic: %+v", anthropic.Capabilities)
+	}
+	if !strings.Contains(anthropic.Note, "breakpoints") {
+		t.Fatalf("the note should mention the capability: %q", anthropic.Note)
+	}
+
+	unknown := g.CacheGuidance("some-new-vendor", "their-model")
+	if unknown.CapabilityState != CapabilityUnknown {
+		t.Fatalf("an unknown provider must report unknown, got %s", unknown.CapabilityState)
+	}
+	if !strings.Contains(unknown.Note, "unknown") {
+		t.Fatalf("the note should say the support is unknown: %q", unknown.Note)
+	}
+	// Structural guidance applies regardless.
+	if len(unknown.Order) == 0 || len(unknown.TrimOrder) == 0 {
+		t.Fatal("ordering guidance is provider-independent and must always be present")
+	}
+	if unknown.CatalogVersion == "" {
+		t.Fatal("the catalog version must be reported so a decision is traceable")
+	}
+}
+
+func TestCacheGuidanceBecomesObservedAfterAReport(t *testing.T) {
+	g := newGovernor(t)
+	if g.CacheGuidance("some-vendor", "m1").CapabilityState == CapabilityObserved {
+		t.Fatal("nothing has been observed yet")
+	}
+
+	cached := 1200
+	g.ReportUsage(Usage{
+		TaskID: "t1", Provider: "some-vendor", Model: "m1",
+		CachedInputTokens: &cached, Observed: true,
+	})
+
+	if got := g.CacheGuidance("some-vendor", "m1").CapabilityState; got != CapabilityObserved {
+		t.Fatalf("an observed cache report should upgrade the state, got %s", got)
+	}
+}
+
+func TestUnobservedReportTeachesNothingAboutTheProvider(t *testing.T) {
+	g := newGovernor(t)
+	cached := 1200
+	g.ReportUsage(Usage{
+		TaskID: "t1", Provider: "some-vendor", Model: "m1",
+		CachedInputTokens: &cached, Observed: false,
+	})
+	if got := g.CacheGuidance("some-vendor", "m1").CapabilityState; got == CapabilityObserved {
+		t.Fatal("an estimate must never be recorded as an observation")
+	}
+}
+
+func TestReportUsageFillsInAnEstimateWhenPricingIsKnown(t *testing.T) {
+	g := newGovernor(t)
+	g.Pricing().Register(provider.Pricing{
+		Provider: "openai", Model: "gpt-x", InputPerMTok: 2, OutputPerMTok: 8,
+	})
+
+	input, output := 1_000_000, 100_000
+	g.ReportUsage(Usage{
+		TaskID: "t1", Provider: "openai", Model: "gpt-x",
+		InputTokens: &input, OutputTokens: &output, Observed: true,
+	})
+
+	// The cost must have been folded into the loop state, which the stop
+	// conditions read.
+	g.mu.RLock()
+	obs := g.loop["t1"]
+	g.mu.RUnlock()
+	if obs == nil || obs.CostUSD <= 0 {
+		t.Fatalf("an estimable cost should be accumulated: %+v", obs)
+	}
+}
+
+func TestReportUsageLeavesCostUnknownWithoutPricing(t *testing.T) {
+	g := newGovernor(t)
+	input, output := 1_000_000, 100_000
+	g.ReportUsage(Usage{
+		TaskID: "t1", Provider: "unpriced-vendor",
+		InputTokens: &input, OutputTokens: &output, Observed: true,
+	})
+	g.mu.RLock()
+	obs := g.loop["t1"]
+	g.mu.RUnlock()
+	if obs != nil && obs.CostUSD != 0 {
+		t.Fatalf("an unknown cost must not be invented: %f", obs.CostUSD)
+	}
 }

@@ -143,11 +143,11 @@ func InitObsidianConfig(dwytHome string) {
 
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		defaultConfig := map[string]interface{}{
-			"api_url":  "http://127.0.0.1:27123",
-			"api_key":  "",
-			"port":     27123,
-			"enabled":  false,
-			"note":     "Configure API key from Obsidian REST API plugin settings",
+			"api_url": "http://127.0.0.1:27123",
+			"api_key": "",
+			"port":    27123,
+			"enabled": false,
+			"note":    "Configure API key from Obsidian REST API plugin settings",
 		}
 		data, _ := json.MarshalIndent(defaultConfig, "", "  ")
 		os.WriteFile(configFile, data, 0644)

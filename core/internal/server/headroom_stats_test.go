@@ -10,9 +10,9 @@ func TestHeadroomTokensSavedFromSummaryCompression(t *testing.T) {
 		"summary": map[string]interface{}{
 			"api_requests": float64(12),
 			"compression": map[string]interface{}{
-				"avg_compression_pct":                    float64(37.5),
-				"total_tokens_saved_with_cli_filtering":  float64(53798),
-				"total_tokens_saved_with_rtk":            float64(53798),
+				"avg_compression_pct":                   float64(37.5),
+				"total_tokens_saved_with_cli_filtering": float64(53798),
+				"total_tokens_saved_with_rtk":           float64(53798),
 			},
 		},
 	}
