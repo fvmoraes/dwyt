@@ -49,6 +49,12 @@ type Config struct {
 	// TTLOverrides replaces individual entries of the default retention table.
 	TTLOverrides map[string]time.Duration `json:"ttl_overrides,omitempty"`
 
+	// VaultGC, when set, runs the project-wide ghost-vault sweep during deep
+	// housekeeping. The housekeeper owns one vault; ghost vaults live in the
+	// projects directory shared by all of them, so the server injects this
+	// callback instead of the housekeeper reaching outside its scope.
+	VaultGC func(dryRun bool) brain.VaultGCReport `json:"-"`
+
 	// DryRun computes everything and changes nothing. Used by the dashboard to
 	// preview a pass before the user commits to it.
 	DryRun bool `json:"dry_run,omitempty"`
@@ -107,6 +113,10 @@ type Report struct {
 	Skipped string `json:"skipped,omitempty"`
 	// Errors carries non-fatal problems. Housekeeping must never fail a session.
 	Errors []string `json:"errors,omitempty"`
+
+	// Vault ghosts swept during a deep pass (project-wide, not per vault).
+	VaultGhostsRemoved int `json:"vault_ghosts_removed,omitempty"`
+	VaultGhostsKept    int `json:"vault_ghosts_kept,omitempty"`
 }
 
 // Housekeeper runs retention passes against one project vault.
@@ -312,6 +322,18 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 			} else {
 				report.Errors = append(report.Errors, "raw prune: "+err.Error())
 			}
+		}
+	}
+
+	// 5. Ghost vaults: hash-only vault directories no project claims that hold
+	// nothing but DWYT scaffolding. A deep pass is the natural place to sweep
+	// them, so the pending-association list shrinks without user intervention.
+	if cfg.VaultGC != nil {
+		gc := cfg.VaultGC(cfg.DryRun)
+		report.VaultGhostsRemoved = gc.Removed
+		report.VaultGhostsKept = gc.KeptWithContent
+		for _, e := range gc.Errors {
+			report.Errors = append(report.Errors, "vault gc: "+e)
 		}
 	}
 }

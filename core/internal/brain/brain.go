@@ -81,6 +81,28 @@ func safePath(dwytHome, target string) error {
 	return nil
 }
 
+// HasVaultDir reports whether a vault directory already exists for the
+// project, in either the canonical "<hash>_<name>" or the legacy "<hash>"
+// layout. It is read-only: read-side helpers (status, diagnostics) must never
+// create a vault as a side effect of being called.
+func HasVaultDir(dwytHome, projectPath string) bool {
+	if strings.TrimSpace(projectPath) == "" {
+		return false
+	}
+	id := db.HashPath(projectPath)
+	projectsDir := filepath.Join(dwytHome, "projects")
+	candidates := []string{id}
+	if named := VaultDirectoryName(id, filepath.Base(projectPath)); named != id {
+		candidates = append([]string{named}, candidates...)
+	}
+	for _, name := range candidates {
+		if info, err := os.Stat(filepath.Join(projectsDir, name)); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
 	// Note: the project path itself is NOT required to exist here — vault
 	// naming only hashes the path string, and internal flows rely on that.
@@ -181,7 +203,7 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 	}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	legacyDir := filepath.Join(projectsDir, projectHash)
-	canonicalDir := filepath.Join(projectsDir, VaultDirectoryName(projectHash, projectName))
+	canonicalDir := filepath.Join(projectsDir, ResolveVaultDirName(projectsDir, projectHash, projectName))
 
 	// Nothing to migrate: the canonical directory already exists and the
 	// hash-only directory does not. This is the steady state.

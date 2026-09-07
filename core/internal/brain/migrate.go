@@ -223,7 +223,10 @@ func migrateOneVault(projectsDir, dirName string, opts MigrationOptions) Migrati
 	result.ResolvedName = resolvedName
 	result.Source = source
 
-	canonical := VaultDirectoryName(hash, resolvedName)
+	// ResolveVaultDirName extends the hash prefix when the default 12-char
+	// name is occupied by a different project's vault, so the rename below
+	// targets a collision-free directory instead of being skipped.
+	canonical := ResolveVaultDirName(projectsDir, hash, resolvedName)
 	if canonical == hash {
 		// The resolved name produced an invalid/empty suffix; keep the
 		// legacy directory and flag the situation.
@@ -303,17 +306,19 @@ func isHashOnlyName(dirName string) bool {
 }
 
 // isCanonicalName reports whether dirName is a canonical "<hash>_<name>"
-// vault directory. The hash prefix must be exactly 12 hex chars followed
-// by an underscore; anything that does not match is treated as foreign
-// (no DWYT-managed hash) and left alone.
+// vault directory. The hash prefix must be 12 to 64 hex chars followed by an
+// underscore (longer prefixes only appear after a collision extended it);
+// anything that does not match is treated as foreign (no DWYT-managed hash)
+// and left alone.
 func isCanonicalName(dirName string) bool {
-	if len(dirName) < 14 { // 12 + "_" + at least one suffix char
+	sep := strings.IndexByte(dirName, '_')
+	if sep < 12 || sep > 64 {
 		return false
 	}
-	if dirName[12] != '_' {
+	if sep+1 >= len(dirName) {
 		return false
 	}
-	for i := 0; i < 12; i++ {
+	for i := 0; i < sep; i++ {
 		r := dirName[i]
 		switch {
 		case r >= '0' && r <= '9':

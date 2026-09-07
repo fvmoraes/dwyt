@@ -147,6 +147,53 @@ func VaultDirectoryName(projectHash, projectName string) string {
 	return projectHash + "_" + safe
 }
 
+// vaultHashPrefixLengths are the hash prefix lengths a directory name may use.
+// Twelve hex characters (48 bits) make a collision practically impossible at
+// personal scale, but "practically impossible" is not "impossible", so the
+// resolver extends the prefix instead of letting two projects share a folder.
+var vaultHashPrefixLengths = []int{12, 16, 20, 24, 32, 48, 64}
+
+// ResolveVaultDirName is VaultDirectoryName with a filesystem-backed collision
+// guard. If the default 12-char name is occupied by a directory that belongs
+// to a DIFFERENT project hash, the prefix grows (16, 20, 24 ... 64 chars)
+// until the name is free or provably ours. The project's stable ID stays the
+// 12-char hash everywhere else; only the on-disk name adapts.
+//
+// The projectsDir may be empty (callers without a filesystem context), in
+// which case the pure name is returned unchanged.
+func ResolveVaultDirName(projectsDir, projectHash, projectName string) string {
+	base := VaultDirectoryName(projectHash, projectName)
+	if projectsDir == "" || base == "" || base == projectHash {
+		return base
+	}
+	safe := safeDirName(projectName)
+	if safe == "" {
+		return base
+	}
+	for _, n := range vaultHashPrefixLengths {
+		if n > len(projectHash) {
+			break
+		}
+		candidate := projectHash[:n] + "_" + safe
+		full := filepath.Join(projectsDir, candidate)
+		info, err := os.Stat(full)
+		if err != nil {
+			// Free — take it.
+			return candidate
+		}
+		if !info.IsDir() {
+			// A stray file with an unlucky name; a longer prefix may dodge it.
+			continue
+		}
+		if meta, _ := ReadVaultMeta(full); meta != nil && meta.ProjectHash == projectHash {
+			// Already ours.
+			return candidate
+		}
+		// Occupied by a different project — grow the prefix.
+	}
+	return base
+}
+
 // vaultMetaPath is the canonical location of the per-vault metadata file.
 // Using ".dwyt" (not ".obsidian") so the file is owned by DWYT and survives
 // any future Obsidian-managed vault resets.

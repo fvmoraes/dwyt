@@ -57,6 +57,25 @@ func (ds *DashboardServer) codebasePath() string {
 
 func (ds *DashboardServer) rtkPath() string { return ds.toolPath(toolsource.ToolRTK) }
 
+// vaultAttachError reports why a vault must NOT be attached for the project,
+// or nil when attaching is correct. Registration in the projects registry is
+// the gate: it is a user action, and it is what keeps daemon start directories
+// from silently growing ghost vaults.
+func vaultAttachError(store *db.Store, project string) error {
+	if project == "" {
+		return fmt.Errorf("no project directory to attach a vault to")
+	}
+	if store == nil {
+		// Registry unavailable: fall back to the permissive legacy behavior
+		// rather than blinding the whole dashboard.
+		return nil
+	}
+	if _, err := store.GetActiveProject(db.HashPath(project)); err != nil {
+		return fmt.Errorf("project is not registered yet; its vault is created when the project is added")
+	}
+	return nil
+}
+
 // projectDirExists reports whether path is an existing directory. Empty paths
 // and files do not count: a project is always a directory on disk.
 func projectDirExists(path string) bool {
@@ -127,10 +146,13 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 
 	var pb *brain.ProjectObsidian
 	var brainErr error
-	if project != "" {
+	// A vault serves a project the user actually registered. Attaching one for
+	// whatever directory the daemon happened to start in is exactly how the
+	// ghost vaults were born: every start directory got a scaffold folder and
+	// none of it was ever claimed. Unregistered start directories get their
+	// vault the moment the project is added via the dashboard or setup.
+	if brainErr = vaultAttachError(store, project); brainErr == nil {
 		pb, brainErr = brain.NewProjectObsidian(dwytHome, project)
-	} else {
-		brainErr = fmt.Errorf("no existing project directory to attach a vault to")
 	}
 	if brainErr != nil {
 		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
@@ -248,7 +270,15 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 
 	if store != nil {
-		store.TouchProject(project)
+		// Refresh registration metadata for a project DWYT already knows, but
+		// do not register new ones as a side effect of starting the daemon:
+		// registration is a user action (setup, dashboard, project switch),
+		// and it is what gates vault creation above.
+		if project != "" {
+			if _, err := store.GetActiveProject(db.HashPath(project)); err == nil {
+				store.TouchProject(project)
+			}
+		}
 		store.SetConfig("project_path", project)
 	}
 
@@ -355,6 +385,28 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 			log.Warn("vault migration: needs manual resolution",
 				log.Fields{"name": r.LegacyName, "status": string(r.Status), "reason": r.Reason})
 		}
+	}
+
+	// With the renames out of the way, sweep the leftovers: hash-only vaults
+	// no project claims and that hold nothing but DWYT scaffolding. These are
+	// ghosts older versions left behind for every directory DWYT ever ran in
+	// — without this they pile up forever and the migration card keeps asking
+	// the user to associate directories they have never heard of.
+	gc := brain.GCSweepVaults(dwytHome, brain.VaultGCOptions{
+		KnownHash: func(hash string) bool {
+			if store == nil {
+				return false
+			}
+			_, err := store.GetProject(hash)
+			return err == nil
+		},
+	})
+	if gc.Removed > 0 || gc.KeptWithContent > 0 || len(gc.Errors) > 0 {
+		log.Info("vault gc: completed", log.Fields{
+			"removed":     gc.Removed,
+			"kept":        gc.KeptWithContent,
+			"scan_errors": len(gc.Errors),
+		})
 	}
 }
 
