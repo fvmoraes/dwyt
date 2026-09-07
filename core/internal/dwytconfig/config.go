@@ -225,6 +225,16 @@ type CacheConfig struct {
 	DiagnosePrefixHashes     bool     `json:"diagnose_prefix_hashes"`
 	NeverClaimUnobservedHits bool     `json:"never_claim_unobserved_hits"`
 	CacheKeyHashOnly         bool     `json:"cache_key_hash_only"`
+
+	// LongContextThreshold overrides the provider catalog's long-context pricing
+	// cliff (spec §44, §67). Zero means "use the catalog", which is the right
+	// default — but a user on a provider DWYT has no data for needs a way to say
+	// where their own cliff is, and pinning it in the catalog would mean shipping
+	// a release for every provider price change.
+	LongContextThreshold int `json:"long_context_threshold"`
+	// AllowLongContext permits planning above the threshold. Off by default:
+	// crossing a pricing cliff should be a decision, not an accident.
+	AllowLongContext bool `json:"allow_long_context"`
 }
 
 // TelemetryConfig mirrors the `telemetry` block.
@@ -458,6 +468,8 @@ func (c Config) OptimizerConfig() optimizer.Config {
 	g.StructuredOperational = c.Output.StructuredOperational
 	g.StopLimits = c.Limits
 	g.Routing = c.Routing
+	g.LongContextThreshold = c.Cache.LongContextThreshold
+	g.AllowLongContext = c.Cache.AllowLongContext
 	if ttl := c.Retention.ToolOutputs.Std(); ttl > 0 {
 		g.RawTTL = ttl
 	}

@@ -75,6 +75,16 @@ type Config struct {
 	// RawTTL is the retention of tool-output raw objects (spec §22 P3:
 	// 72 hours).
 	RawTTL time.Duration `json:"raw_ttl"`
+
+	// LongContextThreshold is the configured long-context pricing cliff
+	// (spec §44, §67). It is a fallback: a request that names its own threshold
+	// wins, and zero means "ask the provider catalog". Configuration exists here
+	// because provider prices change faster than DWYT releases.
+	LongContextThreshold int `json:"long_context_threshold,omitempty"`
+	// AllowLongContext permits planning above the threshold. Off by default,
+	// since crossing a pricing cliff should be a decision rather than a side
+	// effect of a large task.
+	AllowLongContext bool `json:"allow_long_context,omitempty"`
 }
 
 // DefaultConfig returns the operational recommendation from the spec.
@@ -270,6 +280,12 @@ type PlanRequest struct {
 	MissingContext []string `json:"missing_context,omitempty"`
 	AchievedLevel  string   `json:"achieved_level,omitempty"`
 
+	// Provider and Model are optional. When given, the budgeter can look the
+	// long-context pricing cliff up in the capability catalog instead of relying
+	// on a configured guess.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+
 	ModelContextWindow   int  `json:"model_context_window,omitempty"`
 	LongContextThreshold int  `json:"long_context_threshold,omitempty"`
 	AllowLongContext     bool `json:"allow_long_context,omitempty"`
@@ -306,7 +322,18 @@ func (g *Optimizer) ContextPlan(req PlanRequest) PlanResponse {
 		ReservePercent:       cfg.ReservePercent,
 		ModelContextWindow:   req.ModelContextWindow,
 		LongContextThreshold: req.LongContextThreshold,
-		AllowLongContext:     req.AllowLongContext,
+		AllowLongContext:     req.AllowLongContext || cfg.AllowLongContext,
+	}
+	// A request that names its own cliff wins: it knows the model it is about to
+	// call. The configured value is the fallback for everything else, and the
+	// catalog answers when neither is set.
+	if profile.LongContextThreshold <= 0 {
+		profile.LongContextThreshold = cfg.LongContextThreshold
+	}
+	if profile.LongContextThreshold <= 0 && req.Model != "" {
+		if caps := g.Capabilities().Lookup(req.Provider, req.Model); caps.LongContext.Active() {
+			profile.LongContextThreshold = caps.LongContext.Threshold
+		}
 	}
 
 	taskID := req.TaskID

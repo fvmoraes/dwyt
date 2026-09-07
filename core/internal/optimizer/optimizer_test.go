@@ -604,3 +604,60 @@ func TestRouteRespectsDisabledRoutingConfig(t *testing.T) {
 		t.Fatalf("disabled routing must stay neutral, got %s", resp.Decision.Tier)
 	}
 }
+
+// Long-context pricing cliffs (spec §44, §67) must be configurable, because
+// provider prices change faster than DWYT ships. The resolution order matters as
+// much as the feature: the caller knows which model it is about to hit, so its
+// value wins; configuration is the fallback; the catalog answers last.
+
+func TestConfiguredLongContextThresholdCapsTheBudget(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.LongContextThreshold = 20000
+	g := New(cfg, t.TempDir())
+
+	resp := g.ContextPlan(PlanRequest{
+		TaskID:     "t-long",
+		Task:       "refactor the whole retrieval pipeline",
+		Phase:      "plan",
+		Complexity: "critical",
+	})
+	if got := resp.Plan.Budget.Total; got > 20000 {
+		t.Fatalf("the configured cliff must cap the budget, got %d", got)
+	}
+}
+
+func TestRequestThresholdBeatsConfiguration(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.LongContextThreshold = 20000
+	g := New(cfg, t.TempDir())
+
+	resp := g.ContextPlan(PlanRequest{
+		TaskID:               "t-long",
+		Task:                 "refactor the whole retrieval pipeline",
+		Phase:                "plan",
+		Complexity:           "critical",
+		LongContextThreshold: 8000,
+	})
+	if got := resp.Plan.Budget.Total; got > 8000 {
+		t.Fatalf("the caller's cliff must win over configuration, got %d", got)
+	}
+}
+
+func TestAllowLongContextLetsThePlanCrossTheCliff(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.LongContextThreshold = 20000
+	cfg.AllowLongContext = true
+	g := New(cfg, t.TempDir())
+
+	resp := g.ContextPlan(PlanRequest{
+		TaskID:     "t-long",
+		Task:       "refactor the whole retrieval pipeline",
+		Phase:      "plan",
+		Complexity: "critical",
+	})
+	// Crossing must be possible when explicitly allowed; otherwise a legitimate
+	// large task would be silently starved.
+	if got := resp.Plan.Budget.Total; got <= 20000 {
+		t.Fatalf("an allowed crossing should exceed the cliff, got %d", got)
+	}
+}
