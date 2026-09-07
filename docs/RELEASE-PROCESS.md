@@ -33,10 +33,24 @@ MAJOR.MINOR.PATCH
 
 | Commit Prefix | Version Bump | Example |
 |---------------|--------------|---------|
-| `BREAKING CHANGE:` or `breaking:` | Major (x.0.0) | v1.0.0 → v2.0.0 |
+| `BREAKING CHANGE:` footer, `breaking:`, or any `type!:` | Major (x.0.0) | v1.0.0 → v2.0.0 |
 | `feat:` or `feature:` | Minor (0.x.0) | v1.0.0 → v1.1.0 |
 | `fix:` or `bugfix:` | Patch (0.0.x) | v1.0.0 → v1.0.1 |
 | Any other | Patch (0.0.x) | v1.0.0 → v1.0.1 |
+
+The parser is **conventional-commit aware**, including scopes:
+
+```text
+feat(v5): add session savings        -> minor   (scope does not break the match)
+feat!: remove the v4 API             -> major   (the "!" breaking marker)
+refactor(mcp)!: rename every MCP     -> major
+commit body ends with:
+BREAKING CHANGE: config format ...   -> major   (footer detection scans bodies)
+```
+
+A scope — `feat(v5):`, `fix(ci):` — never changes the bump type. This is how a
+v5 release once accidentally shipped as a patch: the old parser required the
+colon immediately after the type and treated `feat(v5): ...` as "other".
 
 ### 3. Changelog Generation
 
