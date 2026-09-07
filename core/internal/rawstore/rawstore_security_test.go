@@ -3,6 +3,7 @@ package rawstore
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,26 +22,38 @@ func TestPutKeepsObjectsPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	objInfo, err := os.Stat(filepath.Join(s.Dir(), meta.ID))
-	if err != nil {
-		t.Fatal(err)
+	if runtime.GOOS != "windows" {
+		// Unix permission semantics. Windows has no POSIX mode bits: a
+		// writable file always reports 0666, and Go's Chmod only toggles the
+		// read-only attribute, so the numeric assertions below would fail
+		// there even though the write path behaves correctly.
+		objInfo, err := os.Stat(filepath.Join(s.Dir(), meta.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if objInfo.Mode().Perm() != 0600 {
+			t.Fatalf("object should be 0600, got %v", objInfo.Mode().Perm())
+		}
+		metaInfo, err := os.Stat(filepath.Join(s.Dir(), meta.ID+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if metaInfo.Mode().Perm() != 0600 {
+			t.Fatalf("meta should be 0600, got %v", metaInfo.Mode().Perm())
+		}
+		dirInfo, err := os.Stat(s.Dir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dirInfo.Mode().Perm() != 0700 {
+			t.Fatalf("store dir should be 0700, got %v", dirInfo.Mode().Perm())
+		}
 	}
-	if objInfo.Mode().Perm() != 0600 {
-		t.Fatalf("object should be 0600, got %v", objInfo.Mode().Perm())
-	}
-	metaInfo, err := os.Stat(filepath.Join(s.Dir(), meta.ID+".json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if metaInfo.Mode().Perm() != 0600 {
-		t.Fatalf("meta should be 0600, got %v", metaInfo.Mode().Perm())
-	}
-	dirInfo, err := os.Stat(s.Dir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dirInfo.Mode().Perm() != 0700 {
-		t.Fatalf("store dir should be 0700, got %v", dirInfo.Mode().Perm())
+
+	// The functional part holds on every OS: the object is readable through
+	// the store API and the refused-write path leaves nothing behind.
+	if _, _, err := s.Get(meta.Ref()); err != nil {
+		t.Fatalf("stored object should be readable: %v", err)
 	}
 }
 

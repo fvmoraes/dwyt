@@ -172,8 +172,8 @@ func (ds *DashboardServer) apiSessionSummary(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"available":  true,
-		"project":    projectPath,
+		"available":   true,
+		"project":     projectPath,
 		"gap_minutes": gapSecs / 60,
 		"session": gin.H{
 			"started_at":    time.Unix(cur.Start, 0).UTC().Format(time.RFC3339),
@@ -181,10 +181,10 @@ func (ds *DashboardServer) apiSessionSummary(c *gin.Context) {
 			"duration_secs": cur.End - cur.Start,
 		},
 		"savings": gin.H{
-			"tokens_saved":       savedTotal,
+			"tokens_saved":        savedTotal,
 			"without_dwyt_tokens": withoutTotal,
-			"with_dwyt_tokens":   withoutTotal - savedTotal,
-			"by_tool":            byTool,
+			"with_dwyt_tokens":    withoutTotal - savedTotal,
+			"by_tool":             byTool,
 		},
 		"mcp": gin.H{
 			"calls":         mcpCalls,

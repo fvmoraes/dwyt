@@ -3,6 +3,7 @@ package security
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -82,6 +83,9 @@ func TestCleanHomeKeepsProtectedProjects(t *testing.T) {
 }
 
 func TestInitObsidianConfigPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits do not exist on Windows; a writable file always reports 0666")
+	}
 	dwytHome := t.TempDir()
 	configFile := filepath.Join(dwytHome, "data", "obsidian", "obsidian.json")
 
