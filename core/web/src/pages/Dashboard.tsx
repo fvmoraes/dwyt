@@ -523,8 +523,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
-
       {showLogs && (
         <div className="card" style={{ marginBottom: 8, padding: '8px 12px' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{t.logsTitle}</div>
@@ -632,6 +630,7 @@ export default function Dashboard() {
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
         <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} />
+        <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
       </div>
     </div>
   )
