@@ -536,8 +536,8 @@ The UI must:
 
 Update or create:
 
-- `docs/OBSIDIAN-LAW.md`;
-- `docs/CODEBASE-LAW.md`;
+- `docs/obsidian-law.md`;
+- `docs/codebase-law.md`;
 - `Tokens Saved` documentation;
 - Kiro Power documentation;
 - the main README;

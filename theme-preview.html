@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>DWYT — Catppuccin Mocha preview</title>
+<title>DWYT — Dashboard theme preview (Catppuccin Mocha, v5)</title>
 <style>
+  /* Mirrors core/web/src/index.css + the live dashboard layout.
+     Update this file whenever the dashboard theme changes. */
   :root{
     --ctp-mauve:#cba6f7;--ctp-red:#f38ba8;--ctp-peach:#fab387;--ctp-yellow:#f9e2af;
     --ctp-green:#a6e3a1;--ctp-sky:#89dceb;--ctp-text:#cdd6f4;--ctp-overlay1:#7f849c;
@@ -16,88 +18,231 @@
     --green:var(--ctp-green);--yellow:var(--ctp-yellow);--red:var(--ctp-red);
     --sky:var(--ctp-sky);--peach:var(--ctp-peach);--mauve:var(--ctp-mauve);
     --accent:var(--ctp-yellow);--on-accent:var(--ctp-crust);
+    --inner:rgba(17,17,27,.6);
   }
   *{box-sizing:border-box;}
   body{
     margin:0;min-height:100vh;color:var(--text);
-    font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:12px;
+    font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:14px;
     background:linear-gradient(135deg,#0a0a11 0%,#11111b 50%,#0a0a11 100%);
     background-attachment:fixed;padding:14px;
   }
-  .logo{font-size:20px;font-weight:700;letter-spacing:1px;}
+
+  /* ── header ── */
+  .header{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:0 0 8px 28px;}
+  .logo{font-size:22px;font-weight:700;letter-spacing:1px;}
   .logo .yt{color:var(--yellow);}
-  .summary{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:10px 0;}
-  .summary>div{padding:8px 12px;background:var(--ctp-mantle);border-right:1px solid var(--border);}
+  .header-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+  .seg{display:flex;align-items:center;gap:2px;background:var(--ctp-base);border:1px solid var(--border);border-radius:5px;padding:1px 5px;}
+  .seg .lab{font-size:11px;color:var(--muted);margin-right:1px;}
+  .seg button{font-family:inherit;background:transparent;color:var(--muted);border:none;font-size:11px;padding:1px 7px;border-radius:4px;cursor:pointer;}
+  .seg button.on{background:var(--accent);color:var(--on-accent);font-weight:700;box-shadow:0 0 5px rgba(249,226,175,.45);}
+  .ghost{font-family:inherit;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:5px;font-size:12px;padding:2px 8px;cursor:pointer;}
+
+  /* ── project banner ── */
+  .banner{display:flex;align-items:center;gap:10px;border:1px solid rgba(166,227,161,.35);border-radius:8px;padding:6px 12px;margin-bottom:8px;background:linear-gradient(135deg,rgba(166,227,161,.06) 0%,var(--ctp-crust) 100%);}
+  .shield{font-size:14px;}
+  .banner .proj{font-size:13px;font-weight:700;color:var(--green);font-family:monospace;}
+  .banner .prot{font-size:12px;color:var(--text);}
+  .banner .files{margin-left:auto;font-size:12px;color:var(--peach);}
+
+  /* ── period selector ── */
+  .segrow{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+  .plab{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;}
+
+  /* ── totals ── */
+  .summary{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px;}
+  .summary>div{padding:6px 12px;background:var(--ctp-mantle);border-right:1px solid var(--border);}
   .summary .total{background:linear-gradient(135deg,rgba(166,227,161,0.07) 0%,var(--ctp-mantle) 100%);border-right:none;}
-  .lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
+  .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;}
   .big{font-size:20px;font-weight:700;}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .sub{font-size:11px;color:var(--muted);margin-top:1px;}
+  .strip{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-top:1px solid var(--border);padding:3px 8px;background:var(--ctp-mantle);gap:6px;}
+  .strip .tool{display:flex;align-items:center;gap:5px;}
+  .strip .tn{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
+  .strip .tv{font-size:12px;font-family:monospace;font-weight:700;}
+
+  /* ── card grid ── */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;}
   .card{
     background:linear-gradient(150deg,var(--card) 0%,var(--card-2) 100%);
-    border:1px solid var(--border);border-radius:8px;padding:14px;
-    box-shadow:0 4px 24px rgba(0,0,0,.45),inset 0 1px 0 rgba(203,166,247,.06);
-    backdrop-filter:blur(12px);display:flex;flex-direction:column;gap:6px;
+    border:1px solid rgba(203,166,247,0.16);border-radius:6px;padding:10px;
+    box-shadow:0 5px 20px rgba(0,0,0,.5),inset 0 1px 0 rgba(203,166,247,.06);
+    backdrop-filter:blur(12px);display:flex;flex-direction:column;gap:4px;height:100%;
   }
-  .chead{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px;}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);margin-left:auto;}
-  .row{display:flex;justify-content:space-between;font-size:10px;}
-  .row .k{color:var(--muted);text-transform:uppercase;}
+  .chead{display:flex;align-items:center;justify-content:space-between;}
+  .chead .t{display:flex;align-items:center;gap:5px;}
+  .chead .name{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
+  .chead .icon{font-size:13px;}
+  .chead .badge{font-size:12px;font-weight:700;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:1px 0;}
+  .row .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+  .row .v{font-family:monospace;font-size:13px;}
+  .row .v.mono{color:var(--text);}
   .hr{border-top:1px solid var(--border);margin:3px 0;}
-  .btns{display:flex;gap:6px;margin-top:4px;}
-  button{font-family:inherit;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer;border:1px solid;}
+  .note{font-size:11px;color:var(--muted);font-style:italic;line-height:1.5;}
+  .sect{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:2px;}
+  .path{font-size:12px;color:var(--accent);font-family:monospace;background:rgba(249,226,175,.05);border:1px solid rgba(249,226,175,.25);border-radius:4px;padding:3px 6px;text-align:center;margin:3px 0;}
+  .btns{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;}
+  button.b{font-family:inherit;border-radius:5px;padding:2px 6px;font-size:12px;cursor:pointer;border:1px solid;background:rgba(69,71,90,.45);color:var(--text);border-color:rgba(203,166,247,.14);}
   .primary{background:var(--accent);color:var(--on-accent);border-color:rgba(249,226,175,.45);font-weight:700;}
-  .secondary{background:rgba(69,71,90,.45);color:var(--text);border-color:rgba(203,166,247,.14);}
   .success{background:rgba(166,227,161,.12);color:var(--green);border-color:rgba(166,227,161,.35);}
   .danger{background:rgba(243,139,168,.12);color:var(--red);border-color:rgba(243,139,168,.35);}
+  input.txt{background:var(--inner);border:1px solid var(--border);color:var(--text);border-radius:4px;font-family:inherit;font-size:12px;padding:3px 6px;width:100%;}
   .bar{height:4px;border-radius:2px;background:var(--border);overflow:hidden;margin-top:4px;}
   .fill{height:100%;border-radius:2px;}
+  .hint{font-size:11px;color:var(--muted);}
+  .badge-hint{display:inline-block;background:rgba(249,226,175,.08);border:1px solid rgba(249,226,175,.25);border-radius:4px;font-size:11px;padding:1px 6px;}
+
+  /* ── swatches ── */
   .swatches{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
-  .sw{display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted);}
+  .sw{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
   .chip{width:16px;height:16px;border-radius:4px;border:1px solid rgba(255,255,255,.08);}
 </style>
 </head>
 <body>
-  <div class="logo">DW<span class="yt">YT</span> <span style="font-size:11px;color:var(--muted)">· Catppuccin Mocha preview</span></div>
+
+  <div class="header">
+    <div class="logo">DW<span class="yt">YT</span></div>
+    <div class="header-actions">
+      <div class="seg"><span class="lab">Auto</span><button>Off</button><button>5s</button><button class="on">10s</button></div>
+      <button class="ghost">↺ Refresh</button>
+      <button class="ghost">Logs</button>
+      <button class="ghost">← Setup</button>
+    </div>
+  </div>
+
+  <div class="banner">
+    <span class="shield">🛡️</span>
+    <span class="proj">d5960d64640d_dwyt</span>
+    <span class="prot">DWYT is protecting this project</span>
+    <span class="files">🧠 99 Obsidian files</span>
+  </div>
+
+  <div class="segrow">
+    <span class="plab">Period</span>
+    <div class="seg"><button>All time</button><button>1h</button><button class="on">6h</button><button>24h</button><button>2d</button><button>7d</button></div>
+    <span class="hint">showing savings accrued in the selected window</span>
+  </div>
 
   <div class="summary">
-    <div><div class="lbl">Without DWYT</div><div class="big" style="color:var(--red)">116.5M</div></div>
-    <div><div class="lbl">With DWYT</div><div class="big" style="color:var(--green)">28.9M</div></div>
-    <div class="total"><div class="lbl">Total Savings</div><div class="big" style="color:var(--yellow)">87.6M <span style="font-size:11px;color:var(--green)">↓75%</span></div></div>
+    <div><div class="lbl">Without DWYT</div><div class="big" style="color:var(--red)">7.0M</div><div class="sub">tokens would be spent</div></div>
+    <div><div class="lbl">With DWYT</div><div class="big" style="color:var(--green)">15K</div><div class="sub">tokens spent</div></div>
+    <div class="total"><div class="lbl">Total Savings</div><div class="big" style="color:var(--yellow)">7.0M <span style="font-size:13px;color:var(--green)">↓ 99%</span></div><div class="sub">tokens saved</div>
+      <div class="strip" style="border:none;padding:3px 0 0;margin-top:4px;">
+        <div class="tool"><span class="tn" style="color:var(--sky)">RTK</span><span class="tv" style="color:var(--sky)">7.0M</span></div>
+        <div class="tool"><span class="tn" style="color:var(--peach)">HEADROOM</span><span class="tv" style="color:var(--muted)">—</span></div>
+        <div class="tool"><span class="tn" style="color:var(--mauve)">OBSIDIAN</span><span class="tv" style="color:var(--muted)">—</span></div>
+        <div class="tool"><span class="tn" style="color:var(--green)">CODEBASE</span><span class="tv" style="color:var(--muted)">—</span></div>
+      </div>
+    </div>
   </div>
 
   <div class="grid">
+
     <div class="card">
-      <div class="chead" style="color:var(--green)">CODEBASE<span class="dot"></span></div>
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--green)">CODEBASE</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
       <div class="hr"></div>
-      <div class="row"><span class="k">tokens saved</span><span>62.2M</span></div>
-      <div class="row"><span class="k">status</span><span>Indexed</span></div>
-      <div class="row"><span class="k">mcp</span><span style="color:var(--green)">🟢 configured</span></div>
-      <div class="btns"><button class="primary">Open Graph</button><button class="primary">Reconfigure MCP</button></div>
+      <div class="row"><span class="k">uptime</span><span class="v">2h 14m</span></div>
+      <div class="row"><span class="k">status</span><span class="v">Indexed</span></div>
+      <div class="row"><span class="k">mcp</span><span class="v" style="color:var(--green)">🟢 Online</span></div>
+      <div class="row"><span class="k">repos</span><span class="v" style="color:var(--accent)">📁 dwyt</span></div>
+      <div class="path">/home/user/Documents/Pessoal/dwyt</div>
+      <div class="btns"><button class="b">Index</button><button class="b">Open Graph →</button><button class="b">Configure MCP</button></div>
     </div>
 
     <div class="card">
-      <div class="chead" style="color:var(--sky)">RTK<span class="dot"></span></div>
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--sky)">RTK</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
       <div class="hr"></div>
-      <div class="row"><span class="k">commands</span><span>4813</span></div>
-      <div class="row"><span class="k">% savings</span><span>94.6%</span></div>
+      <div class="row"><span class="k">commands</span><span class="v">4,813</span></div>
+      <div class="row"><span class="k">tokens saved</span><span class="v">31.2M</span></div>
+      <div class="row"><span class="k">% savings</span><span class="v">94.6%</span></div>
       <div class="bar"><div class="fill" style="width:94%;background:var(--sky)"></div></div>
+      <div class="hint">🏷 CLI: prefix commands with <b>rtk</b></div>
     </div>
 
     <div class="card">
-      <div class="chead" style="color:var(--peach)">HEADROOM<span class="dot"></span></div>
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--peach)">HEADROOM</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
       <div class="hr"></div>
-      <div class="row"><span class="k">tokens saved</span><span>25.4M</span></div>
-      <div class="row"><span class="k">compression</span><span>active</span></div>
-      <div class="btns"><button class="success">▶ Start</button><button class="danger">■ Stop</button><button class="primary">Open Stats</button></div>
+      <div class="row"><span class="k">requests</span><span class="v">234</span></div>
+      <div class="row"><span class="k">tokens saved</span><span class="v">8.1M</span></div>
+      <div class="row"><span class="k">compression</span><span class="v">34%</span></div>
+      <div class="hint">🏷 global proxy total (shared across projects)</div>
+      <div class="btns"><button class="success">▶ Start</button><button class="danger">■ Stop</button><button class="b">Open Stats →</button></div>
     </div>
 
     <div class="card">
-      <div class="chead" style="color:var(--mauve)">OBSIDIAN<span class="dot"></span></div>
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--mauve)">OBSIDIAN</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
       <div class="hr"></div>
-      <div class="row"><span class="k">obsidian files</span><span>57</span></div>
-      <div class="row"><span class="k">mcp</span><span style="color:var(--green)">🟢 configured</span></div>
-      <div class="btns"><button class="primary">Rebuild summary</button><button class="secondary">Open Vault</button></div>
+      <div class="row"><span class="k">obsidian files</span><span class="v">99</span></div>
+      <div class="row"><span class="k">active</span><span class="v">1h 2m</span></div>
+      <div class="row"><span class="k">mcp</span><span class="v" style="color:var(--green)">🟢 Online</span></div>
+      <div class="btns" style="gap:4px;"><input class="txt" style="flex:1" placeholder="Obsidian note..." /><button class="primary">Save</button></div>
+      <div class="btns"><input class="txt" style="flex:1" placeholder="Search obsidian..." /><button class="b">🔍</button></div>
+      <div class="btns"><button class="b">Rebuild summary</button><button class="b">Open Vault</button><button class="b">Open Dir</button><button class="b">Configure MCP</button></div>
     </div>
+
+    <div class="card">
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--accent)">CONTEXT OPTIMIZER</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">context reduction</span><span class="v">42.1%</span></div>
+      <div class="row"><span class="k">avoided tokens</span><span class="v">1.2M</span></div>
+      <div class="row"><span class="k">cache hit</span><span class="v">38.4%</span></div>
+      <div class="row"><span class="k">cache control</span><span class="v" title="How much control DWYT has over provider caching. Never enforced.">advised</span></div>
+      <div class="row"><span class="k">cost (observed)</span><span class="v">$0.4217</span></div>
+      <div class="row"><span class="k">cost (estimated)</span><span class="v">~$0.6890</span></div>
+      <div class="row"><span class="k">cost / completed task</span><span class="v">$0.1090</span></div>
+      <div class="row"><span class="k">completion rate</span><span class="v">91.7%</span></div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">canonical notes</span><span class="v">214</span></div>
+      <div class="row"><span class="k">sessions kept</span><span class="v">43 / 100</span></div>
+      <div class="row"><span class="k">stale notes</span><span class="v">7</span></div>
+      <div class="row"><span class="k">expiring &lt; 24h</span><span class="v">2</span></div>
+      <div class="row"><span class="k">raw objects</span><span class="v">41 (12.4 MB)</span></div>
+      <div class="row"><span class="k">last housekeeping</span><span class="v">12m</span></div>
+      <div class="btns"><button class="success">Preview cleanup</button><button class="primary">Run cleanup</button></div>
+      <div class="note">* observed on 6 of 8 requests</div>
+    </div>
+
+    <div class="card">
+      <div class="chead">
+        <div class="t"><span class="name" style="color:var(--yellow)">CURRENT SESSION</span><span class="icon">🟢</span><span class="badge" style="color:var(--green)">Active</span></div>
+        <span class="dot"></span>
+      </div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">started</span><span class="v">12m ago</span></div>
+      <div class="row"><span class="k">session length</span><span class="v">25m</span></div>
+      <div class="row"><span class="k">tokens saved (session)</span><span class="v" style="color:var(--yellow)">31.2K</span></div>
+      <div class="row"><span class="k">mcp calls</span><span class="v">9</span></div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">tokens / s</span><span class="v" title="Only usage the provider reported counts here; clients report it via dwyt_report_usage.">14.2</span></div>
+      <div class="row"><span class="k">llm requests (observed/total)</span><span class="v">6/6</span></div>
+      <div class="sect" style="margin-top:2px;">Models used</div>
+      <div class="row"><span class="v" style="color:var(--text)">claude-sonnet-4-5</span><span class="v" style="color:var(--muted)">18.4K · 78% · 12.2 t/s</span></div>
+      <div class="row"><span class="v" style="color:var(--text)">gpt-5.2-codex</span><span class="v" style="color:var(--muted)">5.2K · 22% · 9.8 t/s</span></div>
+      <div class="hr"></div>
+      <div class="sect">Previous sessions</div>
+      <div class="row"><span class="v" style="color:var(--muted)">2h ago · 41m</span><span class="v" style="color:var(--yellow)">↓ 128.4K</span></div>
+      <div class="row"><span class="v" style="color:var(--muted)">yesterday · 1h 12m</span><span class="v" style="color:var(--yellow)">↓ 402.9K</span></div>
+      <div class="row"><span class="v" style="color:var(--muted)">yesterday · 18m</span><span class="v" style="color:var(--muted)">—</span></div>
+    </div>
+
   </div>
 
   <div class="swatches">

@@ -334,12 +334,12 @@ export default function Dashboard() {
         <Logo size={18} showText />
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} className="header-actions">
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 5px' }}>
-            <span style={{ fontSize: 9, color: 'var(--muted)', marginRight: 1 }}>{t.auto}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 1 }}>{t.auto}</span>
             {RELOAD_OPTIONS.map(o => (
               <button key={o.value} onClick={() => setReload(o.value)}
                 style={reloadSecs === o.value
-                  ? { background: 'var(--accent)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
-                  : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 6px', borderRadius: 4 }
+                  ? { background: 'var(--accent)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 11, padding: '1px 6px', borderRadius: 4 }
+                  : { background: 'transparent', color: 'var(--muted)', fontSize: 11, padding: '1px 6px', borderRadius: 4 }
                 }
               >{o.label}</button>
             ))}
@@ -358,31 +358,31 @@ export default function Dashboard() {
 
       {indexPath && (
         <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--green)', background: 'linear-gradient(135deg, rgba(166,227,161,0.08) 0%, var(--ctp-mantle) 100%)', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
+          <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>{'\uD83D\uDEE1\uFE0F'}</span>
           <span
             data-testid="active-project-name"
-            style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 600 }}
+            style={{ fontSize: 12, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 600 }}
           >{repoName}</span>
           {projectCtx.project_state?.id && (
             <span
               data-testid="active-project-hash"
               title={projectCtx.project_state.id}
-              style={{ fontSize: 8, color: 'var(--green)', fontFamily: 'monospace', opacity: 0.7 }}
+              style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', opacity: 0.7 }}
             >{projectCtx.project_state.id}</span>
           )}
-          <span style={{ fontSize: 9, color: 'var(--green)', fontWeight: 600 }}>{t.protecting}</span>
+          <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>{t.protecting}</span>
           {obsidianCount > 0 && (
-            <span style={{ fontSize: 9, color: 'var(--peach)', fontWeight: 600, marginLeft: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--peach)', fontWeight: 600, marginLeft: 4 }}>
               {'\uD83E\uDDE0'} {obsidianCount} {t.memories}
             </span>
           )}
           {releaseVersion && (
-            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 8, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
+            <span title={`${t.releaseLabel} ${releaseVersion}`} style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 700, marginLeft: 'auto' }}>
               {t.releaseLabel} {releaseVersion}
             </span>
           )}
           {projectCtx.project_state?.indexed_at && (
-            <span style={{ fontSize: 9, color: 'var(--accent)', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
+            <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: releaseVersion ? 0 : 'auto' }}>{t.indexedLabel}</span>
           )}
         </div>
       )}
@@ -390,8 +390,8 @@ export default function Dashboard() {
       {versionCheck?.update_available && (
         <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--yellow)', background: 'var(--ctp-mantle)', padding: '5px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: 'var(--yellow)', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
-            <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>
+            <div style={{ fontSize: 12, color: 'var(--yellow)', fontWeight: 700, fontFamily: 'monospace' }}>{t.updateAvailable}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
               {t.currentVersion}: {versionCheck.current || releaseVersion || 'dev'} · {t.latestVersion}: {versionCheck.latest}
             </div>
           </div>
@@ -406,11 +406,11 @@ export default function Dashboard() {
 
       {versionCheck?.update_available && showUpdateInstructions && (
         <div style={{ marginBottom: 6, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--ctp-mantle)', padding: '6px 10px' }}>
-          <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>{t.updateCommandTitle}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>{t.updateCommandTitle}</div>
           <div style={{ overflowX: 'auto', background: 'var(--ctp-crust)', border: '1px solid var(--border)', borderRadius: 4, padding: '5px 7px' }}>
-            <code style={{ color: 'var(--text)', fontSize: 10, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
+            <code style={{ color: 'var(--text)', fontSize: 12, whiteSpace: 'nowrap' }}>{versionCheck.install_command}</code>
           </div>
-          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>{t.updateCommandHelp}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{t.updateCommandHelp}</div>
         </div>
       )}
 
@@ -419,7 +419,7 @@ export default function Dashboard() {
       {!searchParams.get('project') && projectCtx.projects && projectCtx.projects.length > 0 && (
         <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
           <div style={{ padding: '6px 12px', background: 'var(--ctp-mantle)', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t.allRepos}</span>
           </div>
           <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
             {projectCtx.projects.map((p) => (
@@ -430,13 +430,13 @@ export default function Dashboard() {
                 setSearchParams(params)
               }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'var(--card)', border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>{'\uD83D\uDCC1'} {p.name || p.path.split('/').pop()}</span>
-                  <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'monospace' }}>{p.path}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', fontFamily: 'monospace' }}>{'\uD83D\uDCC1'} {p.name || p.path.split('/').pop()}</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>{p.path}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {p.nodes && p.nodes > 0 && <span style={{ fontSize: 9, color: 'var(--peach)' }}>{'\uD83E\uDDE0'} {p.nodes}</span>}
-                  {p.indexed_at && <span style={{ fontSize: 9, color: 'var(--accent)' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
-                  <span style={{ fontSize: 9, color: 'var(--muted)' }}>{'\u2192'}</span>
+                  {p.nodes && p.nodes > 0 && <span style={{ fontSize: 11, color: 'var(--peach)' }}>{'\uD83E\uDDE0'} {p.nodes}</span>}
+                  {p.indexed_at && <span style={{ fontSize: 11, color: 'var(--accent)' }}>{'\uD83D\uDDFA\uFE0F'} Indexed</span>}
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>{'\u2192'}</span>
                 </div>
               </button>
             ))}
@@ -445,7 +445,7 @@ export default function Dashboard() {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{t.savingsWindow}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{t.savingsWindow}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 4px' }}>
           {[
             { label: t.windowAll, value: 'all' },
@@ -457,14 +457,14 @@ export default function Dashboard() {
           ].map(o => (
             <button key={o.value} onClick={() => setSavingsWindow(o.value)}
               style={savingsWindow === o.value
-                ? { background: 'var(--blue)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
-                : { background: 'transparent', color: 'var(--muted)', fontSize: 9, padding: '1px 7px', borderRadius: 4 }
+                ? { background: 'var(--blue)', color: 'var(--on-accent)', fontWeight: 700, boxShadow: '0 0 5px rgba(249,226,175,0.45)', fontSize: 11, padding: '1px 7px', borderRadius: 4 }
+                : { background: 'transparent', color: 'var(--muted)', fontSize: 11, padding: '1px 7px', borderRadius: 4 }
               }
             >{o.label}</button>
           ))}
         </div>
         {savingsWindow !== 'all' && (
-          <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.windowHint}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.windowHint}</span>
         )}
       </div>
 
@@ -477,18 +477,18 @@ export default function Dashboard() {
                 { label: t.withDwyt, value: fmtN(withDwyt), sub: t.tokensSpent, color: 'var(--green)' },
               ].map((col, i) => (
                 <div key={i} style={{ padding: '5px 10px', background: 'var(--ctp-mantle)', borderRight: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.05 }}>{col.value}</div>
-                  <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{col.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: col.color, lineHeight: 1.05 }}>{col.value}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{col.sub}</div>
                 </div>
               ))}
               <div style={{ padding: '5px 10px', background: 'linear-gradient(135deg, rgba(166,227,161,0.07) 0%, var(--ctp-mantle) 100%)' }}>
-                <div style={{ fontSize: 9, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{t.totalSavings}</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: 'var(--yellow)', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
-                  {savingsPct > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--green)' }}>{'\u2193'} {savingsPct}%</span>}
+                  <span style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: 'var(--yellow)', lineHeight: 1.05 }}>{fmtN(totalSaved)}</span>
+                  {savingsPct > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>{'\u2193'} {savingsPct}%</span>}
                 </div>
-                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{t.tokensSaved}</div>
                 {savingsPct > 0 && (
                   <div className="progress-bar" style={{ marginTop: 4 }}>
                     <div className="progress-fill" style={{ width: `${Math.min(savingsPct, 100)}%`, background: 'var(--yellow)' }} />
@@ -504,8 +504,8 @@ export default function Dashboard() {
                 { label: t.codeMap, saved: codebaseSaved, color: 'var(--green)' },
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ fontSize: 9, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
-                  <span style={{ fontSize: 10, fontFamily: 'monospace', fontWeight: 700, color: tool.saved > 0 ? tool.color : 'var(--muted)' }}>
+                  <span style={{ fontSize: 11, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: tool.saved > 0 ? tool.color : 'var(--muted)' }}>
                     {tool.saved > 0 ? fmtN(tool.saved) : '\u2014'}
                   </span>
                 </div>
@@ -514,23 +514,21 @@ export default function Dashboard() {
           </div>
         ) : (
           <div style={{ padding: '8px 14px', background: 'var(--card)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 18 }}>{savingsWindow !== 'all' ? '\u23F1\uFE0F' : '\uD83E\uDD16'}</span>
+            <span style={{ fontSize: 20 }}>{savingsWindow !== 'all' ? '\u23F1\uFE0F' : '\uD83E\uDD16'}</span>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{savingsWindow !== 'all' ? t.noWindowDataTitle : t.noDataTitle}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1 }}>{savingsWindow !== 'all' ? t.noWindowDataSub : t.noDataSub}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{savingsWindow !== 'all' ? t.noWindowDataTitle : t.noDataTitle}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{savingsWindow !== 'all' ? t.noWindowDataSub : t.noDataSub}</div>
             </div>
           </div>
         )}
       </div>
 
-      <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
-
       {showLogs && (
         <div className="card" style={{ marginBottom: 8, padding: '8px 12px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{t.logsTitle}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{t.logsTitle}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 24px' }}>
             {Object.entries(logs).map(([name, msg]) => (
-              <div key={name} style={{ fontSize: 10, display: 'flex', gap: 4 }}>
+              <div key={name} style={{ fontSize: 12, display: 'flex', gap: 4 }}>
                 <span style={{ color: 'var(--muted)', flexShrink: 0 }}>{name}:</span>
                 <span style={{ color: logColor(msg) }}>{msg}</span>
               </div>
@@ -538,8 +536,8 @@ export default function Dashboard() {
           </div>
           {obsidianStats?.summary != null && (
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700 }}>obsidian: </span>
-              <span style={{ fontSize: 10, color: 'var(--text)', fontFamily: 'monospace' }}>{String(obsidianStats.summary ?? '')}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700 }}>obsidian: </span>
+              <span style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'monospace' }}>{String(obsidianStats.summary ?? '')}</span>
             </div>
           )}
           {kiroPower && (
@@ -566,7 +564,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'stretch' }}>
         <CardCodebase
           indexPath={indexPath} repoName={repoName}
           isIndexed={isIndexed} indexing={indexing} openingGraph={openingGraph}
@@ -632,6 +630,7 @@ export default function Dashboard() {
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
         <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} />
+        <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
       </div>
     </div>
   )

@@ -28,12 +28,12 @@ export default function CardRTK({ indexPath, repoName, t, rtkTool, getDetail, to
       <Row label={t.uptime} value={fmtUptimeFromDet(det)} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
       {det?.scope === 'global' && (
-        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>* {t.scopeGlobalRtkNote}</div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>* {t.scopeGlobalRtkNote}</div>
       )}
       <Hr />
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <span style={{ fontSize: 9, color: 'var(--sky)', fontWeight: 600, textTransform: 'uppercase' }}>{t.rtkCli}</span>
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.rtkCliDesc}</span>
+        <span style={{ fontSize: 11, color: 'var(--sky)', fontWeight: 600, textTransform: 'uppercase' }}>{t.rtkCli}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t.rtkCliDesc}</span>
       </div>
       {det?.pct_saved ? (
         <div className="progress-bar">

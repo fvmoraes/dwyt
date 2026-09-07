@@ -23,7 +23,7 @@ export default function MCPFeedbackBanner({ feedback, name, onDismiss }: Props) 
       data-testid="mcp-configure-feedback"
       data-kind={feedback.kind}
       style={{
-        fontSize: 9,
+        fontSize: 11,
         lineHeight: 1.3,
         padding: '4px 6px',
         borderRadius: 4,
@@ -48,7 +48,7 @@ export default function MCPFeedbackBanner({ feedback, name, onDismiss }: Props) 
             border: 'none',
             color: 'inherit',
             cursor: 'pointer',
-            fontSize: 10,
+            fontSize: 12,
             padding: 0,
             lineHeight: 1,
           }}

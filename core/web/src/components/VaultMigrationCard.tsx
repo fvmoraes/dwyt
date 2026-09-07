@@ -77,14 +77,14 @@ export default function VaultMigrationCard({ t }: Props) {
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: hasPending ? 'var(--yellow)' : 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: hasPending ? 'var(--yellow)' : 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
             {t.vaultMigrationTitle}
           </div>
           {migrated > 0 && (
-            <div style={{ fontSize: 10, color: 'var(--green)' }}>{format(t.vaultMigrationMigrated, migrated)}</div>
+            <div style={{ fontSize: 12, color: 'var(--green)' }}>{format(t.vaultMigrationMigrated, migrated)}</div>
           )}
           {pending > 0 && (
-            <div style={{ fontSize: 10, color: 'var(--yellow)' }}>{format(t.vaultMigrationPending, pending)}</div>
+            <div style={{ fontSize: 12, color: 'var(--yellow)' }}>{format(t.vaultMigrationPending, pending)}</div>
           )}
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -107,14 +107,14 @@ export default function VaultMigrationCard({ t }: Props) {
       </div>
 
       {error && (
-        <div role="alert" data-testid="vault-migration-error" style={{ fontSize: 9, color: 'var(--red)', marginTop: 4 }}>
+        <div role="alert" data-testid="vault-migration-error" style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>
           {error}
         </div>
       )}
 
       {expanded && pending > 0 && (
         <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
             {t.vaultMigrationPendingHelp}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -128,7 +128,7 @@ export default function VaultMigrationCard({ t }: Props) {
                   data-status={r.status}
                   title={r.reason || r.status}
                   style={{
-                    fontSize: 9, fontFamily: 'monospace',
+                    fontSize: 11, fontFamily: 'monospace',
                     padding: '2px 6px', borderRadius: 4,
                     background: 'rgba(249,226,175,0.12)',
                     border: '1px solid var(--yellow)',

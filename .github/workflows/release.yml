@@ -7,6 +7,7 @@ on:
       - "core/**"
       - "install.sh"
       - ".github/workflows/release.yml"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -50,20 +51,29 @@ jobs:
           # Get previous tag or start from v0.0.0
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
-          # Get commit messages since last tag
+          # Get commits since last tag
           if [ "$PREV_TAG" = "v0.0.0" ]; then
-            COMMITS=$(git log --pretty=format:"%s" --no-merges)
+            RANGE="HEAD"
           else
-            COMMITS=$(git log --pretty=format:"%s" --no-merges "${PREV_TAG}..HEAD")
+            RANGE="${PREV_TAG}..HEAD"
           fi
+          SUBJECTS=$(git log --pretty=format:"%s" --no-merges "$RANGE")
+          FULL_MESSAGES=$(git log --pretty=format:"%B" --no-merges "$RANGE")
 
-          # Determine version bump
+          # Determine version bump. Conventional-commit aware:
+          #   feat(scope): ...    -> minor
+          #   any-type(scope)!: . -> major  (the "!" breaking marker)
+          #   "BREAKING CHANGE:" footer in a commit body -> major
+          # Scopes MUST NOT break the match: "feat(v5): ..." is a feature,
+          # which is exactly how the v5 release accidentally became 4.13.7.
           MAJOR=0
           MINOR=0
 
-          if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
+          if echo "$FULL_MESSAGES" | grep -qE "^[[:space:]]*BREAKING CHANGE:"; then
             MAJOR=1
-          elif echo "$COMMITS" | grep -qiE "^(feat|feature):"; then
+          elif echo "$SUBJECTS" | grep -qE "^[a-zA-Z]+(\([^)]*\))?!:"; then
+            MAJOR=1
+          elif echo "$SUBJECTS" | grep -qiE "^(feat|feature)(\([^)]*\))?!?:"; then
             MINOR=1
           fi
 
@@ -102,7 +112,8 @@ jobs:
           echo "## Changes" >> /tmp/changelog.md
           echo "" >> /tmp/changelog.md
 
-          # Categorize commits
+          # Categorize commits. Each record is "subject<0x1f>body<0x1e>" so a
+          # multi-line body stays inside its own commit.
           BREAKING=""
           FEATURES=""
           FIXES=""
@@ -110,22 +121,25 @@ jobs:
           CHORES=""
           OTHER=""
 
-          while IFS= read -r commit; do
-            [ -z "$commit" ] && continue
-            if echo "$commit" | grep -qiE "^(BREAKING CHANGE|breaking):"; then
-              BREAKING="${BREAKING}- ${commit#*: }"$'\n'
-            elif echo "$commit" | grep -qiE "^(feat|feature):"; then
-              FEATURES="${FEATURES}- ${commit#*: }"$'\n'
-            elif echo "$commit" | grep -qiE "^(fix|bugfix):"; then
-              FIXES="${FIXES}- ${commit#*: }"$'\n'
-            elif echo "$commit" | grep -qiE "^(docs|doc):"; then
-              DOCS="${DOCS}- ${commit#*: }"$'\n'
-            elif echo "$commit" | grep -qiE "^(chore|build|ci):"; then
-              CHORES="${CHORES}- ${commit#*: }"$'\n'
+          while IFS=$'\x1f' read -r -d $'\x1e' COMMIT_BODY && [ -n "$COMMIT_BODY" ]; do
+            SUBJECT=$(printf '%s' "$COMMIT_BODY" | head -n 1)
+            BODY=$(printf '%s' "$COMMIT_BODY" | tail -n +2)
+            [ -z "$SUBJECT" ] && continue
+            if printf '%s' "$SUBJECT" | grep -qE "^[a-zA-Z]+(\([^)]*\))?!:" || \
+               printf '%s\n' "$BODY" | grep -qE "^[[:space:]]*BREAKING CHANGE:"; then
+              BREAKING="${BREAKING}- ${SUBJECT}"$'\n'
+            elif printf '%s' "$SUBJECT" | grep -qiE "^(feat|feature)(\([^)]*\))?!?:"; then
+              FEATURES="${FEATURES}- ${SUBJECT}"$'\n'
+            elif printf '%s' "$SUBJECT" | grep -qiE "^(fix|bugfix)(\([^)]*\))?!?:"; then
+              FIXES="${FIXES}- ${SUBJECT}"$'\n'
+            elif printf '%s' "$SUBJECT" | grep -qiE "^(docs|doc)(\([^)]*\))?!?:"; then
+              DOCS="${DOCS}- ${SUBJECT}"$'\n'
+            elif printf '%s' "$SUBJECT" | grep -qiE "^(chore|build|ci)(\([^)]*\))?!?:"; then
+              CHORES="${CHORES}- ${SUBJECT}"$'\n'
             else
-              OTHER="${OTHER}- ${commit}"$'\n'
+              OTHER="${OTHER}- ${SUBJECT}"$'\n'
             fi
-          done <<< "$COMMITS"
+          done < <(git log --pretty=format:"%s%x1f%b%x1e" --no-merges "$RANGE")
 
           if [ -n "$BREAKING" ]; then
             echo "### 🚨 Breaking Changes" >> /tmp/changelog.md

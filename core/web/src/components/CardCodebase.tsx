@@ -53,12 +53,12 @@ export default function CardCodebase(props: Props) {
       <Hr />
       <MCPFeedbackBanner feedback={props.configureFeedback} name="codebase" onDismiss={props.onDismissFeedback} />
       {state === 'not_installed' ? (
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.notInstalled}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t.notInstalled}</span>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 4 }}>
             <input type="text" value={indexPath} onChange={e => setIndexPath(e.target.value)}
-              placeholder={t.repoPlaceholder} style={{ flex: 1, fontSize: 9 }} />
+              placeholder={t.repoPlaceholder} style={{ flex: 1, fontSize: 11 }} />
             <Button variant="primary" size="xs" label={indexing ? t.indexing : (isIndexed ? t.reindex : t.index)}
               onClick={onIndex} disabled={indexing} />
           </div>
@@ -67,10 +67,10 @@ export default function CardCodebase(props: Props) {
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: '60%', background: 'var(--green)', animation: 'pulse 1.5s infinite' }} />
               </div>
-              <span style={{ fontSize: 9, color: 'var(--muted)' }}>{t.indexingInBg}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.indexingInBg}</span>
             </div>
           )}
-          {indexError && <pre style={{ fontSize: 10, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
+          {indexError && <pre style={{ fontSize: 12, color: 'var(--red)', maxHeight: 56, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{indexError}</pre>}
           <Button variant="primary" size="xs"
             label={openingGraph ? '...' : (isIndexed ? t.openGraph : t.openGraphUnavailable)}
             loading={openingGraph} disabled={openingGraph}

@@ -33,10 +33,24 @@ MAJOR.MINOR.PATCH
 
 | Commit Prefix | Version Bump | Example |
 |---------------|--------------|---------|
-| `BREAKING CHANGE:` or `breaking:` | Major (x.0.0) | v1.0.0 → v2.0.0 |
+| `BREAKING CHANGE:` footer, `breaking:`, or any `type!:` | Major (x.0.0) | v1.0.0 → v2.0.0 |
 | `feat:` or `feature:` | Minor (0.x.0) | v1.0.0 → v1.1.0 |
 | `fix:` or `bugfix:` | Patch (0.0.x) | v1.0.0 → v1.0.1 |
 | Any other | Patch (0.0.x) | v1.0.0 → v1.0.1 |
+
+The parser is **conventional-commit aware**, including scopes:
+
+```text
+feat(v5): add session savings        -> minor   (scope does not break the match)
+feat!: remove the v4 API             -> major   (the "!" breaking marker)
+refactor(mcp)!: rename every MCP     -> major
+commit body ends with:
+BREAKING CHANGE: config format ...   -> major   (footer detection scans bodies)
+```
+
+A scope — `feat(v5):`, `fix(ci):` — never changes the bump type. This is how a
+v5 release once accidentally shipped as a patch: the old parser required the
+colon immediately after the type and treated `feat(v5): ...` as "other".
 
 ### 3. Changelog Generation
 
@@ -294,7 +308,7 @@ Ensure commits follow the convention:
 
 Before release work, consult the project Obsidian vault and rebuild/read its summary. During release preparation, save important decisions as `decision` entries and release task status as `task` entries. At the end, save complete context with files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
 
-See [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
+See [obsidian-law.md](obsidian-law.md).
 
 ### 1. Atomic Commits
 

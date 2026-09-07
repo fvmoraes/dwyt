@@ -48,3 +48,21 @@ The global numbers are meant for operational visibility, not billing precision:
 - RTK and Headroom remain authoritative where available.
 - Codebase and Obsidian are conservative estimates.
 - Unknown or inactive tools should not make the dashboard fail.
+
+## Sessions and windows
+
+Lifetime counters never reset, which is why the dashboard opens on a **6h window** (auto-refresh every 10s) instead of an all-time total. Three timestamped ledgers power windows and sessions:
+
+| Ledger | Written by | Contents |
+|---|---|---|
+| `metric_events` | dashboard polls (`/api/tool-details`) | per-tool metric deltas (savings, commands, requests, graph nodes, vault files) |
+| `mcp_usage_events` | the stdio MCP shim (`dwyt mcp-proxy`) | MCP calls with credited savings |
+| `llm_request_events` | `dwyt_report_usage` | observed provider usage (tokens by class, latency, cost) |
+
+A **session** is a span of project activity separated by a 30-minute inactivity gap (configurable via `?gap_minutes=` on the API). `GET /api/session/summary` returns the current and previous sessions; the **Current Session** card on the dashboard renders savings, MCP calls and observed LLM throughput (tokens/s, models with token share).
+
+Honesty rules carried over from v5 telemetry:
+
+- A value the backend could not measure renders as "—", never as a fake zero.
+- Observed tokens/s come only from provider-reported usage; the estimated fallback (manual-cost baseline ÷ session duration) is always labelled `(est.)` and never mixed with observations.
+- Unknown providers and unreported fields are NULL, not `0`.

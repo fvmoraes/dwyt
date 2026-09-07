@@ -1,8 +1,24 @@
 # DWYT — Don't Waste Your Tokens
 
-> The invisible orchestrator that reduces token consumption across your AI clients.
+> The invisible Context Optimizer that reduces token consumption across your AI clients.
 
-DWYT orchestrates four tools that drastically reduce token usage in clients like Claude Code, Codex, Copilot, Kiro, Cursor, and OpenCode — all managed through a single web UI, with no CLI configuration needed.
+DWYT v5 is a **Context Optimizer**: three MCP servers with strictly separated jobs, a persistent brain, and deterministic rules for context budget, retrieval, memory lifecycle, output, cache and cost. It works with Claude Code, Codex, Copilot, Kiro, Cursor, and OpenCode — all managed through a single web UI, with no CLI configuration needed.
+
+| Component | Role |
+|---|---|
+| **`dwyt_optimizer`** | Efficiency policy: context budget, Token ROI ranking, output contracts, cache guidance, deterministic routing, raw object store |
+| **`dwyt_obsidian`** | Brain: durable project memory (canonical knowledge, decisions, tasks, sessions) |
+| **`dwyt_codebase`** | Code intelligence: symbols, routes, call paths, dependencies, impact |
+| **RTK** | Terminal output compression (CLI, not an MCP) |
+| **Headroom** | Optional transport-level API compression — never a source of truth |
+
+## What v5 adds
+
+- **Session intelligence** — the dashboard answers "what did DWYT save *in this sitting*": per-session savings, MCP calls, observed LLM throughput (tokens/s) and models used, on the main screen.
+- **Ghost vault cleanup** — legacy hash-only vaults with no content are swept automatically; vaults are only created for registered projects and always follow the `<hash>_<project-name>` layout.
+- **Sane defaults** — savings window defaults to **6h** (lifetime totals one click away) and auto-refresh defaults to **10s**.
+- **Honest telemetry** — request/task ledgers with NULL-preserving fields, estimated vs observed kept separate, cost per *completed* task, and a deterministic benchmark (`dwyt bench`) that refuses to fake claims.
+- **Consolidated configuration** — `dwyt config show|init|validate` over `~/.dwyt/config/dwyt.json`.
 
 ---
 
@@ -26,7 +42,7 @@ irm https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.ps1 | iex
 
 The installer downloads `dwyt_windows_<arch>.zip` from the latest release, verifies its **SHA-256** checksum, installs `dwyt.exe` under `%APPDATA%\dwyt\bin`, adds that folder to your user PATH, and runs `dwyt install` to set up the tools. From a local clone you can run `.\install.ps1` (add `-SkipDeps` to install only the binary).
 
-See the dedicated [Windows documentation](docs/windows/README.md) for installation, updating, troubleshooting, and Windows Terminal / PowerShell integration.
+See the dedicated [Windows documentation](docs/windows/readme.md) for installation, updating, troubleshooting, and Windows Terminal / PowerShell integration.
 
 ---
 
@@ -55,8 +71,10 @@ The UI opens at `http://localhost:2737` with your project pre-loaded. **Everythi
 | `dwyt .` | Open in current directory |
 | `dwyt /path` | Open in a specific directory |
 | `dwyt` | Open in CWD |
-| `dwyt stop` | Stop all services |
 | `dwyt status` | Quick terminal status |
+| `dwyt bench` | Deterministic benchmark (five scenarios, four arms, honest `claim_allowed: false`) |
+| `dwyt config show\|init\|validate` | Manage `~/.dwyt/config/dwyt.json` (prints the effective config) |
+| `dwyt stop` | Stop all services |
 | `dwyt version` | Current version |
 | `dwyt reinstall` | Clean tool cache and reinstall while preserving project vaults |
 | `dwyt uninstall` | Remove DWYT tools/config while preserving project vaults |
@@ -65,13 +83,24 @@ The UI opens at `http://localhost:2737` with your project pre-loaded. **Everythi
 
 ## Architecture
 
-DWYT is a single self-contained binary (~37MB) with the React UI embedded inside. No runtime dependencies — the UI, API, and services all run from one process.
+DWYT is a single self-contained binary (~40MB) with the React UI embedded inside. No runtime dependencies — the UI, API, and services all run from one process. Optimizer session state lives in the **daemon**, not in the MCP processes: an MCP server is spawned per client, so state held there would fragment across clients.
+
+```
+AI client (Kiro / Codex / Claude / Cursor / OpenCode / Copilot)
+   │  stdio MCP
+   ▼
+dwyt_optimizer  ──HTTP──▶  daemon :2737  ──▶  session state, budget, telemetry
+dwyt_obsidian   ──HTTP──▶  daemon :2737  ──▶  vault (markdown on disk)
+dwyt_codebase   ──HTTP──▶  :9749         ──▶  code knowledge graph
+```
 
 ```
 dwyt .
-  ├── Detects project directory
-  ├── Loads Obsidian vault (~/.dwyt/projects/<id>/obsidian/)
-  ├── ProcessManager starts Codebase + Headroom in background
+  ├── Resolves the registered project directory
+  ├── Attaches the project vault (~/.dwyt/projects/<hash>_<project-name>/)
+  ├── Syncs MCP configs for the AI clients selected in setup
+  ├── Warms the Codebase service and sweeps ghost vaults
+  ├── ProcessManager manages Codebase + Headroom
   ├── RTK active as CLI tool
   └── UI opens at http://localhost:2737
 ```
@@ -83,9 +112,10 @@ dwyt .
 DWYT coordinates tools in this order when the task calls for them:
 
 1. **RTK** for shell commands and terminal output.
-2. **Codebase MCP** for current code structure.
-3. **Obsidian MCP** for memory, decisions, tasks, and handoff context.
-4. **Headroom** for compatible API proxy/cache optimization.
+2. **`dwyt_codebase`** for current code structure.
+3. **`dwyt_obsidian`** for memory, decisions, tasks, and handoff context.
+4. **`dwyt_optimizer`** for context budget, output contract, tool-output compaction, and cache guidance.
+5. **Headroom** for compatible API proxy/cache optimization.
 
 ### RTK — terminal compression
 
@@ -109,7 +139,7 @@ Managed by the internal **ProcessManager**:
 - Dynamic port (9749, falls back to alternatives if occupied)
 - **View Logs** button for real diagnostics on failure
 
-The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/CODEBASE-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/codebase-law.md) and [Tokens Saved](docs/tokens-saved.md).
 
 ### Obsidian — mandatory memory
 
@@ -137,6 +167,7 @@ Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>_<project-name>
 │   └── index.md
 ├── context/
 ├── knowledge/
+├── 90-sessions/             # compact session snapshots (housekeeper keeps 100)
 └── logs/
     ├── sessions/
     ├── errors/
@@ -152,7 +183,20 @@ Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>_<project-name>
 | `POST /api/obsidian/summarize` | Rebuild the vault summary |
 | `POST /api/obsidian/context` | Save complete task/session context |
 
-The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/OBSIDIAN-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/obsidian-law.md) and [Tokens Saved](docs/tokens-saved.md).
+
+### Context Optimizer — `dwyt_optimizer`
+
+The efficiency-policy MCP. Every decision is a deterministic function of metadata — no LLM call is spent deciding how to save tokens:
+
+- **Context planning** — budget computed before retrieval, candidates ranked by Token ROI (usefulness per cost-adjusted token), progressive expansion, confidence gate and stop conditions.
+- **Delta reuse** — content the session already delivered is referenced by hash, not resent.
+- **Output contracts** — per-phase visible-token targets, with the artifact exception: a requested document is never truncated.
+- **Tool output compaction** — large tool output is reduced to status, deduplicated diagnostics, counts and a tail; full bytes go to the Raw Object Store behind a `dwyt://objects/<id>` reference.
+- **Cache guidance** — prompt assembly ordered for provider prefix caches, with capability states shown honestly (`observed` / `advised` / `unsupported`).
+- **Deterministic routing** — complexity and risk scores recommend a model tier; escalation is evidence-based.
+
+Its dashboard card sits next to the **Current Session** card, which reports the sitting's savings, MCP calls, and observed LLM throughput (tokens/s, models) — estimated figures are always labelled `(est.)`, never passed off as observations.
 
 ### Headroom — compatible API compression
 
@@ -164,7 +208,8 @@ A proxy/cache optimization for compatible AI clients. DWYT owns the proxy throug
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│  🤓 DWYT          [Auto Off 5s 10s] [↺ Refresh] [Logs] [← Setup] │
+│  🤓 DWYT       [Auto 10s Off 5s] [Period 1h 6h 24h 2d 7d All]     │
+│                [↺ Refresh] [Logs] [← Setup]                       │
 ├───────────────────────────────────────────────────────────────────┤
 │  🛡️ my-project  DWYT is protecting this project  🧠 12 obsidian files │
 │                                                                   │
@@ -179,30 +224,22 @@ A proxy/cache optimization for compatible AI clients. DWYT owns the proxy throug
 │  ┌────────────────────────┐  ┌────────────────────────┐          │
 │  │  CODEBASE         🟢   │  │  RTK               🟢 │          │
 │  │  Code graph — …        │  │  Terminal output —  … │          │
-│  │  ─────────────────────  │  │  ─────────────────────  │          │
-│  │  UPTIME       2m 3s    │  │  COMMANDS         847 │          │
-│  │  STATUS     Indexed    │  │  TOKENS SAVED     31M │          │
-│  │  MCP            🟢 Online│  │  % SAVED          61% │          │
-│  │  [/path] [Index]       │  │  🏷 CLI: prefix with rtk │          │
-│  │  Open Graph →          │  │  ████████████░░░░░░░░░  │          │
-│  │  Configure MCP         │  └────────────────────────┘          │
-│  └────────────────────────┘                                       │
+│  └────────────────────────┘  └────────────────────────┘          │
 │  ┌────────────────────────┐  ┌────────────────────────┐          │
 │  │  HEADROOM         🟢   │  │  OBSIDIAN          🟢 │          │
-│  │  API call compression  │  │  Obsidian vault — …   │          │
-│  │  ─────────────────────  │  │  ─────────────────────  │          │
-│  │  REQUESTS         234  │  │  FILES             12 │          │
-│  │  TOKENS SAVED     8M  │  │  ACTIVE         1h 2m │          │
-│  │  COMPRESSION      34%  │  │  MCP            🟢 Online│          │
-│  │  ▶ Start  ■ Stop       │  │  [type ▼] [note...] [Save]│          │
-│  │  Open Stats →          │  │  [Search obsidian...] 🔍 │          │
-│  └────────────────────────┘  │  Configure MCP          │          │
-│                               │  Rebuild | Open Vault  │          │
-│                               └────────────────────────┘          │
+│  └────────────────────────┘  └────────────────────────┘          │
+│  ┌────────────────────────┐  ┌────────────────────────┐          │
+│  │  CONTEXT OPTIMIZER 🟢  │  │  CURRENT SESSION   🟢 │          │
+│  │  Context reduction 42% │  │  Tokens saved   31.2K │          │
+│  │  Avoided tokens  1.2M  │  │  Tokens / s   ~14.2   │  (est.)  │
+│  │  Cache hit        38%  │  │  Models: gpt-5 · 78%  │          │
+│  │  Cost (obs.) $0.42    │  │  MCP calls          9 │          │
+│  │  [Preview] [Run]       │  │  ▾ previous sessions  │          │
+│  └────────────────────────┘  └────────────────────────┘          │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Each card** shows the tool name, a one-line description, and real status (🟢 online / 🟡 stopped / 🔴 not installed).
+**Each card** shows the tool name, a one-line description, and real status (🟢 online / 🟡 stopped / 🔴 not installed). Cards fill their grid cell, so each pair aligns perfectly. The savings window defaults to **6h** and auto-refresh to **10s** — a value the backend could not measure renders as "—", never as a fake zero.
 
 ---
 
@@ -247,6 +284,9 @@ Click **Install →** and DWYT downloads and configures Codebase, Headroom, and 
 ```
 ~/.dwyt/
 ├── bin/                         # tool binaries
+├── config/
+│   ├── dwyt.json                # consolidated v5 configuration
+│   └── pricing.json             # optional provider pricing catalog
 ├── codebase/                    # code graph data (CBM_CACHE_DIR)
 ├── headroom-venv/               # Python virtualenv
 ├── logs/                        # service stdout/stderr
@@ -254,18 +294,19 @@ Click **Install →** and DWYT downloads and configures Codebase, Headroom, and 
 │   ├── codebase-stderr.log
 │   ├── headroom-stdout.log
 │   └── headroom-stderr.log
+├── objects/                     # raw object store (dwyt://objects/<id>, 0600)
 ├── projects/                    # per-project vaults
-│   └── <sha12>/
-│       ├── obsidian/            # Obsidian vault (markdowns)
-│       └── project.json         # project metadata
+│   └── <sha12>_<project-name>/  # canonical vault layout
+│       ├── index.md             # vault root is the Obsidian vault
+│       └── ...                  # see vault layout above
 ├── powers/
 │   └── dwyt-power/              # local Kiro Power (regenerable)
 ├── env.sh                       # environment variables
-├── dwyt.db                      # SQLite (projects + config)
+├── dwyt.db                      # SQLite (projects, config, telemetry ledgers)
 └── state.json                   # runtime state (PIDs, ports, errors)
 ```
 
-`~/.dwyt/projects/` contains persistent project vaults and is protected from automatic cleanup.
+`~/.dwyt/projects/` contains persistent project vaults and is protected from automatic cleanup. Vault directories follow the `<hash>_<project-name>` layout; legacy hash-only vaults are renamed when a project name can be recovered and swept when they hold nothing but DWYT scaffolding.
 
 ### Windows
 
@@ -289,7 +330,7 @@ Setup creates or updates these files in the project directory. Local configs wit
 
 ```
 <project>/
-├── .mcp.json                      # MCP config (codebase + obsidian servers)
+├── .mcp.json                      # MCP config (dwyt_optimizer + dwyt_codebase + dwyt_obsidian)
 ├── AGENTS.md                      # instructions for Codex, Kiro, Cursor, OpenCode
 ├── CLAUDE.md                      # instructions for Claude Code
 ├── opencode.json                  # OpenCode config
@@ -314,9 +355,66 @@ Setup creates or updates these files in the project directory. Local configs wit
 4. **`dwyt_optimizer`** — context budget, output contract, tool-output compaction, cache guidance
 5. **Headroom** — use only as compatible proxy/cache optimization
 
-The generated instructions enforce the [Codebase Law](docs/CODEBASE-LAW.md) and [Obsidian Law](docs/OBSIDIAN-LAW.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
+The generated instructions enforce the [Codebase Law](docs/codebase-law.md) and [Obsidian Law](docs/obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
 
-For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/ARCHITECTURE-V5.md).
+For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/architecture-v5.md).
+
+---
+
+## Why DWYT exists
+
+Every token an agent re-reads is money and latency. In a typical session the same files are re-explored, the same context is rebuilt from scratch, tool output floods the window, and the model narrates what it already knows. DWYT attacks each of those:
+
+- **Deterministic, not magical** — every saving decision (budget, ranking, compaction, routing) is a pure function of metadata. No LLM call is spent deciding how to save tokens, because that would be self-defeating.
+- **Honest by construction** — a value that was not measured renders as "—", never as a flattering zero; estimated and observed live in separate columns all the way to the UI, and the benchmark refuses to turn fixtures into product claims.
+- **Memory that outlives the session** — the Obsidian brain keeps canonical knowledge, decisions and sessions per project, with a housekeeper that promotes knowledge *before* deleting anything and never touches notes it did not create.
+
+## Technologies
+
+| Layer | Choice |
+|---|---|
+| Backend | Go 1.25, single static binary (cobra CLI + gin HTTP) |
+| Storage | SQLite (`modernc.org/sqlite`, pure Go — no CGO) + markdown vaults |
+| Frontend | React + TypeScript + Vite, embedded in the binary at build time |
+| MCP | stdio servers (`dwyt_optimizer`, `dwyt_obsidian`, `dwyt_codebase`) + a transparent/opt-in stdio shim (`dwyt mcp-proxy`) |
+| Telemetry | Hand-rolled OTLP/HTTP JSON exporter (no OTel SDK dependency tree) |
+| Release | GoReleaser for 5 platforms (linux amd64/arm64, macOS amd64/arm64, Windows amd64), automatic on `main` |
+
+## Project structure
+
+```
+.
+├── core/                        # the DWYT module
+│   ├── main.go                  # entry point + MCP subcommand dispatch
+│   ├── cmd/dwyt/cli/            # cobra commands (root, config, bench, daemon, mcp-proxy…)
+│   ├── cmd/obsidian-mcp/        # standalone Obsidian MCP entry (legacy path)
+│   ├── internal/                # all packages below
+│   │   ├── optimizer/           # Optimizer runtime (plan, register, usage, route)
+│   │   ├── contextopt/          # candidates, budgeter, Token ROI, GC, routing
+│   │   ├── toolopt/             # tool output compaction
+│   │   ├── outputopt/           # output contracts + structured responses
+│   │   ├── cacheintel/          # stable prefix builder + diagnostics
+│   │   ├── provider/            # capabilities + pricing catalog
+│   │   ├── rawstore/            # content-addressed raw object store
+│   │   ├── telemetry/           # request/task ledgers, OTLP export
+│   │   ├── housekeeper/         # memory lifecycle + ghost vault sweep hook
+│   │   ├── brain/               # vaults, canonical memory, snapshots, migration
+│   │   ├── mcp/                 # MCP tool definitions (optimizer, obsidian)
+│   │   ├── mcpregistry/         # client config generation per AI tool
+│   │   ├── mcpproxy/            # stdio shim (transparent / optimized)
+│   │   ├── server/              # daemon: HTTP API + embedded dashboard
+│   │   ├── dwytconfig/          # consolidated v5 configuration
+│   │   ├── db/                  # SQLite store (projects, metrics, usage)
+│   │   ├── benchmark/           # deterministic bench (spec §69)
+│   │   ├── procman/             # managed services (codebase, headroom)
+│   │   ├── security/            # home guards, protected paths
+│   │   └── …                    # detect, install, integrate, kiropow, platform…
+│   └── web/                     # React dashboard source (built into server/dist)
+├── docs/                        # this documentation set
+├── install-lib/                 # shared installer helpers
+├── install.sh / install.ps1     # one-command installers (Unix / Windows)
+└── .github/workflows/           # CI (test) and automatic releases
+```
 
 ---
 
@@ -349,7 +447,7 @@ It is linked into:
 ~/.kiro/powers/dwyt-power
 ```
 
-Only real MCPs are placed in `mcp.json`: `codebase` and `obsidian`. RTK and Headroom are provided as steering instructions because RTK is a CLI tool and Headroom is an API proxy.
+Only real MCPs are placed in `mcp.json`: `dwyt_optimizer`, `dwyt_codebase` and `dwyt_obsidian`. RTK and Headroom are provided as steering instructions because RTK is a CLI tool and Headroom is an API proxy.
 
 DWYT writes Kiro workspace MCP config to `.kiro/settings/mcp.json` and also updates `.kiro/mcp.json` for legacy compatibility. Existing user MCP servers are merged and preserved.
 
@@ -362,7 +460,7 @@ GET  /api/kiro/power/status
 POST /api/kiro/power/refresh
 ```
 
-See [Kiro Power](docs/KIRO-POWER.md).
+See [Kiro Power](docs/kiro-power.md).
 
 ---
 
@@ -373,7 +471,8 @@ See [Kiro Power](docs/KIRO-POWER.md).
 | `/#/` | Setup Wizard |
 | `/#/dashboard` | Dashboard (all repositories) |
 | `/#/dashboard?project=/path` | Dashboard with specific project |
-| `/#/dashboard?reload=5` | Auto-reload every 5s |
+| `/#/dashboard?reload=30` | Auto-reload every 30s (default is 10s) |
+| `/#/dashboard?window=24h` | Savings window: `1h`, `6h` (default), `24h`, `2d`, `7d`, `all` |
 | `/#/dashboard?logs=1` | Logs panel open |
 
 ---
@@ -453,6 +552,23 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 
 - **Linux / macOS / Windows** all run the dashboard, API, SQLite, MCP servers, Headroom proxy, and the cross-platform process manager natively.
 - **RTK** terminal compression has **no upstream Windows binary**. On Windows, DWYT uses a pre-installed `rtk.exe` if found and otherwise skips it with a clear message — every other feature works normally. See the [Windows troubleshooting guide](docs/windows/troubleshooting.md#rtk).
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [How It Works](docs/how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
+| [Architecture v5](docs/architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
+| [Codebase Law](docs/codebase-law.md) | Mandatory code-graph workflow for agents |
+| [Obsidian Law](docs/obsidian-law.md) | Mandatory memory workflow for agents |
+| [Tokens Saved](docs/tokens-saved.md) | Where the savings numbers come from; sessions and windows |
+| [Kiro Power](docs/kiro-power.md) | Kiro Power paths, frontmatter, MCP behavior |
+| [Release Process](docs/release-process.md) | Automatic releases, semver conventions (scopes, `!`, BREAKING CHANGE) |
+| [Changelog](docs/CHANGELOG.md) | Notable changes per release |
+| [Windows docs](docs/windows/readme.md) | Installation, update, troubleshooting, PowerShell/Terminal notes |
+| [Agent rules](docs/rules/rules.md) | Repo conventions for agents working on DWYT itself |
 
 ---
 

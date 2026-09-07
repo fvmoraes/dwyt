@@ -23,6 +23,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -186,6 +187,45 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 
 	security.Load(dwytHome)
 	security.InitObsidianConfig(dwytHome)
+
+	// Warm the Codebase service before any AI client needs it. The stdio
+	// codebase MCP hands off to the daemon on :9749, and a daemon that
+	// listens but does not serve makes every client pay a ~30s timeout
+	// before failing — exactly the red codebase entry users see in their
+	// client MCP panels. Probe, and restart the managed service when it
+	// does not answer its health endpoint.
+	if !health.ProbeURL("http://127.0.0.1:9749/health") {
+		if status := procmanInstance.Status("codebase"); status != nil && status.Running {
+			log.Warn("codebase service is running but unhealthy; restarting",
+				log.Fields{"pid": status.PID})
+			if _, err := procmanInstance.Restart("codebase"); err != nil {
+				log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
+			}
+		} else if _, err := procmanInstance.Start("codebase"); err != nil {
+			log.Info("codebase service was not started at startup",
+				log.Fields{"reason": err.Error()})
+		} else {
+			log.Info("codebase service started")
+		}
+	}
+
+	// Reconcile the AI clients' MCP configs at startup. A full sync removes
+	// DWYT's historical server keys — a pre-v5 "codebase" entry kept showing
+	// up next to dwyt_codebase in client MCP panels because scoped per-card
+	// syncs deliberately never touch another card's leftovers — and rewrites
+	// the canonical wiring, so users do not depend on re-running setup after
+	// an upgrade. Scoped to the clients the user actually selected.
+	if hasSetupCfg && project != "" && len(setupCfg.Ias) > 0 {
+		if reg, err := mcpregistry.Load(); err == nil {
+			if err := reg.ConfigureMCP(project, setupCfg.Ias); err != nil {
+				log.Warn("mcp config sync had failures", log.Fields{"error": err.Error()})
+			} else {
+				log.Info("mcp configs synced", log.Fields{"clients": strings.Join(setupCfg.Ias, ",")})
+			}
+		} else {
+			log.Warn("mcp registry unavailable for config sync", log.Fields{"error": err.Error()})
+		}
+	}
 
 	// Adopt the canonical "<hash>_<name>" layout for any pre-existing
 	// "<hash>" vault directories. This runs once at startup and is fully
