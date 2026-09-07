@@ -364,3 +364,232 @@ export async function refreshKiroPower(): Promise<KiroPowerStatus> {
   const r = await fetch(`${API}/kiro/power/refresh`, { method: 'POST' })
   return r.json()
 }
+
+// ── DWYT v5: Optimizer, Brain lifecycle and telemetry ─────────────────────
+//
+// Every ratio below is nullable on purpose. The backend returns null when no
+// request reported the underlying numbers, and the UI must render "—" rather
+// than "0%": a fabricated zero would understate cache effectiveness and
+// overstate cost, which is exactly the misleading metric v5 set out to remove.
+
+export interface TelemetrySummary {
+  window: string
+  requests: number
+  observed_requests: number
+  input_tokens: number
+  cached_input_tokens: number
+  uncached_input_tokens: number
+  cache_write_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cache_hit_pct: number | null
+  context_reduction_pct: number | null
+  context_before: number
+  context_after: number
+  avoided_tokens: number
+  observed_cost_usd: number
+  estimated_cost_usd: number
+  tasks: number
+  tasks_succeeded: number
+  completion_pct: number | null
+  cost_per_completed_task: number | null
+  tokens_per_completed_task: number | null
+  avg_attempts: number | null
+  coverage: {
+    cache_reported_requests: number
+    context_reported_requests: number
+    cost_reported_requests: number
+  }
+}
+
+export interface BrainHealth {
+  project_name?: string
+  vault_dir?: string
+  total_notes?: number
+  total_bytes?: number
+  canonical_notes?: number
+  compact_sessions?: number
+  stale_notes?: number
+  expiring_within_24h?: number
+  unmanaged_notes?: number
+  notes_by_area?: Record<string, number>
+}
+
+export interface HousekeeperStatus {
+  enabled: boolean
+  running?: boolean
+  keep_latest_sessions?: number
+  sessions_retained?: number
+  sessions_limit?: number
+  expiring_within_24h?: number
+  stale_notes?: number
+  total_notes?: number
+  raw_objects?: number
+  raw_bytes?: number
+  promote_before_delete?: boolean
+  interval?: string
+  last_run?: string | null
+  reason?: string
+}
+
+export interface RawStoreUsage {
+  enabled: boolean
+  objects?: number
+  bytes?: number
+  dir?: string
+}
+
+export interface PricingMeta {
+  version?: string
+  source?: string
+  model_entries?: number
+  provider_entries?: number
+  loaded_at?: string
+}
+
+// CacheCapability is how much control DWYT has over provider caching. The
+// dashboard shows it next to the hit rate because a 0% hit rate means something
+// very different when the provider does not support caching at all.
+export interface CacheCapability {
+  provider?: string
+  model?: string
+  state: 'observed' | 'advised' | 'unsupported' | 'unknown' | string
+  note?: string
+}
+
+export interface TelemetryPayload {
+  available: boolean
+  reason?: string
+  summary?: TelemetrySummary
+  brain?: BrainHealth
+  housekeeper?: HousekeeperStatus
+  raw_store?: RawStoreUsage
+  pricing?: PricingMeta
+  cache_capability?: CacheCapability
+}
+
+export async function getTelemetrySummary(window = '6h'): Promise<TelemetryPayload> {
+  const r = await fetch(`${API}/telemetry/summary?window=${encodeURIComponent(window)}`)
+  return parseJSON(r) as Promise<TelemetryPayload>
+}
+
+// ── Session summary ──────────────────────────────────────────────────────────
+// The per-sitting view: what this project's current activity session saved and
+// how the observed LLM conversation flowed (tokens/s, models). Sessions are
+// activity spans separated by a 30-minute inactivity gap by default.
+
+export interface SessionModel {
+  model: string
+  requests: number
+  observed_requests: number
+  tokens_total: number
+  tokens_per_sec: number
+  share_pct: number
+}
+
+export interface SessionLLM {
+  available: boolean
+  reason?: string
+  requests: number
+  observed_requests: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cached_tokens: number
+  tokens_per_sec: number | null
+  duration_secs: number
+  models: SessionModel[]
+}
+
+export interface PreviousSession {
+  started_at: string
+  last_activity: string
+  duration_secs: number
+  tokens_saved: number
+  mcp_calls: number
+}
+
+export interface SessionSummary {
+  available: boolean
+  reason?: string
+  project?: string
+  gap_minutes?: number
+  session?: { started_at: string; last_activity: string; duration_secs: number }
+  savings?: {
+    tokens_saved: number
+    without_dwyt_tokens: number
+    with_dwyt_tokens: number
+    by_tool: Record<string, number>
+  }
+  mcp?: { calls: number; calls_by_tool: Record<string, number> }
+  llm?: SessionLLM
+  previous_sessions?: PreviousSession[]
+}
+
+export async function getSessionSummary(projectPath?: string): Promise<SessionSummary> {
+  const params = new URLSearchParams()
+  if (projectPath) params.set('path', projectPath)
+  const qs = params.toString()
+  const r = await fetch(`${API}/session/summary${qs ? `?${qs}` : ''}`)
+  return parseJSON(r) as Promise<SessionSummary>
+}
+
+export interface OptimizerPolicy {
+  policy_version: string
+  catalog_version?: string
+  providers?: string[]
+  pricing?: PricingMeta
+  raw_store?: RawStoreUsage
+  config?: Record<string, unknown>
+}
+
+export async function getOptimizerPolicy(): Promise<OptimizerPolicy> {
+  const r = await fetch(`${API}/optimizer/policy`)
+  return parseJSON(r) as Promise<OptimizerPolicy>
+}
+
+export interface HousekeeperReport {
+  depth: string
+  dry_run?: boolean
+  sessions_total: number
+  sessions_retained: number
+  sessions_removed: number
+  expired_removed: number
+  stale_marked: number
+  duplicates_merged: number
+  knowledge_promoted?: string[]
+  raw_objects: number
+  raw_bytes: number
+  raw_pruned: number
+  raw_bytes_freed: number
+  skipped?: string
+  errors?: string[]
+  duration?: string
+}
+
+// runHousekeeper defaults to a dry run: a real pass deletes notes, so the UI
+// must make the user ask for that explicitly.
+export async function runHousekeeper(depth: 'light' | 'deep' = 'deep', apply = false): Promise<HousekeeperReport> {
+  const params = new URLSearchParams({ depth })
+  if (!apply) params.set('dry_run', 'true')
+  const r = await fetch(`${API}/housekeeper/run?${params.toString()}`, { method: 'POST' })
+  return parseJSON(r) as Promise<HousekeeperReport>
+}
+
+export interface CanonicalNote {
+  key: string
+  title: string
+  body?: string
+  temperature: 'hot' | 'warm' | 'cold'
+  tokens_est?: number
+  path?: string
+}
+
+export async function getCanonicalMemory(temperature?: string, includeBody = false): Promise<{ notes: CanonicalNote[]; count: number; tokens_est: number }> {
+  const params = new URLSearchParams()
+  if (temperature) params.set('temperature', temperature)
+  if (includeBody) params.set('include_body', 'true')
+  const qs = params.toString()
+  const r = await fetch(`${API}/memory/canonical${qs ? `?${qs}` : ''}`)
+  return parseJSON(r) as Promise<{ notes: CanonicalNote[]; count: number; tokens_est: number }>
+}

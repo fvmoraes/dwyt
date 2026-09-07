@@ -61,8 +61,13 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
 		var pm *brain.ProjectObsidian
-		if projectMemory, err := brain.NewProjectObsidian(DwytHome, cwd); err == nil {
-			pm = projectMemory
+		// Read-only lookup: a status print must never materialize a vault for
+		// a project that does not have one yet (that is how ghost vaults were
+		// born).
+		if brain.HasVaultDir(DwytHome, cwd) {
+			if projectMemory, err := brain.NewProjectObsidian(DwytHome, cwd); err == nil {
+				pm = projectMemory
+			}
 		}
 
 		s := status.PollAll(DwytBin, pm != nil)

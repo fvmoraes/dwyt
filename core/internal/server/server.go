@@ -16,16 +16,20 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/security"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/status"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
@@ -53,6 +57,35 @@ func (ds *DashboardServer) codebasePath() string {
 
 func (ds *DashboardServer) rtkPath() string { return ds.toolPath(toolsource.ToolRTK) }
 
+// vaultAttachError reports why a vault must NOT be attached for the project,
+// or nil when attaching is correct. Registration in the projects registry is
+// the gate: it is a user action, and it is what keeps daemon start directories
+// from silently growing ghost vaults.
+func vaultAttachError(store *db.Store, project string) error {
+	if project == "" {
+		return fmt.Errorf("no project directory to attach a vault to")
+	}
+	if store == nil {
+		// Registry unavailable: fall back to the permissive legacy behavior
+		// rather than blinding the whole dashboard.
+		return nil
+	}
+	if _, err := store.GetActiveProject(db.HashPath(project)); err != nil {
+		return fmt.Errorf("project is not registered yet; its vault is created when the project is added")
+	}
+	return nil
+}
+
+// projectDirExists reports whether path is an existing directory. Empty paths
+// and files do not count: a project is always a directory on disk.
+func projectDirExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	cwd, _ := os.Getwd()
 	project := os.Getenv("DWYT_PROJECT")
@@ -68,11 +101,34 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		log.Error("failed to open db", log.Fields{"error": err.Error()})
 	}
 
+	// The consolidated v5 configuration (spec §57). Loaded before anything that
+	// depends on it so the Optimizer and Housekeeper are built from the user's
+	// values rather than being reconfigured after the fact.
+	v5cfg := loadedV5Config(dwytHome)
+
 	brain.MigrateOldMemoryDirs(dwytHome)
 
 	rs := state.Init(dwytHome)
 	rs.SetVersion(releaseVersion)
-	rs.SetCurrentProject(project, filepath.Base(project))
+	// Never adopt — or create a vault for — a directory that does not exist. A
+	// daemon started from a since-deleted directory (renamed repo, removed
+	// worktree) would otherwise phantom-project every dashboard and MCP call
+	// until the next restart, and the vault created for the ghost path would
+	// linger in ~/.dwyt/projects forever.
+	if !projectDirExists(project) {
+		if prev := strings.TrimSpace(rs.CurrentProject); prev != project && projectDirExists(prev) {
+			log.Warn("start project missing; keeping previous project",
+				log.Fields{"missing": project, "kept": prev})
+			project = prev
+		} else {
+			log.Warn("start project missing; starting without a project vault",
+				log.Fields{"project": project})
+			project = ""
+		}
+	}
+	if project != "" {
+		rs.SetCurrentProject(project, filepath.Base(project))
+	}
 	var setupCfg Config
 	hasSetupCfg := false
 	if store != nil {
@@ -88,7 +144,16 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		}
 	}
 
-	pb, brainErr := brain.NewProjectObsidian(dwytHome, project)
+	var pb *brain.ProjectObsidian
+	var brainErr error
+	// A vault serves a project the user actually registered. Attaching one for
+	// whatever directory the daemon happened to start in is exactly how the
+	// ghost vaults were born: every start directory got a scaffold folder and
+	// none of it was ever claimed. Unregistered start directories get their
+	// vault the moment the project is added via the dashboard or setup.
+	if brainErr = vaultAttachError(store, project); brainErr == nil {
+		pb, brainErr = brain.NewProjectObsidian(dwytHome, project)
+	}
 	if brainErr != nil {
 		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
 		rs.ToolErrors["obsidian"] = brainErr.Error()
@@ -148,14 +213,72 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		ProjectObsidian: pb,
 		ProcMan:         procmanInstance,
 		RuntimeState:    rs,
+		Optimizer:       optimizer.New(v5cfg.cfg.OptimizerConfig(), dwytHome),
+		V5Config:        v5cfg.cfg,
 		HeadroomPort:    headroomPort,
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
 	}
 	ds.setHeadroomPort(headroomPort)
+	// The Optimizer reports Brain health and housekeeping state, but must not
+	// import the brain package (the brain's handlers already call into the
+	// optimizer). Wiring it through narrow interfaces keeps the dependency
+	// one-directional.
+	ds.Optimizer.SetMemoryHealthProvider(ds)
+	// A malformed config is surfaced but not fatal: the daemon runs on defaults
+	// rather than refusing to start, and the dashboard shows the error.
+	if v5cfg.err != nil {
+		log.Warn("config: falling back to defaults", log.Fields{"error": v5cfg.err.Error()})
+		rs.ToolErrors["config"] = v5cfg.err.Error()
+	}
+
+	// Bring the Brain to the v5 layout. Both calls are additive and idempotent,
+	// so this is safe on every startup; a failure leaves the pre-v5 vault
+	// working and is retried next time.
+	if pb != nil {
+		if err := pb.EnsureCanonicalLayout(); err != nil {
+			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
+		}
+		report := pb.MigrateToV5(brain.V5MigrationOptions{
+			KeepLatestSessions: v5cfg.cfg.Housekeeper.Sessions.KeepLatest,
+		})
+		if report.CanonicalSeeded > 0 || report.SessionsConverted > 0 || report.SessionsCompiled > 0 {
+			log.Info("brain: migrated to the v5 layout", log.Fields{
+				"canonical_seeded":   report.CanonicalSeeded,
+				"sessions_converted": report.SessionsConverted,
+				"sessions_compiled":  report.SessionsCompiled,
+				"knowledge_promoted": len(report.KnowledgePromoted),
+			})
+		}
+		for _, e := range report.Errors {
+			log.Warn("brain: v5 migration issue", log.Fields{"error": e})
+		}
+	}
+	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Optimizer.RawStore())
+	ds.Optimizer.SetHousekeeperStatusProvider(ds.Housekeeper)
+
+	// Telemetry lives in the same SQLite file as the rest of DWYT's state. A
+	// failure to initialize it is non-fatal: metrics are observability, and
+	// losing them must not stop the daemon from optimizing context.
+	if store != nil {
+		if ts, err := telemetry.New(store.DB()); err != nil {
+			log.Warn("telemetry: init failed", log.Fields{"error": err.Error()})
+		} else {
+			ds.Telemetry = ts
+			ds.Optimizer.SetUsageRecorder(ds)
+		}
+	}
 
 	if store != nil {
-		store.TouchProject(project)
+		// Refresh registration metadata for a project DWYT already knows, but
+		// do not register new ones as a side effect of starting the daemon:
+		// registration is a user action (setup, dashboard, project switch),
+		// and it is what gates vault creation above.
+		if project != "" {
+			if _, err := store.GetActiveProject(db.HashPath(project)); err == nil {
+				store.TouchProject(project)
+			}
+		}
 		store.SetConfig("project_path", project)
 	}
 
@@ -263,6 +386,28 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 				log.Fields{"name": r.LegacyName, "status": string(r.Status), "reason": r.Reason})
 		}
 	}
+
+	// With the renames out of the way, sweep the leftovers: hash-only vaults
+	// no project claims and that hold nothing but DWYT scaffolding. These are
+	// ghosts older versions left behind for every directory DWYT ever ran in
+	// — without this they pile up forever and the migration card keeps asking
+	// the user to associate directories they have never heard of.
+	gc := brain.GCSweepVaults(dwytHome, brain.VaultGCOptions{
+		KnownHash: func(hash string) bool {
+			if store == nil {
+				return false
+			}
+			_, err := store.GetProject(hash)
+			return err == nil
+		},
+	})
+	if gc.Removed > 0 || gc.KeptWithContent > 0 || len(gc.Errors) > 0 {
+		log.Info("vault gc: completed", log.Fields{
+			"removed":     gc.Removed,
+			"kept":        gc.KeptWithContent,
+			"scan_errors": len(gc.Errors),
+		})
+	}
 }
 
 func (ds *DashboardServer) Start() error {
@@ -312,6 +457,11 @@ func (ds *DashboardServer) Start() error {
 
 	ds.startHeadroomIfNeeded()
 	ds.startMCPsIfNeeded()
+	if ds.Housekeeper != nil {
+		// Runs a deep pass now and then on the configured interval. Both are
+		// goroutines, so a large vault never delays the daemon coming up.
+		ds.Housekeeper.Start()
+	}
 
 	return r.Run(addr)
 }
@@ -616,4 +766,19 @@ func (ds *DashboardServer) configureHeadroomClients(projectPath string) {
 			log.Info("headroom durable init", log.Fields{"client": c, "port": port})
 		}
 	}
+}
+
+// v5ConfigResult pairs the loaded configuration with the load error, so New can
+// build everything from real values and still report a malformed file.
+type v5ConfigResult struct {
+	cfg dwytconfig.Config
+	err error
+}
+
+// loadedV5Config reads the consolidated configuration. It never fails: a missing
+// file yields the recommended defaults, and a malformed one yields the defaults
+// plus an error the caller surfaces.
+func loadedV5Config(dwytHome string) v5ConfigResult {
+	cfg, err := dwytconfig.Load(dwytHome)
+	return v5ConfigResult{cfg: cfg, err: err}
 }

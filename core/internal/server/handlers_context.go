@@ -23,7 +23,9 @@ func (ds *DashboardServer) apiContext(c *gin.Context) {
 	toolsInstalled := map[string]bool{}
 	for _, t := range []string{"codebase-memory-mcp", "rtk", "headroom"} {
 		tool := t
-		if t == "codebase-memory-mcp" { tool = "cbmcp" }
+		if t == "codebase-memory-mcp" {
+			tool = "cbmcp"
+		}
 		_, err := os.Stat(ds.toolPath(tool))
 		toolsInstalled[t] = err == nil
 	}

@@ -9,6 +9,8 @@ import CardCodebase from '../components/CardCodebase'
 import CardRTK from '../components/CardRTK'
 import CardHeadroom from '../components/CardHeadroom'
 import CardObsidian from '../components/CardObsidian'
+import CardOptimizer from '../components/CardOptimizer'
+import CardSession from '../components/CardSession'
 import VaultMigrationCard from '../components/VaultMigrationCard'
 import { logColor } from '../utils'
 import { useLang } from '../LangContext'
@@ -109,19 +111,23 @@ export default function Dashboard() {
   const [configureFeedback, setConfigureFeedback] = useState<{ kind: 'success' | 'error'; message: string; name: string } | null>(null)
   const [kiroPower, setKiroPower] = useState<api.KiroPowerStatus | null>(null)
   const [refreshingKiroPower, setRefreshingKiroPower] = useState(false)
-  const reloadSecs = parseInt(searchParams.get('reload') || '0', 10)
-  const savingsWindow = searchParams.get('window') || 'all'
+  // Defaults the product promises (user-facing): auto-refresh every 10s and a
+  // 6h savings window. Lifetime totals remain one click away ('All time') but
+  // are no longer what opens on screen — an ever-growing lifetime number is
+  // not an actionable metric.
+  const reloadSecs = parseInt(searchParams.get('reload') || '10', 10)
+  const savingsWindow = searchParams.get('window') || '6h'
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const setReload = useCallback((secs: number) => {
     const p = new URLSearchParams(searchParams)
-    if (secs === 0) { p.delete('reload') } else { p.set('reload', String(secs)) }
+    if (secs === 10) { p.delete('reload') } else { p.set('reload', String(secs)) }
     setSearchParams(p)
   }, [searchParams, setSearchParams])
 
   const setSavingsWindow = useCallback((w: string) => {
     const p = new URLSearchParams(searchParams)
-    if (w === 'all') { p.delete('window') } else { p.set('window', w) }
+    if (w === '6h') { p.delete('window') } else { p.set('window', w) }
     setSearchParams(p)
   }, [searchParams, setSearchParams])
 
@@ -517,6 +523,8 @@ export default function Dashboard() {
         )}
       </div>
 
+      <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
+
       {showLogs && (
         <div className="card" style={{ marginBottom: 8, padding: '8px 12px' }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{t.logsTitle}</div>
@@ -623,6 +631,7 @@ export default function Dashboard() {
           onConfigure={() => handleConfigureMCP('obsidian')}
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
+        <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} />
       </div>
     </div>
   )

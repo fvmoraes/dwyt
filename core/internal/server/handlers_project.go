@@ -22,6 +22,13 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "path is required"})
 		return
 	}
+	// A project is a directory on disk. Switching to a missing path would
+	// phantom-project the whole daemon — vault, Kiro power, indexing — onto a
+	// directory that is not there, so it is refused before any state moves.
+	if info, statErr := os.Stat(body.Path); statErr != nil || !info.IsDir() {
+		c.JSON(400, gin.H{"error": "project path does not exist or is not a directory", "path": body.Path})
+		return
+	}
 
 	ds.projectMu.Lock()
 	old := ds.DefaultProject
@@ -100,11 +107,22 @@ func (ds *DashboardServer) projectObsidian() *brain.ProjectObsidian {
 	return ds.ProjectObsidian
 }
 
-// setProjectObsidian swaps the active vault pointer under a write lock.
+// setProjectObsidian swaps the active vault pointer under a write lock and
+// repoints the housekeeper at the new vault, so a project switch never leaves
+// retention passes running against the previous project's notes.
 func (ds *DashboardServer) setProjectObsidian(pb *brain.ProjectObsidian) {
 	ds.projectMu.Lock()
-	defer ds.projectMu.Unlock()
 	ds.ProjectObsidian = pb
+	ds.projectMu.Unlock()
+
+	if ds.Housekeeper != nil {
+		ds.Housekeeper.SetVault(pb)
+	}
+	if pb != nil {
+		if err := pb.EnsureCanonicalLayout(); err != nil {
+			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
+		}
+	}
 }
 
 // apiProjectRemove performs a logical removal: the project leaves the active

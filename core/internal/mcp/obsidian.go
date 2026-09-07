@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -168,8 +169,133 @@ func (ot *ObsidianTools) Open(args map[string]interface{}) (string, error) {
 	return "Obsidian vault opened", nil
 }
 
+// Canonical implements obsidian_canonical (spec §15, §17).
+func (ot *ObsidianTools) Canonical(args map[string]interface{}) (string, error) {
+	query := url.Values{}
+	if v, ok := args["temperature"].(string); ok && v != "" {
+		query.Set("temperature", v)
+	}
+	if v, ok := args["include_body"].(bool); ok && v {
+		query.Set("include_body", "true")
+	}
+	target := fmt.Sprintf("%s/memory/canonical", dwytAPI)
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	resp, err := ot.client.Get(target)
+	if err != nil {
+		return "", fmt.Errorf("canonical memory read failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("canonical memory returned HTTP %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("parse error: %w", err)
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return string(data), nil
+}
+
+// UpsertCanonical implements obsidian_upsert_canonical.
+func (ot *ObsidianTools) UpsertCanonical(args map[string]interface{}) (string, error) {
+	key, _ := args["key"].(string)
+	if strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("key is required")
+	}
+	body, _ := args["body"].(string)
+	bullet, _ := args["bullet"].(string)
+	if strings.TrimSpace(body) == "" && strings.TrimSpace(bullet) == "" {
+		return "", fmt.Errorf("body or bullet is required")
+	}
+	payload, _ := json.Marshal(args)
+	resp, err := ot.client.Post(fmt.Sprintf("%s/memory/canonical", dwytAPI),
+		"application/json", bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("canonical memory write failed: %w", err)
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if resp.StatusCode >= 400 {
+		if msg, ok := result["error"].(string); ok {
+			return "", fmt.Errorf("canonical memory write: %s", msg)
+		}
+		return "", fmt.Errorf("canonical memory write returned HTTP %d", resp.StatusCode)
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return string(data), nil
+}
+
+// Compile implements obsidian_compile (spec §18).
+func (ot *ObsidianTools) Compile(args map[string]interface{}) (string, error) {
+	payload, _ := json.Marshal(args)
+	resp, err := ot.client.Post(fmt.Sprintf("%s/memory/compile", dwytAPI),
+		"application/json", bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("memory compile failed: %w", err)
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if resp.StatusCode >= 400 {
+		if msg, ok := result["error"].(string); ok {
+			return "", fmt.Errorf("memory compile: %s", msg)
+		}
+		return "", fmt.Errorf("memory compile returned HTTP %d", resp.StatusCode)
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return string(data), nil
+}
+
 func RegisterObsidianTools(s *Server) {
 	ot := NewObsidianTools()
+
+	s.RegisterTool("obsidian_canonical",
+		"Read the project's canonical memory: the single authoritative copy of project identity, "+
+			"architecture, decisions, conventions, constraints and module summaries. Returns notes "+
+			"ordered HOT then WARM then COLD with token estimates. Prefer this over searching old "+
+			"session notes.",
+		map[string]Property{
+			"temperature":  {Type: "string", Description: "hot, warm or cold; omit for all"},
+			"include_body": {Type: "boolean", Description: "Include note bodies; omit to get only keys, titles and token estimates"},
+		},
+		nil,
+		ot.Canonical,
+	)
+
+	s.RegisterTool("obsidian_upsert_canonical",
+		"Update canonical memory in place, or append one deduplicated bullet to a list note. "+
+			"Use this instead of saving a second copy of a fact that changed. Keys: project, "+
+			"active-constraints, architecture, frontend, backend, integrations, conventions, "+
+			"known-issues, lessons, error-memory, current-task, active-errors, module:<name>.",
+		map[string]Property{
+			"key":         {Type: "string", Description: "Canonical key to write"},
+			"title":       {Type: "string", Description: "Optional note title"},
+			"body":        {Type: "string", Description: "Full replacement body for the note"},
+			"bullet":      {Type: "string", Description: "Single list entry to append; skipped when an equivalent entry already exists"},
+			"source_file": {Type: "string", Description: "Source file this note derives from, so it can be marked stale when that file changes"},
+		},
+		[]string{"key"},
+		ot.UpsertCanonical,
+	)
+
+	s.RegisterTool("obsidian_compile",
+		"Promote the reusable knowledge from a finished task into canonical memory: decisions, "+
+			"constraints, reusable error patterns, lessons and known issues. Call it at the end of a "+
+			"phase so the knowledge survives after the session note expires.",
+		map[string]Property{
+			"objective":      {Type: "string", Description: "What the task was about"},
+			"decisions":      {Type: "array", Description: "Decisions made; constraint-shaped ones are routed to active-constraints"},
+			"resolved":       {Type: "array", Description: "Resolved problems as 'symptom — resolution'; promoted as reusable error patterns"},
+			"blockers":       {Type: "array", Description: "Unresolved blockers; promoted as known issues"},
+			"next_steps":     {Type: "array", Description: "Follow-ups; lesson-shaped entries are promoted as lessons"},
+			"affected_files": {Type: "array", Description: "Files the task touched"},
+		},
+		nil,
+		ot.Compile,
+	)
 
 	s.RegisterTool("obsidian_search",
 		"Search the Obsidian vault for notes matching a query. Returns matching entries with type, content, and creation date.",

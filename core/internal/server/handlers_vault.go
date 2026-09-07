@@ -6,10 +6,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// apiVaultMigrationReport returns what the migration WOULD do right now,
-// without touching the filesystem (dry run). The dashboard uses it to show
-// pending vaults; the actual rename happens on POST /api/vault/migrate or
-// at server startup.
+// apiVaultMigrationReport returns what the migration and the ghost-vault sweep
+// WOULD do right now, without touching the filesystem (dry run). The dashboard
+// uses it to show pending vaults; the actual rename and sweep happen on
+// POST /api/vault/migrate or at server startup.
 func (ds *DashboardServer) apiVaultMigrationReport(c *gin.Context) {
 	opts := ds.vaultMigrationOpts()
 	opts.DryRun = true
@@ -18,13 +18,14 @@ func (ds *DashboardServer) apiVaultMigrationReport(c *gin.Context) {
 		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"status": "ok", "report": report})
+	gc := brain.GCSweepVaults(ds.DwytHome, ds.vaultGCOptions(true))
+	c.JSON(200, gin.H{"status": "ok", "report": report, "gc": gc})
 }
 
-// apiVaultMigrate forces an immediate migration pass. The dashboard exposes
-// this as a "Rename legacy vaults" action so the user can confirm a manual
-// rename after pointing DWYT at a project whose vault directory could not be
-// resolved automatically.
+// apiVaultMigrate forces an immediate migration pass plus the ghost-vault
+// sweep. The dashboard exposes this as a "Rename legacy vaults" action so the
+// user can confirm a manual rename after pointing DWYT at a project whose
+// vault directory could not be resolved automatically.
 func (ds *DashboardServer) apiVaultMigrate(c *gin.Context) {
 	report, err := brain.MigrateVaultsToNamedLayout(ds.DwytHome, ds.vaultMigrationOpts())
 	if err != nil {
@@ -32,9 +33,27 @@ func (ds *DashboardServer) apiVaultMigrate(c *gin.Context) {
 		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
 		return
 	}
+	gc := brain.GCSweepVaults(ds.DwytHome, ds.vaultGCOptions(false))
 	log.Info("vault migration: manual run",
-		log.Fields{"migrated": report.Migrated, "unidentifiable": report.Unidentifiable})
-	c.JSON(200, gin.H{"status": "ok", "report": report})
+		log.Fields{"migrated": report.Migrated, "unidentifiable": report.Unidentifiable,
+			"gc_removed": gc.Removed, "gc_kept": gc.KeptWithContent})
+	c.JSON(200, gin.H{"status": "ok", "report": report, "gc": gc})
+}
+
+// vaultGCOptions builds the sweep options: hashes DWYT knows (active or
+// soft-removed projects) are never swept — their vault is the migration's
+// business. A dry run only reports.
+func (ds *DashboardServer) vaultGCOptions(dryRun bool) brain.VaultGCOptions {
+	return brain.VaultGCOptions{
+		DryRun: dryRun,
+		KnownHash: func(hash string) bool {
+			if ds.Store == nil {
+				return false
+			}
+			_, err := ds.Store.GetProject(hash)
+			return err == nil
+		},
+	}
 }
 
 // vaultMigrationOpts returns the standard MigrationOptions the server uses

@@ -48,8 +48,8 @@ type VaultMeta struct {
 //   - Reject names that are reserved device names on Windows (CON, PRN,
 //     AUX, NUL, COM1..COM9, LPT1..LPT9), with or without extension.
 //   - Cap the basename at 64 characters to stay well below common PATH_MAX
-//     limits even after the "<hash>_" prefix is prepended (hash is 12 chars
-//     + "_" = 13 chars, leaving 64 - 13 = 51 chars for the suffix).
+//     limits even after the "<hash>_" prefix is prepended (a 12-character hash
+//     plus one underscore is 13 characters, leaving 51 for the suffix).
 //
 // Returns an empty string when the input cannot be normalized into a usable
 // name. Callers must fall back to a hash-only layout in that case.
@@ -145,6 +145,53 @@ func VaultDirectoryName(projectHash, projectName string) string {
 		return projectHash
 	}
 	return projectHash + "_" + safe
+}
+
+// vaultHashPrefixLengths are the hash prefix lengths a directory name may use.
+// Twelve hex characters (48 bits) make a collision practically impossible at
+// personal scale, but "practically impossible" is not "impossible", so the
+// resolver extends the prefix instead of letting two projects share a folder.
+var vaultHashPrefixLengths = []int{12, 16, 20, 24, 32, 48, 64}
+
+// ResolveVaultDirName is VaultDirectoryName with a filesystem-backed collision
+// guard. If the default 12-char name is occupied by a directory that belongs
+// to a DIFFERENT project hash, the prefix grows (16, 20, 24 ... 64 chars)
+// until the name is free or provably ours. The project's stable ID stays the
+// 12-char hash everywhere else; only the on-disk name adapts.
+//
+// The projectsDir may be empty (callers without a filesystem context), in
+// which case the pure name is returned unchanged.
+func ResolveVaultDirName(projectsDir, projectHash, projectName string) string {
+	base := VaultDirectoryName(projectHash, projectName)
+	if projectsDir == "" || base == "" || base == projectHash {
+		return base
+	}
+	safe := safeDirName(projectName)
+	if safe == "" {
+		return base
+	}
+	for _, n := range vaultHashPrefixLengths {
+		if n > len(projectHash) {
+			break
+		}
+		candidate := projectHash[:n] + "_" + safe
+		full := filepath.Join(projectsDir, candidate)
+		info, err := os.Stat(full)
+		if err != nil {
+			// Free — take it.
+			return candidate
+		}
+		if !info.IsDir() {
+			// A stray file with an unlucky name; a longer prefix may dodge it.
+			continue
+		}
+		if meta, _ := ReadVaultMeta(full); meta != nil && meta.ProjectHash == projectHash {
+			// Already ours.
+			return candidate
+		}
+		// Occupied by a different project — grow the prefix.
+	}
+	return base
 }
 
 // vaultMetaPath is the canonical location of the per-vault metadata file.

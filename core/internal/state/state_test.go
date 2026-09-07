@@ -198,7 +198,7 @@ func TestRuntimeState_Persistence(t *testing.T) {
 
 func TestRuntimeState_SaveFailureBackup(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create read-only directory to force save failure
 	readonlyDir := filepath.Join(tmpDir, "readonly")
 	os.MkdirAll(readonlyDir, 0555)

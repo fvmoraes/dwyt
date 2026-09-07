@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,12 @@ func (ds *DashboardServer) apiObsidianStatus(c *gin.Context) {
 	})
 }
 
+// apiObsidianSearch serves Search V2 (spec §27): a small top-k, canonical
+// types first, raw/stale/resolved excluded by default.
+//
+// The endpoint stays backward compatible — `?q=` alone still works — but now
+// returns 5 ranked results instead of up to 30 ordered by mtime. Callers that
+// genuinely need more can widen the query with the documented parameters.
 func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
@@ -37,12 +44,63 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 	}
 	pb := ds.projectObsidian()
 	if pb == nil {
-		c.JSON(200, gin.H{"results": []interface{}{}, "note": "no Obsidian vault"})
+		c.JSON(200, gin.H{"results": []interface{}{}, "count": 0, "note": "no Obsidian vault"})
 		return
 	}
-	results := pb.Search(query)
+
+	opts := brain.SearchOptions{
+		Query:          query,
+		Types:          splitCSV(c.Query("types")),
+		Limit:          atoiOr(c.Query("limit"), 0),
+		MaxTokens:      atoiOr(c.Query("max_tokens"), 0),
+		PreferCurrent:  c.Query("prefer_current") != "false",
+		IncludeRaw:     c.Query("include_raw") == "true",
+		IncludeExpired: c.Query("include_expired") == "true",
+		// A search is a real retrieval, so it counts as an access for
+		// usage-aware retention. Background pollers use the dashboard
+		// endpoints, which do not go through here.
+		CountAccess: true,
+	}
+	if states := splitCSV(c.Query("exclude_state")); len(states) > 0 {
+		opts.ExcludeState = states
+	}
+
+	results := pb.SearchV2(opts)
 	ds.creditObsidianUsage()
-	c.JSON(200, gin.H{"results": results, "count": len(results)})
+	c.JSON(200, gin.H{
+		"results": results,
+		"count":   len(results),
+		"limit":   effectiveSearchLimit(opts),
+	})
+}
+
+func effectiveSearchLimit(opts brain.SearchOptions) int {
+	if opts.Limit > 0 {
+		return opts.Limit
+	}
+	return brain.DefaultSearchLimit
+}
+
+func splitCSV(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func atoiOr(raw string, fallback int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v < 0 {
+		return fallback
+	}
+	return v
 }
 
 func (ds *DashboardServer) apiObsidianSave(c *gin.Context) {
@@ -84,20 +142,74 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(body.Context) == "" && strings.TrimSpace(body.Summary) == "" {
-		body.Context = ds.currentContextMarkdown()
-	}
 	if strings.TrimSpace(body.Client) == "" {
 		body.Client = "dwyt"
 	}
-	path, err := pb.SaveContextSnapshot(body)
+
+	// Rich handoff (spec §19.1: "use rich handoff only when required"). The
+	// pre-v5 full snapshot is still available on request — a complex handoff
+	// between agents genuinely needs the commands and the prose — but it is no
+	// longer what an ordinary end-of-task save produces.
+	if c.Query("rich") == "true" {
+		if strings.TrimSpace(body.Context) == "" && strings.TrimSpace(body.Summary) == "" {
+			body.Context = ds.currentContextMarkdown()
+		}
+		path, err := pb.SaveContextSnapshot(body)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		ds.creditObsidianUsage()
+		c.JSON(200, gin.H{
+			"status":  "saved",
+			"written": true,
+			"mode":    "rich",
+			"file":    path,
+			"summary": pb.RebuildSummary(),
+		})
+		return
+	}
+
+	// Snapshot v2 (spec §19): reduce the rich payload to compact state and
+	// persist only when that state actually changed. The endpoint contract is
+	// unchanged for callers — they keep sending what they always sent.
+	compact := brain.CompactFromContextSnapshot(body)
+	outcome, err := pb.SaveCompactSnapshot(compact)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	summary := pb.RebuildSummary()
+	if !outcome.Written && outcome.Skipped != "" && compact.Empty() {
+		// Nothing at all was supplied and the daemon has state worth recording:
+		// fall back to the environment snapshot so a bare call is still useful.
+		body.Context = ds.currentContextMarkdown()
+		compact = brain.CompactFromContextSnapshot(body)
+		if outcome, err = pb.SaveCompactSnapshot(compact); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	ds.creditObsidianUsage()
-	c.JSON(200, gin.H{"status": "saved", "file": path, "summary": summary})
+	response := gin.H{
+		"status":     "saved",
+		"written":    outcome.Written,
+		"state_hash": outcome.StateHash,
+		"file":       outcome.Path,
+	}
+	if !outcome.Written {
+		response["status"] = "skipped"
+		response["reason"] = outcome.Skipped
+	}
+	if outcome.TokensEst > 0 {
+		response["tokens_est"] = outcome.TokensEst
+	}
+	// Rebuilding the summary walks the whole vault, so it only runs when
+	// something was actually written.
+	if outcome.Written {
+		response["summary"] = pb.RebuildSummary()
+	}
+	c.JSON(200, response)
 }
 
 func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {

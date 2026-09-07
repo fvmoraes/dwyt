@@ -6,20 +6,24 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
+	"github.com/fvmoraes/dwyt/internal/housekeeper"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
 type Config struct {
-	Configured  bool     `json:"configured"`
-	Tools       []string `json:"tools"`
-	Clients     []string `json:"clients"`
-	Ias         []string `json:"ias"`
-	Providers   []string `json:"providers"`
+	Configured  bool                            `json:"configured"`
+	Tools       []string                        `json:"tools"`
+	Clients     []string                        `json:"clients"`
+	Ias         []string                        `json:"ias"`
+	Providers   []string                        `json:"providers"`
 	ToolSources map[string]toolsource.Selection `json:"tool_sources,omitempty"`
-	ProjectPath string   `json:"project_path"`
-	LastSetup   string   `json:"last_setup"`
+	ProjectPath string                          `json:"project_path"`
+	LastSetup   string                          `json:"last_setup"`
 }
 
 type FsNode struct {
@@ -53,16 +57,27 @@ type ToolDetail struct {
 }
 
 type DashboardServer struct {
-	Port             int
-	DwytBin          string
-	DwytHome         string
-	ReleaseVersion   string
-	StartCwd         string
-	DefaultProject   string
-	Store            *db.Store
-	ProjectObsidian  *brain.ProjectObsidian
-	ProcMan          *procman.ProcessManager
-	RuntimeState     *state.RuntimeState
+	Port            int
+	DwytBin         string
+	DwytHome        string
+	ReleaseVersion  string
+	StartCwd        string
+	DefaultProject  string
+	Store           *db.Store
+	ProjectObsidian *brain.ProjectObsidian
+	ProcMan         *procman.ProcessManager
+	RuntimeState    *state.RuntimeState
+	// Optimizer is the DWYT v5 Context Optimizer. It owns the efficiency policy
+	// (budgets, retrieval ladder, output profiles, cache guidance, raw store)
+	// so instruction files can stay small and stable.
+	Optimizer *optimizer.Optimizer
+	// Housekeeper enforces Brain retention: the 100-session limit, TTLs, stale
+	// detection and raw pruning, always promoting reusable knowledge first.
+	Housekeeper *housekeeper.Housekeeper
+	// Telemetry is the request and task ledger behind cost-per-completed-task.
+	Telemetry *telemetry.Store
+	// V5Config is the consolidated DWYT v5 configuration (spec §57).
+	V5Config         dwytconfig.Config
 	HeadroomPort     int
 	headroomMu       sync.RWMutex
 	projectMu        sync.RWMutex

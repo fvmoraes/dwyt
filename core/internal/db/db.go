@@ -89,6 +89,16 @@ func (s *Store) migrate() error {
 			tokens_without INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (project_id, tool)
 		);
+		CREATE TABLE IF NOT EXISTS mcp_usage_events (
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id     TEXT NOT NULL,
+			tool           TEXT NOT NULL,
+			calls          INTEGER NOT NULL DEFAULT 0,
+			tokens_saved   INTEGER NOT NULL DEFAULT 0,
+			tokens_without INTEGER NOT NULL DEFAULT 0,
+			ts             INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_mcp_usage_events ON mcp_usage_events(project_id, ts);
 	`); err != nil {
 		return err
 	}
@@ -232,14 +242,24 @@ func (s *Store) AddMCPUsage(projectID, tool string, calls, saved, without int64)
 	if without < saved {
 		without = saved
 	}
-	_, err := s.db.Exec(`
+	now := time.Now().Unix()
+	if _, err := s.db.Exec(`
 		INSERT INTO mcp_usage (project_id, tool, calls, tokens_saved, tokens_without)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(project_id, tool) DO UPDATE SET
 			calls          = calls + ?,
 			tokens_saved   = tokens_saved + ?,
 			tokens_without = tokens_without + ?
-	`, projectID, tool, calls, saved, without, calls, saved, without)
+	`, projectID, tool, calls, saved, without, calls, saved, without); err != nil {
+		return err
+	}
+	// The cumulative table above never resets, which is why it cannot answer
+	// "what happened in this session / this afternoon". The timestamped event
+	// is what session and window views are built from.
+	_, err := s.db.Exec(
+		`INSERT INTO mcp_usage_events (project_id, tool, calls, tokens_saved, tokens_without, ts)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		projectID, tool, calls, saved, without, now)
 	return err
 }
 
@@ -315,10 +335,17 @@ func (s *Store) RecordMetricDeltas(projectID, tool string, cumulative map[string
 // SumMetricsByTool returns the metric growth for a project since the given unix
 // timestamp, grouped as tool -> metric -> summed delta.
 func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]map[string]int64, error) {
+	return s.SumMetricsByToolBetween(projectID, sinceUnix, time.Now().Add(time.Hour).Unix())
+}
+
+// SumMetricsByToolBetween is SumMetricsByTool with an explicit upper bound, so
+// a session (or any historical span) can be summed without bleeding in events
+// that happened after it.
+func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int64) (map[string]map[string]int64, error) {
 	rows, err := s.db.Query(
 		`SELECT tool, metric, COALESCE(SUM(delta), 0)
-		 FROM metric_events WHERE project_id = ? AND ts >= ? GROUP BY tool, metric`,
-		projectID, sinceUnix,
+		 FROM metric_events WHERE project_id = ? AND ts >= ? AND ts <= ? GROUP BY tool, metric`,
+		projectID, startUnix, endUnix,
 	)
 	if err != nil {
 		return nil, err
@@ -340,11 +367,87 @@ func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]
 	return out, nil
 }
 
+// MCPActivityTS returns the (distinct, ascending) timestamps at which MCP usage
+// was credited to a project. Session detection unions these with the other
+// activity ledgers.
+func (s *Store) MCPActivityTS(projectID string, sinceUnix int64) ([]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT ts FROM mcp_usage_events WHERE project_id = ? AND ts >= ? ORDER BY ts`,
+		projectID, sinceUnix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var ts int64
+		if err := rows.Scan(&ts); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
+// MetricActivityTS returns the (distinct, ascending) timestamps at which tool
+// metric growth was recorded for a project.
+func (s *Store) MetricActivityTS(projectID string, sinceUnix int64) ([]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT ts FROM metric_events WHERE project_id = ? AND ts >= ? ORDER BY ts`,
+		projectID, sinceUnix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var ts int64
+		if err := rows.Scan(&ts); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
+// MCPUsageBetween sums the MCP calls and savings credited to a project inside
+// [start, end], plus the per-tool split the session card renders.
+func (s *Store) MCPUsageBetween(projectID string, startUnix, endUnix int64) (calls, saved, without int64, byTool map[string]int64, err error) {
+	rows, err := s.db.Query(
+		`SELECT tool, COALESCE(SUM(calls), 0), COALESCE(SUM(tokens_saved), 0), COALESCE(SUM(tokens_without), 0)
+		 FROM mcp_usage_events WHERE project_id = ? AND ts >= ? AND ts <= ? GROUP BY tool`,
+		projectID, startUnix, endUnix,
+	)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	defer rows.Close()
+
+	byTool = map[string]int64{}
+	for rows.Next() {
+		var tool string
+		var c, sv, wo int64
+		if err := rows.Scan(&tool, &c, &sv, &wo); err != nil {
+			return 0, 0, 0, nil, err
+		}
+		calls += c
+		saved += sv
+		without += wo
+		byTool[tool] = c
+	}
+	return calls, saved, without, byTool, rows.Err()
+}
+
 // PruneMetricEvents drops events older than the given unix timestamp. The
 // dashboard never queries beyond the largest window (7 days), so old rows are
 // pure dead weight.
 func (s *Store) PruneMetricEvents(olderThanUnix int64) error {
-	_, err := s.db.Exec(`DELETE FROM metric_events WHERE ts < ?`, olderThanUnix)
+	if _, err := s.db.Exec(`DELETE FROM metric_events WHERE ts < ?`, olderThanUnix); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM mcp_usage_events WHERE ts < ?`, olderThanUnix)
 	return err
 }
 
@@ -397,6 +500,16 @@ func (s *Store) GetConfig(key string) (string, error) {
 	var value string
 	err := s.db.QueryRow(`SELECT value FROM config WHERE key = ?`, key).Scan(&value)
 	return value, err
+}
+
+// DB exposes the underlying handle so satellite packages (telemetry) can own
+// their own tables in the same file.
+//
+// Sharing one database keeps a single file to back up and one migration path,
+// instead of a second SQLite file whose lifecycle nobody manages. The satellite
+// packages create only their own tables and never touch these.
+func (s *Store) DB() *sql.DB {
+	return s.db
 }
 
 func (s *Store) Close() error {

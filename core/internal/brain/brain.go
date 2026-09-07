@@ -81,7 +81,34 @@ func safePath(dwytHome, target string) error {
 	return nil
 }
 
+// HasVaultDir reports whether a vault directory already exists for the
+// project, in either the canonical "<hash>_<name>" or the legacy "<hash>"
+// layout. It is read-only: read-side helpers (status, diagnostics) must never
+// create a vault as a side effect of being called.
+func HasVaultDir(dwytHome, projectPath string) bool {
+	if strings.TrimSpace(projectPath) == "" {
+		return false
+	}
+	id := db.HashPath(projectPath)
+	projectsDir := filepath.Join(dwytHome, "projects")
+	candidates := []string{id}
+	if named := VaultDirectoryName(id, filepath.Base(projectPath)); named != id {
+		candidates = append([]string{named}, candidates...)
+	}
+	for _, name := range candidates {
+		if info, err := os.Stat(filepath.Join(projectsDir, name)); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
+	// Note: the project path itself is NOT required to exist here — vault
+	// naming only hashes the path string, and internal flows rely on that.
+	// Callers that take user input (project switch, daemon startup) are
+	// responsible for validating that the directory is real, so a stale path
+	// never phantom-projects a vault into existence.
 	id := db.HashPath(projectPath)
 	projectName := filepath.Base(projectPath)
 
@@ -176,7 +203,7 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 	}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	legacyDir := filepath.Join(projectsDir, projectHash)
-	canonicalDir := filepath.Join(projectsDir, VaultDirectoryName(projectHash, projectName))
+	canonicalDir := filepath.Join(projectsDir, ResolveVaultDirName(projectsDir, projectHash, projectName))
 
 	// Nothing to migrate: the canonical directory already exists and the
 	// hash-only directory does not. This is the steady state.
@@ -555,7 +582,34 @@ func flattenInto(src, dst string) error {
 	return nil
 }
 
+// safeEntryName neutralizes a caller-provided entry type before it can reach a
+// filesystem path. Entry types arrive from HTTP and MCP clients, and a value
+// like "../../tmp/x" would otherwise escape the vault through the generated
+// file name. Only [A-Za-z0-9._-] survive; everything else collapses to "-",
+// leading dots and dashes are stripped (no hidden files, no ".." segments), and
+// the result is capped to a sane file-name length.
+func safeEntryName(entryType string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(entryType) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	name := strings.TrimLeft(b.String(), "-.")
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	if name == "" {
+		return "note"
+	}
+	return name
+}
+
 func appendToMarkdown(brainDir, entryType, content string) {
+	entryType = safeEntryName(entryType)
 	var targetFile string
 	switch entryType {
 	case "decision":
@@ -585,6 +639,9 @@ migrated: true
 }
 
 func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) error {
+	// The entry type is client-controlled and becomes part of generated file
+	// names downstream; sanitize it before anything branches on it.
+	entryType = safeEntryName(entryType)
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	defer pb.invalidateStats()
@@ -604,6 +661,12 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 	}
 }
 
+// SaveContextSnapshot writes the full "rich handoff" note.
+//
+// In v5 this is no longer the default end-of-task save — SaveCompactSnapshot is
+// (spec §19). It remains available for the case the spec explicitly reserves it
+// for: a complex handoff where the commands, actions and prose genuinely need to
+// survive. Callers reach it through `POST /api/obsidian/context?rich=true`.
 func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string, error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
@@ -734,6 +797,14 @@ func appendFile(path, content string) error {
 	return err
 }
 
+// Search is the pre-v5 broad substring search: every matching note, ordered by
+// modification time, capped at 30.
+//
+// SearchV2 is the v5 default for agent-facing retrieval (spec §27) because this
+// shape is the wrong one for a token budget — the newest 30 notes are mostly
+// session history and the caller cannot ask for the two decisions it needed.
+// Search stays for local tooling and diagnostics that genuinely want "every
+// note containing this string".
 func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	pb.mu.RLock()
 	defer pb.mu.RUnlock()
@@ -1058,13 +1129,20 @@ func AutoSaveCommand(pb *ProjectObsidian, command string) error {
 	return pb.SaveEntry("note", content, []string{"dwyt", "command"})
 }
 
+// writeFrontmatter emits the note header, including the v5 lifecycle block
+// (spec §22, §25) so the housekeeper can classify retention, detect staleness
+// and apply usage-aware retention without reading the body.
+//
+// The legacy `date` field is kept alongside `created_at` because existing
+// Obsidian views and user queries reference it; dropping it would break vaults
+// silently.
 func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Time) {
 	allTags := []string{"dwyt", entryType}
 	allTags = append(allTags, tags...)
 	fmt.Fprintf(f, "---\n")
 	fmt.Fprintf(f, "tags: [%s]\n", strings.Join(allTags, ", "))
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprintf(f, "type: %s\n", entryType)
+	fmt.Fprint(f, NewLifecycle(entryType, date).Render())
 	fmt.Fprintf(f, "---\n\n")
 }
 
@@ -1072,7 +1150,7 @@ func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectOb
 	fmt.Fprintf(f, "---\n")
 	fmt.Fprintf(f, "tags: [dwyt, context, session, conversation]\n")
 	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprintf(f, "type: context\n")
+	fmt.Fprint(f, NewLifecycle("context", date).Render())
 	fmt.Fprintf(f, "client: %q\n", snapshot.Client)
 	fmt.Fprintf(f, "project: %q\n", pb.ProjectName)
 	fmt.Fprintf(f, "project_path: %q\n", pb.ProjectPath)

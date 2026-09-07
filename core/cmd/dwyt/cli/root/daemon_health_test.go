@@ -40,14 +40,20 @@ func TestWaitForDaemonTimesOutWithLastHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := waitForDaemonURL(server.URL, 250*time.Millisecond, 25*time.Millisecond)
+	// A generous budget keeps this stable on loaded CI machines: the very
+	// short 250ms budget let the HTTP client time out while awaiting headers
+	// before the local server could answer, turning LastError into a context
+	// deadline error instead of the expected HTTP 503. Three seconds guarantee
+	// at least two probes even when the first one burns the full 2s probe
+	// timeout (daemonHealthProbeTimeout) before answering.
+	result := waitForDaemonURL(server.URL, 3*time.Second, 50*time.Millisecond)
 	if result.OK {
 		t.Fatal("daemon that never becomes ready must time out")
 	}
 	if result.LastError != "HTTP 503" {
 		t.Fatalf("last error = %q, want HTTP 503", result.LastError)
 	}
-	if result.Waited < 200*time.Millisecond {
+	if result.Waited < 2*time.Second {
 		t.Fatalf("waited %s, expected to use the total startup budget", result.Waited)
 	}
 }

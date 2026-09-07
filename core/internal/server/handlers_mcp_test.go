@@ -139,7 +139,7 @@ func TestAPIMCPConfigureKeepsCodebaseProxyCanonical(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected mcpServers, got %#v", config)
 	}
-	codebase, ok := servers["codebase"].(map[string]any)
+	codebase, ok := servers[mcpregistry.ServerCodebase].(map[string]any)
 	if !ok {
 		t.Fatalf("expected codebase server, got %#v", servers)
 	}
