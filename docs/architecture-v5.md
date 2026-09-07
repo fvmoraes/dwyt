@@ -6,7 +6,7 @@ retrieval, lifecycle, output, cache and cost.
 
 This document is the answer to "which component owns what". If you are looking
 for the HTTP surface, package map and startup flow, read
-[HOW-IT-WORKS](HOW-IT-WORKS.md) instead.
+[HOW-IT-WORKS](how-it-works.md) instead.
 
 ---
 
@@ -240,7 +240,7 @@ HTTP equivalents live under `/api/optimizer/*`, `/api/housekeeper/*` and
 
 ### `dwyt_obsidian` and `dwyt_codebase`
 
-See [Obsidian Law](OBSIDIAN-LAW.md) and [Codebase Law](CODEBASE-LAW.md).
+See [Obsidian Law](obsidian-law.md) and [Codebase Law](codebase-law.md).
 
 ---
 

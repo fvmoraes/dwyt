@@ -2,7 +2,7 @@
 
 The Obsidian vault is the official project memory in DWYT. Agents must use it to recover context, preserve decisions, track work, and hand off useful state to future agents.
 
-`dwyt_obsidian` is the **Brain**: memory, not code structure. For code symbols, dependencies, call paths, and impact analysis, follow the [Codebase Law](CODEBASE-LAW.md). For how memory ages out and what survives, see [Architecture v5](ARCHITECTURE-V5.md).
+`dwyt_obsidian` is the **Brain**: memory, not code structure. For code symbols, dependencies, call paths, and impact analysis, follow the [Codebase Law](codebase-law.md). For how memory ages out and what survives, see [Architecture v5](architecture-v5.md).
 
 ## Mandatory Workflow
 

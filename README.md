@@ -42,7 +42,7 @@ irm https://raw.githubusercontent.com/fvmoraes/dwyt/main/install.ps1 | iex
 
 The installer downloads `dwyt_windows_<arch>.zip` from the latest release, verifies its **SHA-256** checksum, installs `dwyt.exe` under `%APPDATA%\dwyt\bin`, adds that folder to your user PATH, and runs `dwyt install` to set up the tools. From a local clone you can run `.\install.ps1` (add `-SkipDeps` to install only the binary).
 
-See the dedicated [Windows documentation](docs/windows/README.md) for installation, updating, troubleshooting, and Windows Terminal / PowerShell integration.
+See the dedicated [Windows documentation](docs/windows/readme.md) for installation, updating, troubleshooting, and Windows Terminal / PowerShell integration.
 
 ---
 
@@ -139,7 +139,7 @@ Managed by the internal **ProcessManager**:
 - Dynamic port (9749, falls back to alternatives if occupied)
 - **View Logs** button for real diagnostics on failure
 
-The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/CODEBASE-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/codebase-law.md) and [Tokens Saved](docs/tokens-saved.md).
 
 ### Obsidian — mandatory memory
 
@@ -183,7 +183,7 @@ Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>_<project-name>
 | `POST /api/obsidian/summarize` | Rebuild the vault summary |
 | `POST /api/obsidian/context` | Save complete task/session context |
 
-The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/OBSIDIAN-LAW.md) and [Tokens Saved](docs/TOKENS-SAVED.md).
+The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/obsidian-law.md) and [Tokens Saved](docs/tokens-saved.md).
 
 ### Context Optimizer — `dwyt_optimizer`
 
@@ -355,9 +355,66 @@ Setup creates or updates these files in the project directory. Local configs wit
 4. **`dwyt_optimizer`** — context budget, output contract, tool-output compaction, cache guidance
 5. **Headroom** — use only as compatible proxy/cache optimization
 
-The generated instructions enforce the [Codebase Law](docs/CODEBASE-LAW.md) and [Obsidian Law](docs/OBSIDIAN-LAW.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
+The generated instructions enforce the [Codebase Law](docs/codebase-law.md) and [Obsidian Law](docs/obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
 
-For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/ARCHITECTURE-V5.md).
+For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/architecture-v5.md).
+
+---
+
+## Why DWYT exists
+
+Every token an agent re-reads is money and latency. In a typical session the same files are re-explored, the same context is rebuilt from scratch, tool output floods the window, and the model narrates what it already knows. DWYT attacks each of those:
+
+- **Deterministic, not magical** — every saving decision (budget, ranking, compaction, routing) is a pure function of metadata. No LLM call is spent deciding how to save tokens, because that would be self-defeating.
+- **Honest by construction** — a value that was not measured renders as "—", never as a flattering zero; estimated and observed live in separate columns all the way to the UI, and the benchmark refuses to turn fixtures into product claims.
+- **Memory that outlives the session** — the Obsidian brain keeps canonical knowledge, decisions and sessions per project, with a housekeeper that promotes knowledge *before* deleting anything and never touches notes it did not create.
+
+## Technologies
+
+| Layer | Choice |
+|---|---|
+| Backend | Go 1.25, single static binary (cobra CLI + gin HTTP) |
+| Storage | SQLite (`modernc.org/sqlite`, pure Go — no CGO) + markdown vaults |
+| Frontend | React + TypeScript + Vite, embedded in the binary at build time |
+| MCP | stdio servers (`dwyt_optimizer`, `dwyt_obsidian`, `dwyt_codebase`) + a transparent/opt-in stdio shim (`dwyt mcp-proxy`) |
+| Telemetry | Hand-rolled OTLP/HTTP JSON exporter (no OTel SDK dependency tree) |
+| Release | GoReleaser for 5 platforms (linux amd64/arm64, macOS amd64/arm64, Windows amd64), automatic on `main` |
+
+## Project structure
+
+```
+.
+├── core/                        # the DWYT module
+│   ├── main.go                  # entry point + MCP subcommand dispatch
+│   ├── cmd/dwyt/cli/            # cobra commands (root, config, bench, daemon, mcp-proxy…)
+│   ├── cmd/obsidian-mcp/        # standalone Obsidian MCP entry (legacy path)
+│   ├── internal/                # all packages below
+│   │   ├── optimizer/           # Optimizer runtime (plan, register, usage, route)
+│   │   ├── contextopt/          # candidates, budgeter, Token ROI, GC, routing
+│   │   ├── toolopt/             # tool output compaction
+│   │   ├── outputopt/           # output contracts + structured responses
+│   │   ├── cacheintel/          # stable prefix builder + diagnostics
+│   │   ├── provider/            # capabilities + pricing catalog
+│   │   ├── rawstore/            # content-addressed raw object store
+│   │   ├── telemetry/           # request/task ledgers, OTLP export
+│   │   ├── housekeeper/         # memory lifecycle + ghost vault sweep hook
+│   │   ├── brain/               # vaults, canonical memory, snapshots, migration
+│   │   ├── mcp/                 # MCP tool definitions (optimizer, obsidian)
+│   │   ├── mcpregistry/         # client config generation per AI tool
+│   │   ├── mcpproxy/            # stdio shim (transparent / optimized)
+│   │   ├── server/              # daemon: HTTP API + embedded dashboard
+│   │   ├── dwytconfig/          # consolidated v5 configuration
+│   │   ├── db/                  # SQLite store (projects, metrics, usage)
+│   │   ├── benchmark/           # deterministic bench (spec §69)
+│   │   ├── procman/             # managed services (codebase, headroom)
+│   │   ├── security/            # home guards, protected paths
+│   │   └── …                    # detect, install, integrate, kiropow, platform…
+│   └── web/                     # React dashboard source (built into server/dist)
+├── docs/                        # this documentation set
+├── install-lib/                 # shared installer helpers
+├── install.sh / install.ps1     # one-command installers (Unix / Windows)
+└── .github/workflows/           # CI (test) and automatic releases
+```
 
 ---
 
@@ -403,7 +460,7 @@ GET  /api/kiro/power/status
 POST /api/kiro/power/refresh
 ```
 
-See [Kiro Power](docs/KIRO-POWER.md).
+See [Kiro Power](docs/kiro-power.md).
 
 ---
 
@@ -495,6 +552,23 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 
 - **Linux / macOS / Windows** all run the dashboard, API, SQLite, MCP servers, Headroom proxy, and the cross-platform process manager natively.
 - **RTK** terminal compression has **no upstream Windows binary**. On Windows, DWYT uses a pre-installed `rtk.exe` if found and otherwise skips it with a clear message — every other feature works normally. See the [Windows troubleshooting guide](docs/windows/troubleshooting.md#rtk).
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [How It Works](docs/how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
+| [Architecture v5](docs/architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
+| [Codebase Law](docs/codebase-law.md) | Mandatory code-graph workflow for agents |
+| [Obsidian Law](docs/obsidian-law.md) | Mandatory memory workflow for agents |
+| [Tokens Saved](docs/tokens-saved.md) | Where the savings numbers come from; sessions and windows |
+| [Kiro Power](docs/kiro-power.md) | Kiro Power paths, frontmatter, MCP behavior |
+| [Release Process](docs/release-process.md) | Automatic releases, semver conventions (scopes, `!`, BREAKING CHANGE) |
+| [Changelog](docs/CHANGELOG.md) | Notable changes per release |
+| [Windows docs](docs/windows/readme.md) | Installation, update, troubleshooting, PowerShell/Terminal notes |
+| [Agent rules](docs/rules/rules.md) | Repo conventions for agents working on DWYT itself |
 
 ---
 

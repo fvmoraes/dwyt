@@ -45,7 +45,7 @@ Vite outputs to `core/internal/server/dashboard/dist/`. At build time, GoRelease
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ dwyt binary (single static executable, ~37MB)           │
+│ dwyt binary (single static executable, ~40MB)           │
 │                                                         │
 │  ┌──────────────┐  ┌──────────┐  ┌──────────────────┐  │
 │  │ CLI (Cobra)   │  │ Gin HTTP │  │ React SPA        │  │
@@ -144,9 +144,10 @@ dwyt daemon
 ### Structure
 
 ```
-~/.dwyt/projects/<sha256[:12]>/
+~/.dwyt/projects/<sha256[:12]>_<project-name>/
 ├── index.md                  # project index with structure overview
 ├── context.md                # full summary, rebuilt from all files
+├── .dwyt/vault.json          # DWYT vault metadata (hash, name)
 ├── instructions/
 │   ├── obsidian-law.md       # mandatory memory workflow
 │   └── codebase-law.md       # mandatory code graph workflow
@@ -164,6 +165,8 @@ dwyt daemon
 │   └── index.md              # investigation notes and failures
 ├── context/                  # complete task/session context snapshots
 ├── knowledge/                # knowledge base articles
+├── 90-sessions/              # compact session snapshots (StateHash-deduplicated,
+│                             # capped at 100 by the housekeeper)
 └── logs/
     ├── sessions/             # legacy session records
     ├── errors/               # legacy error records
@@ -307,16 +310,20 @@ The MCP registry manages MCP server configurations for AI clients (Claude Deskto
 
 | Server | Binary | Endpoint |
 |--------|--------|----------|
-| `codebase` | `codebase-memory-mcp` | HTTP on port 9749 |
-| `obsidian` | `dwyt` (subcommand `obsidian-mcp`) | stdio (launched by AI agents) |
+| `dwyt_optimizer` | `dwyt` (subcommand `optimizer-mcp`) | stdio (launched by AI agents) |
+| `dwyt_codebase` | `codebase-memory-mcp` via `dwyt mcp-proxy` | stdio (usage-counted by the shim) |
+| `dwyt_obsidian` | `dwyt` (subcommand `obsidian-mcp`) | stdio (launched by AI agents) |
 
-The Obsidian MCP is embedded in the main `dwyt` binary and is invoked as
-`dwyt obsidian-mcp`. Earlier versions created a sibling `dwyt-obsidian-mcp`
-copy of the binary, which the installer sometimes failed to write on
-Windows (file in use, locked by AV, partial permissions). The canonical
-command no longer requires that copy — only the real `dwyt` binary needs to
-be present, and any leftover `dwyt-obsidian-mcp` file is removed on the
-next configure.
+The Optimizer and Obsidian MCPs are embedded in the main `dwyt` binary and invoked
+through subcommands, so no renamed binary copies exist on any platform. The Codebase
+MCP runs behind the DWYT stdio shim (`mcp-proxy`) so its tool calls are countable by
+the dashboard; every failure path of the shim bypasses to the original bytes, and
+without the shim present the entry heals back to running the binary directly.
+
+Pre-v5 server keys (`codebase`, `obsidian`, `dwyt`, `dwyt-codebase`, ...) are removed
+and rewritten to their canonical `dwyt_*` names on the next configure — the daemon
+now also runs a full config sync at startup, so legacy leftovers such as a bare
+`codebase` entry next to `dwyt_codebase` disappear without manual action.
 
 ### Registry Operations
 
@@ -334,11 +341,13 @@ The `/api/mcp/registry` endpoint uses two-tier detection:
 
 ### Config Sync
 
-When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards):
+When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards, the
+setup flow, `dwyt .`, or — since the v5 startup reconcile — automatically when the
+daemon boots for the clients selected in setup):
 1. Saves the registry to disk
 2. Creates backup of current entries
 3. Writes Claude Desktop config → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/claude-desktop/` (Linux)
-4. Writes per-project MCP configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `opencode.json`)
+4. Writes per-project MCP configs (`.mcp.json`, `.claude/mcp.json`, `.vscode/mcp.json`, `.kiro/settings/mcp.json`, `.kiro/mcp.json`, `opencode.json`) — a full sync removes DWYT's historical server keys, so pre-v5 leftovers such as a bare `codebase` entry next to `dwyt_codebase` are cleaned up
 5. Rolls back on failure
 
 ### API Endpoints
@@ -354,6 +363,28 @@ When `ConfigureMCP` is called (via the "Configure MCP" button on dashboard cards
 | GET | `/api/mcp/services/logs?name=` | Get server logs |
 
 ---
+
+## Context Optimizer
+
+`dwyt_optimizer` (served by the main binary through the `optimizer-mcp` subcommand)
+owns the efficiency policy. Its session state lives in the daemon, shared by every
+AI client on the machine. Key internals:
+
+| Package | Responsibility |
+|---------|----------------|
+| `internal/optimizer` | MCP-facing runtime: plan, register, output profile, cache guidance, compaction, usage, routing |
+| `internal/contextopt` | ContextCandidate, budgeter, Token ROI ranker, session state, context GC, routing scores, progressive retrieval (confidence gate, stop conditions) |
+| `internal/toolopt` | Tool output compaction (summary first, raw on demand, similar-error dedup, RTK-aware passthrough) |
+| `internal/outputopt` | Per-phase output contracts with the artifact exception, structured response schema |
+| `internal/cacheintel` | Stable prefix builder, cache identity, prefix stability diagnostics |
+| `internal/provider` | Provider capabilities with safe fallback, versioned pricing catalog |
+| `internal/rawstore` | Content-addressed raw object store (`dwyt://objects/<id>`, 0600, 8 MiB cap) |
+| `internal/telemetry` | Request/task ledgers (NULL-preserving), cost per completed task, OTLP/HTTP JSON export |
+| `internal/housekeeper` | Memory lifecycle: 100-session cap, TTLs, promotion before deletion, stale detection, dedup, ghost vault sweep |
+
+Deterministic rules throughout: no LLM call is ever spent deciding how to save
+tokens. The benchmark (`dwyt bench`) runs five scenarios over four arms and ends
+with `claim_allowed: false` — no percentage from a fixture is a product claim.
 
 ## Kiro Power
 
@@ -514,6 +545,16 @@ DWYT separates real telemetry from transparent local estimates:
 
 Codebase estimates use indexed graph size to approximate manual repository exploration avoided by MCP queries. Obsidian estimates use vault markdown bytes to approximate manual context rereads avoided by search/summarize/context APIs. Both are conservative and labeled local until those tools expose native telemetry.
 
+### Session and window accounting
+
+Cumulative counters never reset, which is why they cannot answer "what did DWYT save *in this sitting*". Three timestamped ledgers make windows and sessions possible:
+
+- `metric_events` — per-tool metric deltas (savings, commands, requests, graph nodes), recorded idempotently on every dashboard poll;
+- `mcp_usage_events` — MCP calls credited by the stdio shim (calls, tokens saved/without);
+- `llm_request_events` — observed provider usage (tokens by class, latency, cost), written when an agent reports via `dwyt_report_usage`.
+
+A **session** is a span of project activity separated from other activity by a 30-minute inactivity gap. `GET /api/session/summary` returns the current session (savings per tool, MCP calls, observed tokens/s and models, previous sessions). The dashboard's **Current Session** card renders it; when no provider has reported usage, tokens/s falls back to an estimate from the session's manual-cost baseline and is labelled `(est.)` — observed and estimated are never mixed.
+
 ---
 
 ## UI Architecture
@@ -522,7 +563,7 @@ Codebase estimates use indexed graph size to approximate manual repository explo
 
 ```
 /#/               → Boot component (decides Setup vs Dashboard)
-/#/dashboard      → Dashboard (4 tool cards + totals banner)
+/#/dashboard      → Dashboard (totals banner, 6 cards in 3 aligned pairs, logs)
 /#/setup          → Setup Wizard (tools + clients + project)
 ```
 
@@ -531,7 +572,8 @@ Codebase estimates use indexed graph size to approximate manual repository explo
 | Param | Description |
 |-------|------------|
 | `?project=/path` | Active project path |
-| `?reload=5` | Auto-refresh interval (0/5/10 seconds) |
+| `?reload=30` | Auto-refresh interval in seconds (default **10**, `0` disables) |
+| `?window=6h` | Savings window: `1h`, `6h` (default), `24h`, `2d`, `7d`, `all` |
 | `?logs=1` | Show logs panel |
 | `?from=dashboard` | Navigation source |
 
@@ -541,7 +583,9 @@ Codebase estimates use indexed graph size to approximate manual repository explo
 Component mounts
   → GET /api/context       (project, tools, config, all repos)
   → GET /api/status        (tool health)
-  → GET /api/tool-details  (per-tool metrics)
+  → GET /api/tool-details  (per-tool metrics, scoped to the savings window)
+  → GET /api/session/summary (current session: savings, MCP calls, tokens/s, models)
+  → GET /api/telemetry/summary (optimizer, brain health, housekeeper, cache capability)
   → GET /api/logs          (service status)
   → GET /api/obsidian/status  (obsidian stats)
   → SSE /api/events        (real-time project_switch, status updates)
@@ -552,9 +596,11 @@ Component mounts
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| Dashboard | `Dashboard.tsx` | Main dashboard: 4 cards, totals banner, logs, global repo view |
+| Dashboard | `Dashboard.tsx` | Main dashboard: totals banner, 6 cards in 3 aligned pairs (Codebase-RTK, Headroom-Obsidian, Optimizer-Session), logs, global repo view |
 | SetupWizard | `SetupWizard.tsx` | Tool/IA client selection + install progress |
 | Sidebar | `Sidebar.tsx` | Project list with switching |
+| CardSession | `CardSession.tsx` | Current session: per-sitting savings, MCP calls, observed tokens/s and models (est. fallback labelled) |
+| CardOptimizer | `CardOptimizer.tsx` | Context Optimizer: context reduction, cache capability, cost (observed/estimated), housekeeper actions |
 | FileBrowser | `FileBrowser.tsx` | Directory browser for project path selection |
 | Button | `Button.tsx` | Unified button with variants (primary, secondary, success, danger, ghost, icon), sizes, loading/disabled states |
 | Toggle | `Toggle.tsx` | Generic toggle switch with disabled state |
@@ -660,9 +706,18 @@ Component mounts
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET | `/api/rtk/gain` | RTK token metrics |
-| GET | `/api/tool-details?path=` | Per-tool details |
+| GET | `/api/tool-details?path=&window=` | Per-tool details, scoped to the savings window |
+| GET | `/api/session/summary?path=&gap_minutes=` | Current + previous sessions (savings, MCP calls, observed tokens/s, models) |
 | GET | `/api/fs/browse?path=` | Filesystem browser |
 | GET | `/api/logs` | Tool log status |
+| GET | `/api/telemetry/summary?window=` | Optimizer aggregate + brain health + housekeeper + cache capability |
+| GET | `/api/telemetry/requests` | Request ledger (paginated) |
+| POST | `/api/telemetry/task/complete` | Task outcome ledger entry |
+| GET | `/api/optimizer/*` | DWYT MCP Optimizer HTTP surface (plan, register, output-profile, cache-guidance, compact, raw, usage, route) |
+| GET | `/api/housekeeper/status` · POST `/api/housekeeper/run` | Memory lifecycle inspection and passes |
+| GET | `/api/memory/canonical` · POST `/api/memory/canonical` | Canonical project memory |
+| GET | `/api/config/v5` | Effective v5 configuration |
+| GET | `/api/vault/migration` · POST `/api/vault/migrate` | Vault migration report (dry run) and pass |
 
 ---
 
@@ -676,35 +731,37 @@ Component mounts
 │   ├── headroom
 │   └── codebase-memory-mcp
 ├── codebase/                     # Codebase indexes (CBM_CACHE_DIR=~/.dwyt/codebase)
-├── data/                         # (reserved)
+├── config/                       # v5 configuration + registries
+│   ├── dwyt.json                 # consolidated configuration (spec §57)
+│   ├── mcp-registry.json         # MCP server registry
+│   └── pricing.json              # optional provider pricing catalog
+├── data/                         # Obsidian API config, protection config
 ├── headroom-venv/                # Python virtualenv
 ├── logs/                         # ProcessManager captured logs
 │   ├── codebase-stdout.log
 │   ├── codebase-stderr.log
 │   ├── headroom-stdout.log
 │   └── headroom-stderr.log
-├── projects/                     # Per-project data
-│   └── <sha12>/                  # project ID = SHA256(path)[:12]
-│       ├── obsidian/              # Obsidian vault
-│       │   ├── index.md
-│       │   ├── context.md
-│       │   ├── instructions/
-│       │   ├── maps/
-│       │   ├── templates/
-│       │   ├── decisions/
-│       │   ├── tasks/
-│       │   ├── debug/
-│       │   ├── context/
-│       │   ├── knowledge/
-│       │   └── logs/
-│       ├── project.json          # project metadata + last_open
-│       └── headroom-proxy.json   # headroom proxy state (when active)
+├── objects/                      # Raw Object Store (dwyt://objects/<id>, 0600)
+├── projects/                     # Per-project vaults
+│   └── <sha12>_<project-name>/   # canonical layout; ID = SHA256(path)[:12]
+│       ├── index.md              # vault root is the Obsidian vault
+│       ├── .dwyt/vault.json      # DWYT vault metadata (hash, name)
+│       ├── instructions/
+│       ├── maps/
+│       ├── templates/
+│       ├── decisions/
+│       ├── tasks/
+│       ├── debug/
+│       ├── context/
+│       ├── knowledge/
+│       ├── 90-sessions/          # compact session snapshots (cap: 100)
+│       └── logs/
 ├── powers/
 │   └── dwyt-power/               # Kiro Power files (regenerable)
-├── dwyt.db                       # SQLite (projects + config)
+├── dwyt.db                       # SQLite (projects, config, telemetry ledgers)
 ├── dwyt.log                      # DWYT log file
 ├── env.sh                        # Shell environment (sourced in .zshrc)
-├── config.json                   # (legacy — now in SQLite)
 └── state.json                    # Runtime state (PIDs, ports, errors)
 ```
 
@@ -712,6 +769,8 @@ Component mounts
 > (`AGENTS.md`, `CLAUDE.md`, `.mcp.json`, etc.) selected during Setup.
 > All DWYT state lives exclusively in `~/.dwyt/`.
 > `~/.dwyt/projects/` is persistent project memory and is protected from automatic cleanup.
+> Vault directories use the `<hash>_<project-name>` layout: legacy hash-only vaults are renamed
+> when a project name can be recovered, and swept when they hold nothing but DWYT scaffolding.
 
 > **Windows:** the same layout lives under `%APPDATA%\dwyt\` (for example
 > `C:\Users\<user>\AppData\Roaming\dwyt`). Shell environment is written to `env.ps1`
@@ -754,7 +813,7 @@ Shared instruction files such as `AGENTS.md`, `.cursor/rules/dwyt.mdc`,
 4. Headroom     → compatible proxy/cache optimization only
 ```
 
-All generated instruction files also enforce the Codebase Law and Obsidian Law, require append-only safe DWYT blocks, and preserve user content outside managed sections. See [CODEBASE-LAW.md](CODEBASE-LAW.md) and [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
+All generated instruction files also enforce the Codebase Law and Obsidian Law, require append-only safe DWYT blocks, and preserve user content outside managed sections. See [codebase-law.md](codebase-law.md) and [obsidian-law.md](obsidian-law.md).
 
 ---
 
@@ -778,7 +837,7 @@ cp dwyt ~/.local/bin/dwyt
 
 ### Automated Releases
 
-DWYT uses **automatic releases on every commit** to `main`. See [RELEASE-PROCESS.md](RELEASE-PROCESS.md) for details.
+DWYT uses **automatic releases on every commit** to `main`. See [release-process.md](release-process.md) for details.
 
 **Quick Summary:**
 - Every push to `main` triggers a release
@@ -936,15 +995,23 @@ DWYT documentation follows a structured approach to maintain clarity and histori
 ```
 docs/
 ├── CHANGELOG.md              # Chronological list of all changes (organized by date)
-├── HOW-IT-WORKS.md          # This file - always kept up-to-date with latest architecture
-├── CODEBASE-LAW.md          # Mandatory code graph workflow for agents
-├── OBSIDIAN-LAW.md          # Mandatory memory workflow for agents
-├── TOKENS-SAVED.md          # Real metrics and local estimate formulas
-├── KIRO-POWER.md            # Kiro Power paths, frontmatter, and MCP behavior
-└── DDMMYYYY/                # Date-specific folders for detailed change documentation
-    ├── FIXES.md             # Technical details of fixes implemented on this date
-    ├── SUMMARY.md           # Final status, test results, and executive summary
-    └── VALIDATION.md        # Validation commands and procedures
+├── readme.md                 # Documentation index (lowercase filenames)
+├── how-it-works.md          # This file - always kept up-to-date with latest architecture
+├── architecture-v5.md       # Component roles and v5 rules
+├── codebase-law.md          # Mandatory code graph workflow for agents
+├── obsidian-law.md          # Mandatory memory workflow for agents
+├── tokens-saved.md          # Real metrics and local estimate formulas
+├── kiro-power.md            # Kiro Power paths, frontmatter, and MCP behavior
+├── release-process.md       # CI/CD workflow and commit conventions
+├── rules/
+│   └── rules.md             # Repo conventions for agents working on DWYT
+└── windows/                 # Windows-first support docs
+    ├── readme.md
+    ├── installation.md
+    ├── update.md
+    ├── troubleshooting.md
+    ├── powershell.md
+    └── windows-terminal.md
 ```
 
 ### Documentation Maintenance Rules
@@ -955,7 +1022,7 @@ docs/
    - All documentation must be in `docs/` folder
    - Use dated folders for change-specific documentation
 
-2. **ALWAYS update HOW-IT-WORKS.md** when making architectural changes
+2. **ALWAYS update how-it-works.md** when making architectural changes
    - This file is the single source of truth for current architecture
    - Update relevant sections immediately after code changes
    - Keep it synchronized with the actual codebase
@@ -1025,7 +1092,7 @@ vim docs/$(date +%d%m%Y)/SUMMARY.md     # Status + executive summary + commit me
 vim docs/$(date +%d%m%Y)/VALIDATION.md  # Validation commands
 
 # 4. Update main documentation
-vim docs/HOW-IT-WORKS.md      # Update architecture sections
+vim docs/how-it-works.md      # Update architecture sections
 vim docs/CHANGELOG.md          # Add entry at the top
 
 # 5. Commit everything together
@@ -1040,7 +1107,7 @@ git commit -m "fix: critical stability improvements (v3.1.0)"
    - Show before/after comparisons
    - Explain root causes
 
-2. **Keep HOW-IT-WORKS.md current** 
+2. **Keep how-it-works.md current** 
    - Update immediately after changes
    - Remove outdated information
    - Add new sections as needed
@@ -1059,19 +1126,19 @@ git commit -m "fix: critical stability improvements (v3.1.0)"
    - FIXES.md: developers and code reviewers
    - SUMMARY.md: team leads, QA, and management
    - VALIDATION.md: QA engineers and testers
-   - HOW-IT-WORKS.md: new developers and contributors
+   - how-it-works.md: new developers and contributors
 
 ### Finding Documentation
 
-**For current architecture:** Read `docs/HOW-IT-WORKS.md`
+**For current architecture:** Read `docs/how-it-works.md`
 
-**For component roles and v5 optimization:** Read `docs/ARCHITECTURE-V5.md`
+**For component roles and v5 optimization:** Read `docs/architecture-v5.md`
 
-**For agent laws:** Read `docs/CODEBASE-LAW.md` and `docs/OBSIDIAN-LAW.md`
+**For agent laws:** Read `docs/codebase-law.md` and `docs/obsidian-law.md`
 
-**For savings calculations:** Read `docs/TOKENS-SAVED.md`
+**For savings calculations:** Read `docs/tokens-saved.md`
 
-**For Kiro integration:** Read `docs/KIRO-POWER.md`
+**For Kiro integration:** Read `docs/kiro-power.md`
 
 **For recent changes:** Check `docs/CHANGELOG.md` (top entries)
 

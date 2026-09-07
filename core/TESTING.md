@@ -6,7 +6,7 @@ Este guia explica como executar e criar testes para o DWYT.
 
 Antes de alterar ou executar validacoes relevantes, consulte o Obsidian do projeto para contexto. Durante a investigacao, salve decisoes tecnicas como `decision` e status de validacao como `task`. Ao finalizar, salve contexto completo com pedido, resumo, arquivos, decisoes, acoes, comandos, erros, resultado, proximos passos e contexto para agentes futuros.
 
-Consulte tambem [`docs/OBSIDIAN-LAW.md`](../docs/OBSIDIAN-LAW.md).
+Consulte tambem [`docs/obsidian-law.md`](../docs/obsidian-law.md).
 
 ## 📋 Tipos de Testes
 

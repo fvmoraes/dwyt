@@ -2,7 +2,7 @@
 
 The `dwyt_codebase` MCP knowledge graph is the primary source for the current structure of a project. Agents must use it whenever they need to understand, validate, diagnose, refactor, or change real code.
 
-`dwyt_codebase` is **Code Intelligence**: structure, not memory. For decisions, task history, and handoff context, follow the [Obsidian Law](OBSIDIAN-LAW.md). For how much of a graph answer belongs in the context window, that decision belongs to `dwyt_optimizer` — see [Architecture v5](ARCHITECTURE-V5.md).
+`dwyt_codebase` is **Code Intelligence**: structure, not memory. For decisions, task history, and handoff context, follow the [Obsidian Law](obsidian-law.md). For how much of a graph answer belongs in the context window, that decision belongs to `dwyt_optimizer` — see [Architecture v5](architecture-v5.md).
 
 ## Mandatory Workflow
 

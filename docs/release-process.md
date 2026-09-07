@@ -308,7 +308,7 @@ Ensure commits follow the convention:
 
 Before release work, consult the project Obsidian vault and rebuild/read its summary. During release preparation, save important decisions as `decision` entries and release task status as `task` entries. At the end, save complete context with files, decisions, actions, commands, errors, outcome, next steps, and future-agent context.
 
-See [OBSIDIAN-LAW.md](OBSIDIAN-LAW.md).
+See [obsidian-law.md](obsidian-law.md).
 
 ### 1. Atomic Commits
 

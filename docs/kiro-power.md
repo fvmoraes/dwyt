@@ -44,7 +44,7 @@ Add power from local path: ~/.dwyt/powers/dwyt-power
     └── headroom.md
 ```
 
-Only real MCP servers are placed in `mcp.json`: Codebase and Obsidian. RTK is a CLI convention, and Headroom is an API proxy/cache optimization, so both are expressed through steering instructions.
+Only real MCP servers are placed in `mcp.json`: `dwyt_optimizer`, `dwyt_codebase` and `dwyt_obsidian`. RTK is a CLI convention, and Headroom is an API proxy/cache optimization, so both are expressed through steering instructions.
 
 ## POWER.md Frontmatter
 

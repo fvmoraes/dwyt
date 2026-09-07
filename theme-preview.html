@@ -20,31 +20,32 @@
   *{box-sizing:border-box;}
   body{
     margin:0;min-height:100vh;color:var(--text);
-    font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:12px;
+    font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:14px;
     background:linear-gradient(135deg,#0a0a11 0%,#11111b 50%,#0a0a11 100%);
     background-attachment:fixed;padding:14px;
   }
-  .logo{font-size:20px;font-weight:700;letter-spacing:1px;}
+  .logo{font-size:22px;font-weight:700;letter-spacing:1px;}
   .logo .yt{color:var(--yellow);}
   .summary{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:10px 0;}
   .summary>div{padding:8px 12px;background:var(--ctp-mantle);border-right:1px solid var(--border);}
   .summary .total{background:linear-gradient(135deg,rgba(166,227,161,0.07) 0%,var(--ctp-mantle) 100%);border-right:none;}
-  .lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
-  .big{font-size:20px;font-weight:700;}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
+  .big{font-size:22px;font-weight:700;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;}
   .card{
     background:linear-gradient(150deg,var(--card) 0%,var(--card-2) 100%);
-    border:1px solid var(--border);border-radius:8px;padding:14px;
-    box-shadow:0 4px 24px rgba(0,0,0,.45),inset 0 1px 0 rgba(203,166,247,.06);
+    border:1px solid rgba(203,166,247,0.18);border-radius:8px;padding:14px;
+    box-shadow:0 6px 28px rgba(0,0,0,.55),inset 0 1px 0 rgba(203,166,247,.08);
     backdrop-filter:blur(12px);display:flex;flex-direction:column;gap:6px;
   }
-  .chead{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px;}
+  .chead{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px;}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);margin-left:auto;}
-  .row{display:flex;justify-content:space-between;font-size:10px;}
+  .row{display:flex;justify-content:space-between;font-size:12px;}
   .row .k{color:var(--muted);text-transform:uppercase;}
+  .row .est{color:var(--muted);font-style:italic;}
   .hr{border-top:1px solid var(--border);margin:3px 0;}
   .btns{display:flex;gap:6px;margin-top:4px;}
-  button{font-family:inherit;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer;border:1px solid;}
+  button{font-family:inherit;border-radius:5px;padding:5px 10px;font-size:13px;cursor:pointer;border:1px solid;}
   .primary{background:var(--accent);color:var(--on-accent);border-color:rgba(249,226,175,.45);font-weight:700;}
   .secondary{background:rgba(69,71,90,.45);color:var(--text);border-color:rgba(203,166,247,.14);}
   .success{background:rgba(166,227,161,.12);color:var(--green);border-color:rgba(166,227,161,.35);}
@@ -52,17 +53,17 @@
   .bar{height:4px;border-radius:2px;background:var(--border);overflow:hidden;margin-top:4px;}
   .fill{height:100%;border-radius:2px;}
   .swatches{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
-  .sw{display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted);}
+  .sw{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
   .chip{width:16px;height:16px;border-radius:4px;border:1px solid rgba(255,255,255,.08);}
 </style>
 </head>
 <body>
-  <div class="logo">DW<span class="yt">YT</span> <span style="font-size:11px;color:var(--muted)">· Catppuccin Mocha preview</span></div>
+  <div class="logo">DW<span class="yt">YT</span> <span style="font-size:13px;color:var(--muted)">· Catppuccin Mocha preview · v5</span></div>
 
   <div class="summary">
     <div><div class="lbl">Without DWYT</div><div class="big" style="color:var(--red)">116.5M</div></div>
     <div><div class="lbl">With DWYT</div><div class="big" style="color:var(--green)">28.9M</div></div>
-    <div class="total"><div class="lbl">Total Savings</div><div class="big" style="color:var(--yellow)">87.6M <span style="font-size:11px;color:var(--green)">↓75%</span></div></div>
+    <div class="total"><div class="lbl">Total Savings</div><div class="big" style="color:var(--yellow)">87.6M <span style="font-size:13px;color:var(--green)">↓75%</span></div></div>
   </div>
 
   <div class="grid">
@@ -97,6 +98,32 @@
       <div class="row"><span class="k">obsidian files</span><span>57</span></div>
       <div class="row"><span class="k">mcp</span><span style="color:var(--green)">🟢 configured</span></div>
       <div class="btns"><button class="primary">Rebuild summary</button><button class="secondary">Open Vault</button></div>
+    </div>
+
+    <div class="card">
+      <div class="chead" style="color:var(--accent)">CONTEXT OPTIMIZER<span class="dot"></span></div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">context reduction</span><span>42.1%</span></div>
+      <div class="row"><span class="k">avoided tokens</span><span>1.2M</span></div>
+      <div class="row"><span class="k">cache hit</span><span>38.4%</span></div>
+      <div class="row"><span class="k">cache control</span><span>advised</span></div>
+      <div class="row"><span class="k">cost (observed)</span><span>$0.4217</span></div>
+      <div class="row"><span class="k">cost / completed task</span><span>$0.1090</span></div>
+      <div class="btns"><button class="success">Preview cleanup</button><button class="primary">Run cleanup</button></div>
+    </div>
+
+    <div class="card">
+      <div class="chead" style="color:var(--yellow)">CURRENT SESSION<span class="dot"></span></div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">started</span><span>12m</span></div>
+      <div class="row"><span class="k">session length</span><span>25m</span></div>
+      <div class="row"><span class="k">tokens saved (session)</span><span>31.2K</span></div>
+      <div class="row"><span class="k">mcp calls</span><span>9</span></div>
+      <div class="row"><span class="k">tokens / s</span><span>14.2</span></div>
+      <div class="row"><span class="k">llm requests (obs/total)</span><span>6/6</span></div>
+      <div class="hr"></div>
+      <div class="row"><span class="k">claude-sonnet-4-5</span><span>18.4K · 78% · 12.2 t/s</span></div>
+      <div class="row"><span class="k">gpt-5.2-codex</span><span>5.2K · 22% · 9.8 t/s</span></div>
     </div>
   </div>
 
