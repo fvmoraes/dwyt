@@ -309,11 +309,14 @@ Setup creates or updates these files in the project directory. Local configs wit
 
 **All instruct IAs** in this priority order:
 1. **RTK** — prefix shell commands with `rtk`
-2. **Codebase MCP** — use the graph before structural code work
-3. **Obsidian MCP** — search/summarize memory and save context
-4. **Headroom** — use only as compatible proxy/cache optimization
+2. **`dwyt_codebase`** — use the graph before structural code work
+3. **`dwyt_obsidian`** — search/summarize memory and save context
+4. **`dwyt_optimizer`** — context budget, output contract, tool-output compaction, cache guidance
+5. **Headroom** — use only as compatible proxy/cache optimization
 
 The generated instructions enforce the [Codebase Law](docs/CODEBASE-LAW.md) and [Obsidian Law](docs/OBSIDIAN-LAW.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
+
+For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/ARCHITECTURE-V5.md).
 
 ---
 

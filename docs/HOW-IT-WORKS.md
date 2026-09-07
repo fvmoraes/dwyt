@@ -1065,6 +1065,8 @@ git commit -m "fix: critical stability improvements (v3.1.0)"
 
 **For current architecture:** Read `docs/HOW-IT-WORKS.md`
 
+**For component roles and v5 optimization:** Read `docs/ARCHITECTURE-V5.md`
+
 **For agent laws:** Read `docs/CODEBASE-LAW.md` and `docs/OBSIDIAN-LAW.md`
 
 **For savings calculations:** Read `docs/TOKENS-SAVED.md`

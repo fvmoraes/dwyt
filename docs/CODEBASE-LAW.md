@@ -1,8 +1,8 @@
 # Codebase Law
 
-The Codebase MCP knowledge graph is the primary source for the current structure of a project. Agents must use it whenever they need to understand, validate, diagnose, refactor, or change real code.
+The `dwyt_codebase` MCP knowledge graph is the primary source for the current structure of a project. Agents must use it whenever they need to understand, validate, diagnose, refactor, or change real code.
 
-Codebase is structure, not memory. For decisions, task history, and handoff context, follow the [Obsidian Law](OBSIDIAN-LAW.md).
+`dwyt_codebase` is **Code Intelligence**: structure, not memory. For decisions, task history, and handoff context, follow the [Obsidian Law](OBSIDIAN-LAW.md). For how much of a graph answer belongs in the context window, that decision belongs to `dwyt_optimizer` — see [Architecture v5](ARCHITECTURE-V5.md).
 
 ## Mandatory Workflow
 
@@ -15,6 +15,7 @@ Codebase is structure, not memory. For decisions, task history, and handoff cont
    - Use `trace_path` for callers, callees, dependencies, data flow, and impact.
    - Use `get_code_snippet` for exact source once the graph returns the qualified name.
    - Use `query_graph` for advanced multi-hop or aggregate questions.
+   - Retrieve incrementally: map → symbols → references and dependencies → snippets and ranges → a full file only when nothing smaller answers the question. A whole file is the most expensive answer the graph can give, so it should be the last one asked for.
 
 3. **Edit with impact awareness**
    - Do not change critical code based only on filename guesses.
@@ -40,8 +41,9 @@ Even then, prefer RTK for shell commands: `rtk grep`, `rtk find`, `rtk read`, an
 DWYT tool priority for agents is:
 
 1. **RTK** for shell commands and terminal output compression.
-2. **Codebase MCP** for current code structure.
-3. **Obsidian MCP** for memory, decisions, tasks, and handoff context.
-4. **Headroom** for compatible API proxy/cache optimization.
+2. **`dwyt_codebase`** for current code structure.
+3. **`dwyt_obsidian`** for memory, decisions, tasks, and handoff context.
+4. **`dwyt_optimizer`** for context budget, the output contract, tool-output compaction, and cache guidance.
+5. **Headroom** for compatible API proxy/cache optimization.
 
 Headroom is not a source of truth. Codex authenticated through ChatGPT/OAuth must not use Headroom.
