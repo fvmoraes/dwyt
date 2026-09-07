@@ -96,6 +96,8 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/telemetry/summary", ds.apiTelemetrySummary)
 		api.GET("/telemetry/requests", ds.apiTelemetryRequests)
 		api.POST("/telemetry/task/complete", ds.apiTelemetryTaskComplete)
+		// Session: the per-sitting view of savings and observed LLM throughput.
+		api.GET("/session/summary", ds.apiSessionSummary)
 		api.GET("/obsidian/status", ds.apiObsidianStatus)
 		api.GET("/obsidian/search", ds.apiObsidianSearch)
 		api.POST("/obsidian/save", ds.apiObsidianSave)

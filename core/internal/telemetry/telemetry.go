@@ -549,3 +549,97 @@ func floatPtrFromNull(v sql.NullFloat64) *float64 {
 	out := v.Float64
 	return &out
 }
+
+// ActivityTS returns the (distinct, ascending) timestamps of request events for
+// a project, so session detection can union them with the other activity
+// ledgers.
+func (s *Store) ActivityTS(projectID string, since time.Time) ([]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT ts FROM llm_request_events WHERE project_id = ? AND ts >= ? ORDER BY ts`,
+		projectID, since.Unix(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var ts int64
+		if err := rows.Scan(&ts); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
+// ModelUsage is the per-model rollup of the requests inside a time span. Token
+// sums skip events that did not report the field (NULL), so a model that never
+// reported reasoning tokens does not drag an imaginary 0 into the aggregate.
+type ModelUsage struct {
+	Model            string
+	Requests         int
+	ObservedRequests int
+	InputTokens      int
+	CachedTokens     int
+	OutputTokens     int
+	ReasoningTokens  int
+	EstimatedCostUSD float64
+	ActualCostUSD    float64
+	// FirstTS/LastTS bound the model's own activity inside the span (unix
+	// seconds); they ground the tokens-per-second figure.
+	FirstTS int64
+	LastTS  int64
+}
+
+// TotalTokens is the conversational weight of the model usage: input + output
+// + reasoning, the classes a user recognizes as "the conversation".
+func (m ModelUsage) TotalTokens() int {
+	return m.InputTokens + m.OutputTokens + m.ReasoningTokens
+}
+
+// SessionUsage rolls the request ledger up per model inside [start, end].
+func (s *Store) SessionUsage(projectID string, start, end time.Time) ([]ModelUsage, error) {
+	rows, err := s.db.Query(`
+		SELECT COALESCE(model, ''),
+		       COUNT(*),
+		       COALESCE(SUM(observed), 0),
+		       COALESCE(SUM(input_tokens), 0),
+		       COALESCE(SUM(cached_input_tokens), 0),
+		       COALESCE(SUM(output_tokens), 0),
+		       COALESCE(SUM(reasoning_tokens), 0),
+		       COALESCE(SUM(estimated_cost_usd), 0),
+		       COALESCE(SUM(actual_cost_usd), 0),
+		       MIN(ts), MAX(ts)
+		FROM llm_request_events
+		WHERE project_id = ? AND ts >= ? AND ts <= ?
+		GROUP BY model
+		ORDER BY MIN(ts)`,
+		projectID, start.Unix(), end.Unix(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ModelUsage
+	for rows.Next() {
+		var m ModelUsage
+		var estimated, actual sql.NullFloat64
+		if err := rows.Scan(
+			&m.Model, &m.Requests, &m.ObservedRequests,
+			&m.InputTokens, &m.CachedTokens, &m.OutputTokens, &m.ReasoningTokens,
+			&estimated, &actual, &m.FirstTS, &m.LastTS,
+		); err != nil {
+			return nil, err
+		}
+		if estimated.Valid {
+			m.EstimatedCostUSD = estimated.Float64
+		}
+		if actual.Valid {
+			m.ActualCostUSD = actual.Float64
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}

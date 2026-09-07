@@ -114,6 +114,19 @@ export const T = {
     scopeGlobal: 'global',
     scopeGlobalRtkNote: 'global RTK total (this project has no .rtk yet)',
     scopeGlobalHeadroomNote: 'global proxy total (shared across projects)',
+    // Current-session card (per-sitting savings + observed LLM throughput).
+    sessionTitle: 'Current Session',
+    sessionSaved: 'Tokens saved (session)',
+    sessionStarted: 'Started',
+    sessionDuration: 'Session length',
+    sessionMcpCalls: 'MCP calls',
+    sessionTps: 'Tokens / s',
+    sessionRequests: 'LLM requests (observed/total)',
+    sessionModels: 'Models used',
+    sessionObservedHint: 'Only usage the provider reported counts here; clients report it via dwyt_report_usage.',
+    sessionNone: 'No activity yet — use the tools and the session appears here.',
+    sessionPrevious: 'Previous sessions',
+
     // v5 Context Optimizer card. "—" is shown wherever the backend could not
     // measure a value, so the hints explain what observed vs estimated means.
     optimizerTitle: 'Context Optimizer',
@@ -247,6 +260,19 @@ export const T = {
     scopeGlobal: 'global',
     scopeGlobalRtkNote: 'total global do RTK (este projeto ainda não tem .rtk)',
     scopeGlobalHeadroomNote: 'total global do proxy (compartilhado entre projetos)',
+    // Card da sessão atual (economia por sentada + throughput LLM observado).
+    sessionTitle: 'Sessão atual',
+    sessionSaved: 'Tokens economizados (sessão)',
+    sessionStarted: 'Início',
+    sessionDuration: 'Duração da sessão',
+    sessionMcpCalls: 'Chamadas MCP',
+    sessionTps: 'Tokens / s',
+    sessionRequests: 'Requisições LLM (observadas/total)',
+    sessionModels: 'Modelos usados',
+    sessionObservedHint: 'Apenas uso reportado pelo provider conta aqui; os clientes reportam via dwyt_report_usage.',
+    sessionNone: 'Nenhuma atividade ainda — use as ferramentas e a sessão aparece aqui.',
+    sessionPrevious: 'Sessões anteriores',
+
     // Card do Context Optimizer (v5). "—" aparece sempre que o backend não pôde
     // medir o valor; as dicas explicam a diferença entre observado e estimado.
     optimizerTitle: 'Context Optimizer',

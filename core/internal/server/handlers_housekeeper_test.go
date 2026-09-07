@@ -421,8 +421,9 @@ func TestTelemetryTaskCompleteValidatesAndRecords(t *testing.T) {
 
 func TestWindowForMapping(t *testing.T) {
 	for name, want := range map[string]string{
-		"1h": "1h", "hour": "1h", "7d": "7d", "week": "7d",
-		"30d": "30d", "all": "all", "": "24h", "nonsense": "24h",
+		"1h": "1h", "hour": "1h", "6h": "6h", "24h": "24h", "day": "24h",
+		"7d": "7d", "week": "7d", "30d": "30d", "all": "all",
+		"": "6h", "nonsense": "6h",
 	} {
 		if _, got := windowFor(name); got != want {
 			t.Fatalf("windowFor(%q) = %q, want %q", name, got, want)
@@ -434,7 +435,7 @@ func TestWindowForMapping(t *testing.T) {
 		t.Fatalf("the all-time window starts too late: %v", since)
 	}
 	// And every other window must be in the past.
-	for _, name := range []string{"1h", "24h", "7d", "30d"} {
+	for _, name := range []string{"1h", "6h", "24h", "7d", "30d"} {
 		if start, _ := windowFor(name); !start.Before(time.Now()) {
 			t.Fatalf("window %q does not start in the past: %v", name, start)
 		}

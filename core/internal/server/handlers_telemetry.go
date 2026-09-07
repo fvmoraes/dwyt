@@ -59,13 +59,18 @@ func (ds *DashboardServer) currentProjectID() string {
 	return db.HashPath(project)
 }
 
-// windowFor maps a window name to a start time. Unknown names fall back to 24h,
-// which is the window the dashboard opens on.
+// windowFor maps a window name to a start time. Unknown names fall back to 6h,
+// which is the window the dashboard opens on (and the user's requested default:
+// recent activity, not a lifetime total).
 func windowFor(name string) (time.Time, string) {
 	now := time.Now()
 	switch name {
 	case "1h", "hour":
 		return now.Add(-time.Hour), "1h"
+	case "6h":
+		return now.Add(-6 * time.Hour), "6h"
+	case "24h", "day":
+		return now.Add(-24 * time.Hour), "24h"
 	case "7d", "week":
 		return now.Add(-7 * 24 * time.Hour), "7d"
 	case "30d", "month":
@@ -73,7 +78,7 @@ func windowFor(name string) (time.Time, string) {
 	case "all":
 		return time.Unix(0, 0), "all"
 	default:
-		return now.Add(-24 * time.Hour), "24h"
+		return now.Add(-6 * time.Hour), "6h"
 	}
 }
 

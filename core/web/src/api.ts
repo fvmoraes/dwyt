@@ -468,9 +468,70 @@ export interface TelemetryPayload {
   cache_capability?: CacheCapability
 }
 
-export async function getTelemetrySummary(window = '24h'): Promise<TelemetryPayload> {
+export async function getTelemetrySummary(window = '6h'): Promise<TelemetryPayload> {
   const r = await fetch(`${API}/telemetry/summary?window=${encodeURIComponent(window)}`)
   return parseJSON(r) as Promise<TelemetryPayload>
+}
+
+// ── Session summary ──────────────────────────────────────────────────────────
+// The per-sitting view: what this project's current activity session saved and
+// how the observed LLM conversation flowed (tokens/s, models). Sessions are
+// activity spans separated by a 30-minute inactivity gap by default.
+
+export interface SessionModel {
+  model: string
+  requests: number
+  observed_requests: number
+  tokens_total: number
+  tokens_per_sec: number
+  share_pct: number
+}
+
+export interface SessionLLM {
+  available: boolean
+  reason?: string
+  requests: number
+  observed_requests: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cached_tokens: number
+  tokens_per_sec: number | null
+  duration_secs: number
+  models: SessionModel[]
+}
+
+export interface PreviousSession {
+  started_at: string
+  last_activity: string
+  duration_secs: number
+  tokens_saved: number
+  mcp_calls: number
+}
+
+export interface SessionSummary {
+  available: boolean
+  reason?: string
+  project?: string
+  gap_minutes?: number
+  session?: { started_at: string; last_activity: string; duration_secs: number }
+  savings?: {
+    tokens_saved: number
+    without_dwyt_tokens: number
+    with_dwyt_tokens: number
+    by_tool: Record<string, number>
+  }
+  mcp?: { calls: number; calls_by_tool: Record<string, number> }
+  llm?: SessionLLM
+  previous_sessions?: PreviousSession[]
+}
+
+export async function getSessionSummary(projectPath?: string): Promise<SessionSummary> {
+  const params = new URLSearchParams()
+  if (projectPath) params.set('path', projectPath)
+  const qs = params.toString()
+  const r = await fetch(`${API}/session/summary${qs ? `?${qs}` : ''}`)
+  return parseJSON(r) as Promise<SessionSummary>
 }
 
 export interface OptimizerPolicy {
