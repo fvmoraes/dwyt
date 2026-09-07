@@ -261,6 +261,11 @@ func newCodebaseEntry(dwytShim, target string) MCPServerEntry {
 // proxy launches the selected Codebase executable. It never copies, updates,
 // deletes, or otherwise changes target itself; that target may be a user-owned
 // external/local installation.
+//
+// The entry is stored under the canonical dwyt_codebase key. Storing it under
+// the historical "codebase" key made the sync emit BOTH entries into client
+// configs, and the two instances of the same binary then contended for the
+// Codebase daemon until both failed.
 func (r *Registry) SetCodebaseTarget(target string) error {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -271,10 +276,16 @@ func (r *Registry) SetCodebaseTarget(target string) error {
 	}
 	binDir := filepath.Join(dwytHome(), "bin")
 	entry := newCodebaseEntry(filepath.Join(binDir, exeName("dwyt")), target)
-	if existing, ok := r.MCPServers["codebase"]; ok {
+	// Enabled priority: canonical entry first, then the historical key. The
+	// legacy key is removed unconditionally — keeping it is what duplicated
+	// the server in every client config.
+	if existing, ok := r.MCPServers[ServerCodebase]; ok {
 		entry.Enabled = existing.Enabled
+	} else if legacy, ok := r.MCPServers["codebase"]; ok {
+		entry.Enabled = legacy.Enabled
 	}
-	r.MCPServers["codebase"] = entry
+	delete(r.MCPServers, "codebase")
+	r.MCPServers[ServerCodebase] = entry
 	return r.Save()
 }
 
@@ -327,12 +338,20 @@ func (r *Registry) Set(name string, entry MCPServerEntry) {
 	r.MCPServers[ServerName(name)] = entry
 }
 
+// IsBinaryInstalled reports whether a server's real binary is present,
+// resolving the name through ServerName first.
 func (r *Registry) IsBinaryInstalled(name string) bool {
-	name = ServerName(name)
-	entry, ok := r.MCPServers[name]
+	entry, ok := r.MCPServers[ServerName(name)]
 	if !ok {
 		return false
 	}
+	return r.entryInstalled(ServerName(name), entry)
+}
+
+// entryInstalled is the wiring check for a concrete entry. Kept separate from
+// IsBinaryInstalled so the sync path can test entries that live under
+// non-canonical registry keys without a second lookup masking them.
+func (r *Registry) entryInstalled(name string, entry MCPServerEntry) bool {
 	// For shimmed servers the real binary is Target (Command is the dwyt shim,
 	// which always exists). "Installed" must reflect the real server's presence
 	// so a config is never written pointing the shim at a missing target.
@@ -479,20 +498,42 @@ func isCanonicalDWYTMCP(name string) bool {
 // entriesForSync returns enabled, installed registry entries in the requested
 // scope. A nil/empty scope means a full sync; a non-empty scope is used by a
 // card-level reconfigure action and prevents it from changing other servers.
+// entriesForSync resolves the entries a config sync may write, keyed by
+// CANONICAL name only. Registry entries stored under historical keys ("codebase",
+// "obsidian", ...) are merged into their canonical twin — the canonical entry
+// wins — so a legacy key can never leak into a client config next to its
+// dwyt_-prefixed twin (the duplicate codebase + dwyt_codebase bug).
 func (r *Registry) entriesForSync(names []string) map[string]MCPServerEntry {
+	view := make(map[string]MCPServerEntry)
+	for key, entry := range r.MCPServers {
+		canonical := ServerName(key)
+		if canonical == "" {
+			canonical = key
+		}
+		if _, exists := view[canonical]; exists && key != canonical {
+			continue // the entry stored under the canonical key wins
+		}
+		view[canonical] = entry
+	}
+
+	installed := func(name string, entry MCPServerEntry) bool {
+		return r.entryInstalled(name, entry)
+	}
+
 	entries := make(map[string]MCPServerEntry)
 	if len(names) == 0 {
-		for name, entry := range r.MCPServers {
-			if entry.Enabled && r.IsBinaryInstalled(name) {
+		for name, entry := range view {
+			if entry.Enabled && installed(name, entry) {
 				entries[name] = entry
 			}
 		}
 		return entries
 	}
 	for _, name := range names {
-		entry, ok := r.MCPServers[name]
-		if ok && entry.Enabled && r.IsBinaryInstalled(name) {
-			entries[name] = entry
+		key := ServerName(name)
+		entry, ok := view[key]
+		if ok && entry.Enabled && installed(key, entry) {
+			entries[key] = entry
 		}
 	}
 	return entries
