@@ -83,16 +83,9 @@ func TestParseModeDefaultsToTransparent(t *testing.T) {
 			t.Fatalf("%q must default to transparent", in)
 		}
 	}
-	// The pre-rename name must keep working, or a config written before the
-	// rename would silently fall back to transparent.
-	for _, legacy := range []string{"governed", "GOVERNED"} {
-		if ParseMode(legacy) != ModeOptimized {
-			t.Fatalf("%q is the legacy name of optimized mode and must still parse", legacy)
-		}
-	}
 }
 
-func TestGovernedCompactsKnownLargeResponse(t *testing.T) {
+func TestOptimizedCompactsKnownLargeResponse(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: "status: pass\nsummary: 400 lines suppressed\n", rawRef: "dwyt://objects/abc123"}
 
@@ -120,7 +113,7 @@ func TestGovernedCompactsKnownLargeResponse(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesUnknownTools(t *testing.T) {
+func TestOptimizedBypassesUnknownTools(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: "summary", rawRef: "dwyt://objects/abc"}
 
@@ -136,7 +129,7 @@ func TestGovernedBypassesUnknownTools(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesSmallResponses(t *testing.T) {
+func TestOptimizedBypassesSmallResponses(t *testing.T) {
 	stub := &stubCompactor{rendered: "s", rawRef: "dwyt://objects/abc"}
 	out, gov := runOptimized(t, "run_tests", resultFrame(1, "ok"), stub)
 	if gov.compressed != 0 {
@@ -147,7 +140,7 @@ func TestGovernedBypassesSmallResponses(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesWhenArchivingFails(t *testing.T) {
+func TestOptimizedBypassesWhenArchivingFails(t *testing.T) {
 	raw := bigOutput()
 
 	// Daemon unreachable.
@@ -170,7 +163,7 @@ func TestGovernedBypassesWhenArchivingFails(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesWhenCompactionDoesNotReduce(t *testing.T) {
+func TestOptimizedBypassesWhenCompactionDoesNotReduce(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: raw + raw, rawRef: "dwyt://objects/abc"}
 
@@ -180,7 +173,7 @@ func TestGovernedBypassesWhenCompactionDoesNotReduce(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesNonTextContent(t *testing.T) {
+func TestOptimizedBypassesNonTextContent(t *testing.T) {
 	pending := newPendingCalls()
 	counter := &callCounter{server: "codebase", pending: pending}
 	counter.Write([]byte(callFrame(1, "run_tests")))
@@ -207,7 +200,7 @@ func TestGovernedBypassesNonTextContent(t *testing.T) {
 	}
 }
 
-func TestGovernedBypassesErrorResponses(t *testing.T) {
+func TestOptimizedBypassesErrorResponses(t *testing.T) {
 	pending := newPendingCalls()
 	counter := &callCounter{server: "codebase", pending: pending}
 	counter.Write([]byte(callFrame(1, "run_tests")))
@@ -225,7 +218,7 @@ func TestGovernedBypassesErrorResponses(t *testing.T) {
 	}
 }
 
-func TestGovernedPreservesUnrelatedFramesByteExactly(t *testing.T) {
+func TestOptimizedPreservesUnrelatedFramesByteExactly(t *testing.T) {
 	frames := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -243,7 +236,7 @@ func TestGovernedPreservesUnrelatedFramesByteExactly(t *testing.T) {
 	}
 }
 
-func TestGovernedPreservesIsErrorAndExtensionFields(t *testing.T) {
+func TestOptimizedPreservesIsErrorAndExtensionFields(t *testing.T) {
 	raw := bigOutput()
 	pending := newPendingCalls()
 	counter := &callCounter{server: "codebase", pending: pending}

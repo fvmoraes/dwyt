@@ -868,10 +868,7 @@ func isOptimizerEntry(name string, entry MCPServerEntry) bool {
 		return true
 	}
 	for _, a := range entry.Args {
-		// `governor-mcp` is the pre-rename subcommand; an entry still using it is
-		// the Optimizer and must be recognised as such rather than reported as an
-		// unknown server.
-		if a == "optimizer-mcp" || a == "governor-mcp" {
+		if a == "optimizer-mcp" {
 			return true
 		}
 	}

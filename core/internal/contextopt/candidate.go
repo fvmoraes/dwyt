@@ -4,7 +4,7 @@
 //
 // The optimizer is deliberately deterministic. Every decision it makes is a
 // pure function of the candidate metadata it is given, so the same inputs
-// always produce the same plan. That property is what lets DWYT govern
+// always produce the same plan. That property is what lets DWYT optimize
 // context without spending an extra LLM call to do it (spec §46: "prefer
 // deterministic classification when sufficient").
 package contextopt

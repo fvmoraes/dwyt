@@ -1189,12 +1189,13 @@ func TestLoadMigratesUnprefixedNamesPreservingEnabledFlag(t *testing.T) {
 	}
 }
 
-// An entry still using the pre-rename `governor-mcp` subcommand is the
-// Optimizer and must be recognised rather than treated as an unknown server.
-func TestLegacyGovernorSubcommandIsRecognised(t *testing.T) {
-	entry := MCPServerEntry{Command: "/tmp/dwyt", Args: []string{"governor-mcp"}}
+// The Optimizer is identified by its subcommand, so an entry carrying it must
+// never be mistaken for the legacy Codebase wiring that a bare "dwyt" key would
+// otherwise imply.
+func TestOptimizerEntryIsIdentifiedBySubcommand(t *testing.T) {
+	entry := MCPServerEntry{Command: "/tmp/dwyt", Args: []string{"optimizer-mcp"}}
 	if !isOptimizerEntry("", entry) {
-		t.Fatal("the pre-rename subcommand must still identify the Optimizer")
+		t.Fatal("the optimizer-mcp subcommand must identify the Optimizer")
 	}
 	if isLegacyCodebaseWiring(entry) {
 		t.Fatal("an Optimizer entry must never be mistaken for legacy codebase wiring")

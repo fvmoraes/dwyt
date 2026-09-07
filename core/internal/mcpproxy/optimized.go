@@ -42,18 +42,11 @@ const (
 	ModeOptimized Mode = "optimized"
 )
 
-// legacyOptimizedMode is the pre-rename name of ModeOptimized. It is still
-// accepted so a config file or client entry written before the rename keeps
-// working instead of silently falling back to transparent.
-const legacyOptimizedMode = "governed"
-
 // ParseMode maps a string to a Mode, defaulting to transparent. An unknown value
 // is not an error: an unrecognised mode must degrade to the safe behaviour rather
 // than refuse to start the MCP server.
 func ParseMode(s string) Mode {
-	trimmed := strings.TrimSpace(s)
-	if strings.EqualFold(trimmed, string(ModeOptimized)) ||
-		strings.EqualFold(trimmed, legacyOptimizedMode) {
+	if strings.EqualFold(strings.TrimSpace(s), string(ModeOptimized)) {
 		return ModeOptimized
 	}
 	return ModeTransparent

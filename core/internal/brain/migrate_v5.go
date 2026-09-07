@@ -423,7 +423,7 @@ func legacySnapshotFromNote(content string) CompactSnapshot {
 }
 
 // backfillLifecycle gives pre-v5 notes lifecycle metadata so the housekeeper can
-// govern them.
+// manage their retention.
 //
 // Opt-in on purpose: it rewrites frontmatter, and a note without DWYT metadata
 // might be one the user wrote. Marking it managed hands its retention to the

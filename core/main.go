@@ -39,19 +39,9 @@ func isObsidianMCPInvocation() bool {
 
 // isOptimizerMCPInvocation matches the DWYT Optimizer MCP, one of the three
 // official MCPs alongside dwyt_obsidian and dwyt_codebase.
-//
-// `governor-mcp` is still accepted: it is the pre-rename subcommand, and a client
-// config written before the rename would otherwise fail to start the server with
-// a Cobra "unknown command" error.
 func isOptimizerMCPInvocation() bool {
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if name == "dwyt-optimizer-mcp" || name == "dwyt-governor-mcp" {
-		return true
-	}
-	if len(os.Args) > 1 {
-		return os.Args[1] == "optimizer-mcp" || os.Args[1] == "governor-mcp"
-	}
-	return false
+	return name == "dwyt-optimizer-mcp" || (len(os.Args) > 1 && os.Args[1] == "optimizer-mcp")
 }
 
 func runObsidianMCP() {
