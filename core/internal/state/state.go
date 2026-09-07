@@ -264,7 +264,8 @@ func (s *RuntimeState) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.Path, data, 0644)
+	// 0600: the state lists project paths and client names for the local user.
+	return os.WriteFile(s.Path, data, 0600)
 }
 
 func (s *RuntimeState) maybeSave() {
@@ -274,7 +275,7 @@ func (s *RuntimeState) maybeSave() {
 		if s.Path != "" {
 			backupPath := s.Path + ".backup"
 			if data, marshalErr := json.MarshalIndent(s, "", "  "); marshalErr == nil {
-				os.WriteFile(backupPath, data, 0644)
+				os.WriteFile(backupPath, data, 0600)
 			}
 		}
 	}

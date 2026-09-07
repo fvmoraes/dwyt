@@ -2,11 +2,9 @@ package security
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type ProtectionConfig struct {
@@ -20,10 +18,6 @@ var defaultProtected = []string{
 
 func configPath(dwytHome string) string {
 	return filepath.Join(dwytHome, "data", "protection.json")
-}
-
-func logPath(dwytHome string) string {
-	return filepath.Join(dwytHome, "logs", "security.log")
 }
 
 func Load(dwytHome string) *ProtectionConfig {
@@ -60,38 +54,6 @@ func (pc *ProtectionConfig) IsProtected(dwytHome, target string) bool {
 	return false
 }
 
-func (pc *ProtectionConfig) LogBlockedAttempt(dwytHome, operation, path, reason string) {
-	if !pc.LogAttempts {
-		return
-	}
-	os.MkdirAll(filepath.Dir(logPath(dwytHome)), 0755)
-	f, err := os.OpenFile(logPath(dwytHome), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "[%s] BLOCKED op=%s path=%s reason=%s\n",
-		time.Now().Format(time.RFC3339), operation, path, reason)
-}
-
-// ValidateDelete checks if a path is safe to delete. Returns error if protected.
-func ValidateDelete(dwytHome, path string) error {
-	cfg := Load(dwytHome)
-	if cfg.IsProtected(dwytHome, path) {
-		cfg.LogBlockedAttempt(dwytHome, "delete", path, "protected path")
-		return fmt.Errorf("security: cannot delete protected path: %s", path)
-	}
-	return nil
-}
-
-// SafeRemove removes a path only if it's not protected.
-func SafeRemove(dwytHome, path string) error {
-	if err := ValidateDelete(dwytHome, path); err != nil {
-		return err
-	}
-	return os.RemoveAll(path)
-}
-
 // CleanHome removes all contents from dwytHome except protected paths.
 func CleanHome(dwytHome string) {
 	cfg := Load(dwytHome)
@@ -109,6 +71,12 @@ func CleanHome(dwytHome string) {
 }
 
 // IsSafeHome validates that a path looks like a legitimate DWYT home directory.
+//
+// The check exists because CleanHome removes everything under dwytHome that is
+// not protected. It must therefore reject any directory whose wipe would
+// destroy data far beyond DWYT: the user's home itself, any ancestor of it,
+// the filesystem root, and top-level system directories such as /etc or /usr —
+// including when they arrive through an explicit DWYT_HOME override.
 func IsSafeHome(dwytHome string) bool {
 	if dwytHome == "/" || dwytHome == "" {
 		return false
@@ -117,20 +85,32 @@ func IsSafeHome(dwytHome string) bool {
 	if err != nil {
 		return false
 	}
-	// Must be within user's home directory or be an explicit DWYT_HOME override
+	// Top-level system directories (/etc, /usr, /tmp, /opt, ...) are never a
+	// DWYT home.
+	if filepath.Dir(abs) == "/" {
+		return false
+	}
 	home, _ := os.UserHomeDir()
 	if home != "" {
 		homeAbs, _ := filepath.Abs(home)
-		if strings.HasPrefix(abs, homeAbs+string(os.PathSeparator)) || abs == homeAbs {
+		if abs == homeAbs {
+			// $HOME itself is exactly the misconfiguration this guard exists to
+			// catch: DWYT would treat the entire home as its data directory.
+			return false
+		}
+		if strings.HasPrefix(homeAbs, abs+string(os.PathSeparator)) {
+			// abs is an ancestor of $HOME (/home, /Users, ...).
+			return false
+		}
+		if strings.HasPrefix(abs, homeAbs+string(os.PathSeparator)) {
 			return true
 		}
 	}
-	// Allow explicit DWYT_HOME override if set
+	// Outside $HOME: only an explicit DWYT_HOME override qualifies, and it has
+	// already passed the root and ancestor checks above.
 	if dwytHomeEnv := os.Getenv("DWYT_HOME"); dwytHomeEnv != "" {
 		absOverride, _ := filepath.Abs(dwytHomeEnv)
-		if abs == absOverride {
-			return true
-		}
+		return abs == absOverride
 	}
 	return false
 }
@@ -150,6 +130,10 @@ func InitObsidianConfig(dwytHome string) {
 			"note":    "Configure API key from Obsidian REST API plugin settings",
 		}
 		data, _ := json.MarshalIndent(defaultConfig, "", "  ")
-		os.WriteFile(configFile, data, 0644)
+		os.WriteFile(configFile, data, 0600)
+		return
 	}
+	// The file may hold an API key the user pasted in later; a config world
+	// readable on a multi-user machine has no upside. Tighten best-effort.
+	os.Chmod(configFile, 0600)
 }

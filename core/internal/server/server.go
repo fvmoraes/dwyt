@@ -57,6 +57,16 @@ func (ds *DashboardServer) codebasePath() string {
 
 func (ds *DashboardServer) rtkPath() string { return ds.toolPath(toolsource.ToolRTK) }
 
+// projectDirExists reports whether path is an existing directory. Empty paths
+// and files do not count: a project is always a directory on disk.
+func projectDirExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	cwd, _ := os.Getwd()
 	project := os.Getenv("DWYT_PROJECT")
@@ -81,7 +91,25 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 
 	rs := state.Init(dwytHome)
 	rs.SetVersion(releaseVersion)
-	rs.SetCurrentProject(project, filepath.Base(project))
+	// Never adopt — or create a vault for — a directory that does not exist. A
+	// daemon started from a since-deleted directory (renamed repo, removed
+	// worktree) would otherwise phantom-project every dashboard and MCP call
+	// until the next restart, and the vault created for the ghost path would
+	// linger in ~/.dwyt/projects forever.
+	if !projectDirExists(project) {
+		if prev := strings.TrimSpace(rs.CurrentProject); prev != project && projectDirExists(prev) {
+			log.Warn("start project missing; keeping previous project",
+				log.Fields{"missing": project, "kept": prev})
+			project = prev
+		} else {
+			log.Warn("start project missing; starting without a project vault",
+				log.Fields{"project": project})
+			project = ""
+		}
+	}
+	if project != "" {
+		rs.SetCurrentProject(project, filepath.Base(project))
+	}
 	var setupCfg Config
 	hasSetupCfg := false
 	if store != nil {
@@ -97,7 +125,13 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		}
 	}
 
-	pb, brainErr := brain.NewProjectObsidian(dwytHome, project)
+	var pb *brain.ProjectObsidian
+	var brainErr error
+	if project != "" {
+		pb, brainErr = brain.NewProjectObsidian(dwytHome, project)
+	} else {
+		brainErr = fmt.Errorf("no existing project directory to attach a vault to")
+	}
 	if brainErr != nil {
 		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
 		rs.ToolErrors["obsidian"] = brainErr.Error()

@@ -261,7 +261,9 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 		h.retire(report, vault, n, cfg, "ttl expired")
 	}
 
-	// 2. The 100-session limit (spec §21).
+	// 2. The 100-session limit (spec §21). Unmanaged notes in the tail are
+	// counted by the limit but never removed, so the report only claims what
+	// actually left the vault.
 	sessions := filterSessions(notes)
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].Activity.After(sessions[j].Activity)
@@ -269,10 +271,11 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 	report.SessionsRetained = len(sessions)
 	if len(sessions) > cfg.KeepLatestSessions {
 		for _, n := range sessions[cfg.KeepLatestSessions:] {
-			h.retire(report, vault, n, cfg, "beyond the session limit")
-			report.SessionsRemoved++
+			if h.retire(report, vault, n, cfg, "beyond the session limit") {
+				report.SessionsRemoved++
+			}
 		}
-		report.SessionsRetained = cfg.KeepLatestSessions
+		report.SessionsRetained = len(sessions) - report.SessionsRemoved
 	}
 	// Sessions that expired but are still within the limit are also retired:
 	// the limit is a ceiling, not a reprieve from the TTL.
@@ -281,9 +284,10 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 			break
 		}
 		if expired(n, cfg, now) {
-			h.retire(report, vault, n, cfg, "ttl expired")
-			report.SessionsRemoved++
-			report.SessionsRetained--
+			if h.retire(report, vault, n, cfg, "ttl expired") {
+				report.SessionsRemoved++
+				report.SessionsRetained--
+			}
 		}
 	}
 
@@ -314,8 +318,16 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 
 // retire removes a note after extracting whatever is reusable from it
 // (spec §24). A failed extraction cancels the deletion: losing knowledge is
-// worse than keeping a stale note one more cycle.
-func (h *Housekeeper) retire(report *Report, vault *brain.ProjectObsidian, n noteRef, cfg Config, reason string) {
+// worse than keeping a stale note one more cycle. It reports whether the note
+// was actually removed (or, in a dry run, would have been), so callers can
+// keep the report honest about notes DWYT was not allowed to touch.
+func (h *Housekeeper) retire(report *Report, vault *brain.ProjectObsidian, n noteRef, cfg Config, reason string) bool {
+	// The lifecycle law (spec §61) is absolute: a note DWYT does not manage is
+	// never deleted, whatever rule reached for it. The TTL loop and the session
+	// limit both funnel through here, so this is the single enforcement point.
+	if !n.Lifecycle.Managed {
+		return false
+	}
 	if cfg.ExtractReusableKnowledge && cfg.PromoteToCanonicalMemory {
 		snapshot, ok := snapshotFromNote(n)
 		if ok {
@@ -329,24 +341,27 @@ func (h *Housekeeper) retire(report *Report, vault *brain.ProjectObsidian, n not
 					report.Errors = append(report.Errors, result.Errors...)
 					// Compilation partially failed. Keep the note: it is the
 					// only remaining copy of what could not be promoted.
-					return
+					return false
 				}
 			}
 		}
 	}
 	if cfg.DryRun {
 		report.ExpiredRemoved++
-		return
+		return true
 	}
 	if err := os.Remove(n.Path); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("remove %s: %v", filepath.Base(n.Path), err))
-		return
+		return false
 	}
 	report.ExpiredRemoved++
 	log.Info("housekeeper: retired note", log.Fields{"note": filepath.Base(n.Path), "reason": reason})
+	return true
 }
 
 // dedupeByStateHash removes older snapshots that describe an identical state.
+// Unmanaged notes are out of reach even here: identical content does not make
+// a user-authored note DWYT's to delete.
 func (h *Housekeeper) dedupeByStateHash(report *Report, sessions []noteRef, cfg Config) int {
 	seen := map[string]bool{}
 	removed := 0
@@ -359,6 +374,9 @@ func (h *Housekeeper) dedupeByStateHash(report *Report, sessions []noteRef, cfg 
 		}
 		if !seen[hash] {
 			seen[hash] = true
+			continue
+		}
+		if !n.Lifecycle.Managed {
 			continue
 		}
 		if cfg.DryRun {

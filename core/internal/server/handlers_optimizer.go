@@ -6,6 +6,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
+	"github.com/fvmoraes/dwyt/internal/outputopt"
 	"github.com/fvmoraes/dwyt/internal/rawstore"
 	"github.com/gin-gonic/gin"
 )
@@ -65,9 +66,17 @@ func (ds *DashboardServer) apiOptimizerOutputProfile(c *gin.Context) {
 		return
 	}
 	profile := ds.Optimizer.OutputProfile(c.Query("task_type"), c.Query("phase"))
+	// Structured responses (spec §35): expose the canonical response schema so
+	// a provider adapter or client can enforce it, instead of leaving the
+	// contract implicit in prose instructions.
+	var responseSchema map[string]interface{}
+	if profile.Structured {
+		responseSchema = outputopt.Schema()
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"profile":      profile,
-		"instructions": profile.Instructions(),
+		"profile":         profile,
+		"instructions":    profile.Instructions(),
+		"response_schema": responseSchema,
 	})
 }
 

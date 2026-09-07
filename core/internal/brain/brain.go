@@ -82,6 +82,11 @@ func safePath(dwytHome, target string) error {
 }
 
 func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) {
+	// Note: the project path itself is NOT required to exist here — vault
+	// naming only hashes the path string, and internal flows rely on that.
+	// Callers that take user input (project switch, daemon startup) are
+	// responsible for validating that the directory is real, so a stale path
+	// never phantom-projects a vault into existence.
 	id := db.HashPath(projectPath)
 	projectName := filepath.Base(projectPath)
 
@@ -555,7 +560,34 @@ func flattenInto(src, dst string) error {
 	return nil
 }
 
+// safeEntryName neutralizes a caller-provided entry type before it can reach a
+// filesystem path. Entry types arrive from HTTP and MCP clients, and a value
+// like "../../tmp/x" would otherwise escape the vault through the generated
+// file name. Only [A-Za-z0-9._-] survive; everything else collapses to "-",
+// leading dots and dashes are stripped (no hidden files, no ".." segments), and
+// the result is capped to a sane file-name length.
+func safeEntryName(entryType string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(entryType) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	name := strings.TrimLeft(b.String(), "-.")
+	if len(name) > 40 {
+		name = name[:40]
+	}
+	if name == "" {
+		return "note"
+	}
+	return name
+}
+
 func appendToMarkdown(brainDir, entryType, content string) {
+	entryType = safeEntryName(entryType)
 	var targetFile string
 	switch entryType {
 	case "decision":
@@ -585,6 +617,9 @@ migrated: true
 }
 
 func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) error {
+	// The entry type is client-controlled and becomes part of generated file
+	// names downstream; sanitize it before anything branches on it.
+	entryType = safeEntryName(entryType)
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	defer pb.invalidateStats()

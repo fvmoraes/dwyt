@@ -4,6 +4,38 @@ All notable changes to DWYT are documented here.
 
 ---
 
+## v5.0.0
+
+### Features
+
+- **DWYT MCP Optimizer** (formerly "Governor") — the efficiency-policy MCP: deterministic context planning with budget-before-retrieval, Token ROI ranking, progressive expansion, confidence gate and stop conditions; delta reuse by content hash; context GC by lifecycle state. Deterministic complexity/risk routing with an adaptive model/cost budget (`dwyt_route`).
+- **Brain v5** — canonical project memory with numbered areas, HOT/WARM/COLD temperature, compact snapshots keyed by a StateHash (timestamps excluded on purpose), and Search V2 (top-k 5, token-bounded, raw/stale excluded from the default search).
+- **Memory lifecycle** — Housekeeper with the 100-session cap, per-category TTLs, promotion before deletion (a failed compile cancels the delete), hash-based stale detection and deterministic dedup. Notes without `dwyt_managed` never expire; unknown note types classify as permanent.
+- **Raw Object Store** — content-addressed evidence under `~/.dwyt/objects/` with `dwyt://objects/<id>` references, TTLs and reference-guarded pruning.
+- **MCP proxy** — stdio shim with transparent mode (default, byte-exact) and opt-in optimized mode whose every failure path bypasses to the original bytes.
+- **Cache Intelligence** — provider capability catalog with safe generic fallback, versioned pricing catalog, configurable long-context pricing cliff, stable prefix builder with volatile-marker demotion, prefix stability diagnostics and cache capability state on the dashboard.
+- **Output contracts** — per-phase visible-token profiles with the artifact exception, and the structured response schema now exposed through `dwyt_output_profile` (`response_schema`) for providers that enforce structured output.
+- **Telemetry** — request and task-outcome ledgers (NULL-preserving, estimated vs observed kept separate), cost per *completed* task, hand-rolled OTLP/HTTP JSON export without the SDK dependency, and dashboard v5.
+- **Consolidated configuration** — `dwyt config show|init|validate` over `~/.dwyt/config/dwyt.json`; `mcp_proxy.default_mode` now actually governs the MCP shim (flag > env > config > transparent) instead of being dead config.
+- **Vault migration** — legacy hash-only vault directories adopt the `<hash>_<project_name>` layout; migration is copy-only, idempotent and dry-run-able.
+- **Deterministic benchmark** (`dwyt bench`) — five scenarios, four arms, and an explicit list of what it did not measure; the report ends with `claim_allowed: false`.
+
+### Security
+
+- **Fixed path traversal in `POST /api/obsidian/save`** — the client-controlled `type` reached generated file names, so a value like `../../x` could write files outside the vault. Entry types are now sanitized to `[A-Za-z0-9._-]` before anything branches on them.
+- **Fixed `DWYT_HOME=$HOME` catastrophe** — `IsSafeHome` accepted `$HOME` itself (and, via the override, top-level system directories). It now rejects `$HOME`, its ancestors, and root-level dirs like `/etc`; `uninstall`/`reinstall` abort instead of wiping them.
+- **Housekeeper honors the unmanaged-note law everywhere** — the 100-session limit and the state-hash dedupe previously deleted unmanaged notes; deletion now enforces `dwyt_managed` at the single `retire` chokepoint and the reports only claim what actually left the vault.
+- **Raw store hardened** — objects and metadata are written `0600` (store dir `0700`), and a single object is capped at 8 MiB so an MCP call cannot exhaust the disk.
+- **`state.json` and `obsidian.json` tightened to `0600`** — the latter can hold an Obsidian API key pasted in later; existing files are tightened on startup.
+- **Dead safety code removed** — `ValidateDelete`/`SafeRemove`/`LogBlockedAttempt` were unreachable and conceptually conflicted with the Managed-based lifecycle; the protection contract is the lifecycle law, enforced by the Housekeeper.
+- **Phantom project guard** — daemon startup and project switching refuse directories that do not exist, so a stale start directory can no longer create an orphan vault for a ghost path (the daemon keeps the previous project when the start directory has vanished).
+
+### Bug Fixes
+
+- **RTK-aware compaction actually honored** — the `already_compact` flag was plumbed through MCP and HTTP but never read; `toolopt.Compact` now runs the conservative pass-through (verdict detection + bounded tail, head declared) for producer-reduced output instead of re-processing it.
+
+---
+
 ## Unreleased
 
 ### Features

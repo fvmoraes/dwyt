@@ -22,6 +22,13 @@ func (ds *DashboardServer) apiProjectSwitch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "path is required"})
 		return
 	}
+	// A project is a directory on disk. Switching to a missing path would
+	// phantom-project the whole daemon — vault, Kiro power, indexing — onto a
+	// directory that is not there, so it is refused before any state moves.
+	if info, statErr := os.Stat(body.Path); statErr != nil || !info.IsDir() {
+		c.JSON(400, gin.H{"error": "project path does not exist or is not a directory", "path": body.Path})
+		return
+	}
 
 	ds.projectMu.Lock()
 	old := ds.DefaultProject

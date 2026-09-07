@@ -154,6 +154,13 @@ func Compact(raw string, opts Options) Compacted {
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	lines := strings.Split(normalized, "\n")
 
+	// The producer (RTK) already reduced this output. Re-running the
+	// aggressive pass would re-process text the producer curated, so only the
+	// verdict is detected and the size is bounded (spec §31).
+	if opts.AlreadyCompact {
+		return compactPreReduced(lines, out, opts)
+	}
+
 	errorsByKey := map[string]*Diagnostic{}
 	warnsByKey := map[string]*Diagnostic{}
 	var errorOrder, warnOrder []string
@@ -284,6 +291,78 @@ func Compact(raw string, opts Options) Compacted {
 		out.Summary = "output already minimal; passed through"
 		out.SentTokensEst = estimateTokens(out.Render())
 		out.CompressionPct = 0
+	}
+	return out
+}
+
+// compactPreReduced bounds output a producer (RTK) already reduced. The tail
+// is what matters — a tool puts its verdict at the end — so lines are kept
+// from the end up to the MaxTokens budget (always at least TailLines lines).
+// Nothing is reclassified or deduplicated: whatever the producer chose to keep
+// is passed through verbatim, and any head that had to go is declared.
+func compactPreReduced(lines []string, out Compacted, opts Options) Compacted {
+	// A trailing newline splits into a final empty element; it is an artifact,
+	// not content, so it never occupies the tail.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	// Detect the verdict from result lines only; RTK output may not carry
+	// compiler-style diagnostics, so no structured parsing happens here.
+	sawFail := false
+	sawPass := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || !reResult.MatchString(trimmed) {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "fail") {
+			sawFail = true
+		}
+		if strings.HasPrefix(lower, "ok") || strings.Contains(lower, "pass") ||
+			strings.Contains(lower, "successful") || strings.Contains(lower, "succeeded") {
+			sawPass = true
+		}
+	}
+	switch {
+	case sawFail:
+		out.Status = "fail"
+	case sawPass:
+		out.Status = "pass"
+	}
+
+	maxChars := opts.MaxTokens * 4
+	minLines := opts.TailLines
+	if minLines < 1 {
+		minLines = 1
+	}
+	kept := make([]string, 0, minLines)
+	chars := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimRight(lines[i], " \t")
+		if len(kept) >= minLines && chars+len(line) > maxChars {
+			dropped := i + 1
+			out.Suppressed["head_lines"] = dropped
+			out.Truncated = true
+			break
+		}
+		kept = append(kept, line)
+		chars += len(line)
+	}
+	// Reverse back into reading order.
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	out.Tail = kept
+
+	out.Summary = "producer output already compact; passed through"
+	out.SentTokensEst = estimateTokens(out.Render())
+	if out.RawTokensEst > 0 {
+		saved := out.RawTokensEst - out.SentTokensEst
+		if saved < 0 {
+			saved = 0
+		}
+		out.CompressionPct = float64(saved) / float64(out.RawTokensEst) * 100
 	}
 	return out
 }

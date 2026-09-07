@@ -60,6 +60,11 @@ func (m Meta) Expired(now time.Time) bool {
 	return !m.ExpiresAt.IsZero() && now.After(m.ExpiresAt)
 }
 
+// MaxObjectBytes caps a single stored object. Tool output is evidence, not an
+// archive format: an unbounded write turns an MCP call into a disk-fill vector,
+// and no compaction consumer ever needed more than a few megabytes of log.
+const MaxObjectBytes = 8 << 20 // 8 MiB
+
 // Store is a content-addressed object store rooted at a directory.
 type Store struct {
 	dir string
@@ -71,9 +76,13 @@ func New(dwytHome string) (*Store, error) {
 		return nil, fmt.Errorf("rawstore: empty dwyt home")
 	}
 	dir := filepath.Join(dwytHome, "objects")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// 0700: raw objects hold tool output, which routinely embeds tokens and
+	// environment values. Other local users have no business reading them.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("rawstore: create %s: %w", dir, err)
 	}
+	// Best-effort tightening of stores created before the permission change.
+	os.Chmod(dir, 0700)
 	return &Store{dir: dir}, nil
 }
 
@@ -129,6 +138,9 @@ func (s *Store) Put(content string, opts PutOptions) (Meta, error) {
 	if content == "" {
 		return Meta{}, fmt.Errorf("rawstore: refusing to store empty content")
 	}
+	if int64(len(content)) > MaxObjectBytes {
+		return Meta{}, fmt.Errorf("rawstore: content is %d bytes, over the %d byte object limit", len(content), int64(MaxObjectBytes))
+	}
 	id := ID(content)
 	now := time.Now()
 
@@ -159,7 +171,7 @@ func (s *Store) Put(content string, opts PutOptions) (Meta, error) {
 	}
 
 	if _, err := os.Stat(s.objectPath(id)); err != nil {
-		if err := writeFileAtomic(s.objectPath(id), []byte(content), 0644); err != nil {
+		if err := writeFileAtomic(s.objectPath(id), []byte(content), 0600); err != nil {
 			return Meta{}, fmt.Errorf("rawstore: write object: %w", err)
 		}
 	}
@@ -373,7 +385,7 @@ func (s *Store) writeMeta(meta Meta) error {
 	if err != nil {
 		return fmt.Errorf("rawstore: encode metadata: %w", err)
 	}
-	return writeFileAtomic(s.metaPath(meta.ID), append(data, '\n'), 0644)
+	return writeFileAtomic(s.metaPath(meta.ID), append(data, '\n'), 0600)
 }
 
 // writeFileAtomic writes via a temp file + rename so a concurrent reader never

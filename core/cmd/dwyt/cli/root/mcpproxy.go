@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	"github.com/fvmoraes/dwyt/internal/mcpproxy"
 	"github.com/spf13/cobra"
 )
@@ -62,14 +63,24 @@ var mcpProxyCmd = &cobra.Command{
 	},
 }
 
-// resolveProxyMode prefers the explicit flag, then the environment. The
-// environment override exists so a user can enable optimized mode for an already
-// written client config without DWYT rewriting it.
+// resolveProxyMode prefers the explicit flag, then the environment, then the
+// consolidated v5 configuration (`mcp_proxy.default_mode`, spec §57) — so a
+// value set in dwyt.json actually governs the shim instead of being dead
+// config. The flag and the env override exist so a user can enable optimized
+// mode for an already-written client config without DWYT rewriting it.
 func resolveProxyMode() string {
 	if strings.TrimSpace(mcpProxyMode) != "" {
 		return mcpProxyMode
 	}
-	return os.Getenv("DWYT_MCP_PROXY_MODE")
+	if env := strings.TrimSpace(os.Getenv("DWYT_MCP_PROXY_MODE")); env != "" {
+		return env
+	}
+	if DwytHome != "" {
+		if cfg, err := dwytconfig.Load(DwytHome); err == nil {
+			return string(cfg.ProxyMode())
+		}
+	}
+	return ""
 }
 
 // mcpAPIURL resolves a dashboard endpoint, honoring the same DWYT_API_URL
