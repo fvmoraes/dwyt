@@ -92,7 +92,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
           width: 26, height: 26,
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 5, padding: 0, cursor: 'pointer',
-          color: 'var(--text)', fontSize: 13, lineHeight: '26px',
+          color: 'var(--text)', fontSize: 15, lineHeight: '26px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'left 0.2s ease',
         }}
@@ -112,12 +112,12 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
         transition: 'transform 0.2s ease',
         padding: '40px 12px 12px', overflowY: 'auto',
       }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
           Projects ({projects.length})
         </div>
 
         {projects.length === 0 && (
-          <div style={{ fontSize: 10, color: 'var(--muted)', padding: '6px 0' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 0' }}>
             No projects yet. Run <code style={{ color: 'var(--accent)' }}>dwyt .</code> in a directory.
           </div>
         )}
@@ -142,11 +142,11 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                 onClick={() => !isSwitching && !isRemoving && switchTo(p.path)}
                 style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, cursor: isSwitching || isRemoving ? 'wait' : 'pointer' }}
               >
-                <span style={{ fontSize: 12 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
+                <span style={{ fontSize: 14 }}>{isRemoving ? '🗑️' : isSwitching ? '🔄' : isActive ? '📂' : '📁'}</span>
                 <span
                   data-testid="sidebar-project-name"
                   data-id={p.id}
-                  style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--mauve)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--mauve)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                 >
                   {p.name || (p.path ? p.path.split('/').pop() : p.id)}
                 </span>
@@ -155,7 +155,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                     data-testid="sidebar-project-hash"
                     data-id={p.id}
                     title={p.id}
-                    style={{ fontSize: 8, color: 'var(--muted)', fontFamily: 'monospace', flexShrink: 0 }}
+                    style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace', flexShrink: 0 }}
                   >
                     {p.id}
                   </span>
@@ -167,7 +167,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                 style={{
                   flexShrink: 0, width: 20, height: 20, padding: 0,
                   background: 'transparent', border: 'none', cursor: 'pointer',
-                  color: 'var(--muted)', fontSize: 13, lineHeight: '20px', borderRadius: 4,
+                  color: 'var(--muted)', fontSize: 15, lineHeight: '20px', borderRadius: 4,
                 }}
               >☰</button>
             </div>
@@ -187,7 +187,7 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6, width: '100%',
                     padding: '6px 8px', background: 'transparent', border: 'none',
-                    cursor: 'pointer', color: 'var(--red)', fontSize: 11, textAlign: 'left', borderRadius: 4,
+                    cursor: 'pointer', color: 'var(--red)', fontSize: 13, textAlign: 'left', borderRadius: 4,
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(243,139,168,0.12)' }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
@@ -197,11 +197,11 @@ export default function Sidebar({ open, onToggle, projects, onProjectsLoaded }: 
               </div>
             )}
 
-            <div style={{ fontSize: 8, color: 'var(--muted)', marginTop: 1, paddingLeft: 17, wordBreak: 'break-all' }}>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 1, paddingLeft: 17, wordBreak: 'break-all' }}>
               {p.path}
             </div>
             {p.indexed_at && (
-              <div style={{ fontSize: 8, color: 'var(--green)', marginTop: 1, paddingLeft: 17 }}>
+              <div style={{ fontSize: 10, color: 'var(--green)', marginTop: 1, paddingLeft: 17 }}>
                 ✓ {new Date(p.indexed_at).toLocaleDateString()}{p.nodes ? ` · ${p.nodes} nodes` : ''}
               </div>
             )}

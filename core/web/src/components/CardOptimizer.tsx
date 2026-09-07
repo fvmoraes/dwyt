@@ -116,28 +116,28 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       <Row label={t.optimizerLastHousekeeping} value={keeper?.last_run ? fmtWhen(keeper.last_run) : t.optimizerNever} />
 
       {summary && summary.requests > 0 && summary.observed_requests < summary.requests && (
-        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>
+        <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>
           * {t.optimizerPartialCoverage
             .replace('{observed}', String(summary.observed_requests))
             .replace('{total}', String(summary.requests))}
         </div>
       )}
       {payload && !payload.available && (
-        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic' }}>{payload.reason || t.optimizerUnavailable}</div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic' }}>{payload.reason || t.optimizerUnavailable}</div>
       )}
 
       <Hr />
       <div style={{ display: 'flex', gap: 4 }}>
-        <button className="btn" style={{ fontSize: 8, padding: '2px 5px' }} disabled={busy} onClick={() => preview(false)}>
+        <button className="btn" style={{ fontSize: 10, padding: '2px 5px' }} disabled={busy} onClick={() => preview(false)}>
           {t.optimizerPreviewCleanup}
         </button>
-        <button className="btn" style={{ fontSize: 8, padding: '2px 5px' }} disabled={busy} onClick={() => preview(true)}>
+        <button className="btn" style={{ fontSize: 10, padding: '2px 5px' }} disabled={busy} onClick={() => preview(true)}>
           {t.optimizerRunCleanup}
         </button>
       </div>
 
       {report && (
-        <div style={{ fontSize: 8, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>
           <div>
             {report.dry_run ? t.optimizerDryRunPrefix : t.optimizerAppliedPrefix}{' '}
             {t.optimizerReportLine
@@ -157,7 +157,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 8, color: 'var(--error, #dc2626)' }}>{error}</div>}
+      {error && <div style={{ fontSize: 10, color: 'var(--error, #dc2626)' }}>{error}</div>}
     </div>
   )
 }

@@ -26,10 +26,10 @@ export default function Toggle({ checked, onChange, label, description, disabled
         <span className="slider" />
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 11, fontWeight: 500 }}>{label}</div>
-        {description && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{description}</div>}
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+        {description && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{description}</div>}
       </div>
-      <div style={{ fontSize: 10, color: checked ? 'var(--blue)' : 'var(--muted)', minWidth: 20, textAlign: 'right', fontWeight: checked ? 700 : 400 }}>
+      <div style={{ fontSize: 12, color: checked ? 'var(--blue)' : 'var(--muted)', minWidth: 20, textAlign: 'right', fontWeight: checked ? 700 : 400 }}>
         {disabled ? 'ON' : checked ? 'ON' : 'OFF'}
       </div>
     </label>

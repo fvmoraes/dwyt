@@ -69,14 +69,14 @@ export default function CardObsidian({
       <MCPFeedbackBanner feedback={configureFeedback} name="obsidian" onDismiss={onDismissFeedback} />
       <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
         <select value={saveType} onChange={(e: ChangeEvent<HTMLSelectElement>) => setSaveType(e.target.value)}
-          style={{ fontSize: 9, padding: '2px 4px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}>
+          style={{ fontSize: 11, padding: '2px 4px', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4 }}>
           <option value="note">note</option>
           <option value="decision">decision</option>
           <option value="session">session</option>
           <option value="error">error</option>
         </select>
         <input type="text" value={saveContent} onChange={(e: ChangeEvent<HTMLInputElement>) => setSaveContent(e.target.value)}
-          placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 9 }} />
+          placeholder={t.saveMemoryPlaceholder} style={{ flex: 1, fontSize: 11 }} />
         <Button variant="primary" size="xs" label={savingBrain ? '...' : (t.saveMemory || 'Save')} onClick={onSave} />
       </div>
       <div style={{ display: 'flex', gap: 4 }}>
@@ -84,7 +84,7 @@ export default function CardObsidian({
           placeholder={t.searchPlaceholder} style={{ flex: 1 }} />
         <Button variant="primary" size="xs" label={t.search} onClick={onSearch} />
       </div>
-      {searchResult && <pre style={{ fontSize: 10, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
+      {searchResult && <pre style={{ fontSize: 12, color: 'var(--muted)', maxHeight: 60, overflow: 'auto', margin: 0 }}>{searchResult}</pre>}
       <Button variant="primary" size="xs"
         label={configureRunning ? t.mcpConfiguring : (mcpReady ? t.mcpReconfigure : t.mcpConfigure)}
         loading={configureRunning} disabled={configureDisabled}

@@ -124,6 +124,8 @@ export const T = {
     sessionRequests: 'LLM requests (observed/total)',
     sessionModels: 'Models used',
     sessionObservedHint: 'Only usage the provider reported counts here; clients report it via dwyt_report_usage.',
+    sessionEstHint: 'Estimated from this session\u2019s manual-cost baseline over its duration. Observed tokens/s appear once an agent reports usage via dwyt_report_usage.',
+    sessionModelsNone: 'No provider-reported usage in this session yet. Agents report it with dwyt_report_usage \u2014 then the models, token totals and tokens/s show up here.',
     sessionNone: 'No activity yet — use the tools and the session appears here.',
     sessionPrevious: 'Previous sessions',
 
@@ -270,6 +272,8 @@ export const T = {
     sessionRequests: 'Requisições LLM (observadas/total)',
     sessionModels: 'Modelos usados',
     sessionObservedHint: 'Apenas uso reportado pelo provider conta aqui; os clientes reportam via dwyt_report_usage.',
+    sessionEstHint: 'Estimado a partir da linha de base de custo manual desta sess\u00E3o ao longo da sua dura\u00E7\u00E3o. Tokens/s observados aparecem quando um agent reporta uso via dwyt_report_usage.',
+    sessionModelsNone: 'Nenhum uso reportado pelo provider nesta sess\u00E3o ainda. Os agents reportam com dwyt_report_usage \u2014 a\u00ED aparecem os modelos, totais de tokens e tokens/s aqui.',
     sessionNone: 'Nenhuma atividade ainda — use as ferramentas e a sessão aparece aqui.',
     sessionPrevious: 'Sessões anteriores',
 

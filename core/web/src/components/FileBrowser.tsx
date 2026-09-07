@@ -34,49 +34,49 @@ export default function FileBrowser({ onSelect, selected, initialPath }: Props) 
   const crumbs = currentPath.split('/').filter(Boolean)
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', fontSize: 11 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', fontSize: 13 }}>
       {/* Breadcrumb */}
       <div style={{ background: 'var(--ctp-mantle)', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
-        <button onClick={() => navigateTo('/')} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 11, cursor: 'pointer' }}>/</button>
+        <button onClick={() => navigateTo('/')} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 13, cursor: 'pointer' }}>/</button>
         {crumbs.map((part, i) => {
           const path = '/' + crumbs.slice(0, i + 1).join('/')
           return (
             <span key={path} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
               <span style={{ color: 'var(--muted)' }}>/</span>
-              <button onClick={() => navigateTo(path)} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 11, cursor: 'pointer' }}>{part}</button>
+              <button onClick={() => navigateTo(path)} style={{ background: 'transparent', border: 'none', color: 'var(--blue)', padding: '0 2px', fontSize: 13, cursor: 'pointer' }}>{part}</button>
             </span>
           )
         })}
-        {loading && <span style={{ marginLeft: 4, color: 'var(--yellow)', fontSize: 10 }}>...</span>}
+        {loading && <span style={{ marginLeft: 4, color: 'var(--yellow)', fontSize: 12 }}>...</span>}
       </div>
 
       {/* Toolbar */}
       <div style={{ background: 'var(--card)', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid var(--border)' }}>
-        <button onClick={goUp} style={{ fontSize: 10, padding: '2px 7px' }}>{t.goUp}</button>
-        <span style={{ fontSize: 10, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentPath}</span>
-        <button className="primary" style={{ fontSize: 10, padding: '2px 8px', flexShrink: 0 }} onClick={() => onSelect(currentPath)}>{t.selectDir}</button>
+        <button onClick={goUp} style={{ fontSize: 12, padding: '2px 7px' }}>{t.goUp}</button>
+        <span style={{ fontSize: 12, color: 'var(--muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentPath}</span>
+        <button className="primary" style={{ fontSize: 12, padding: '2px 8px', flexShrink: 0 }} onClick={() => onSelect(currentPath)}>{t.selectDir}</button>
       </div>
 
       {/* Listing */}
       <div style={{ maxHeight: 180, overflowY: 'auto' }}>
         {loading && entries.length === 0 ? (
-          <div style={{ padding: 10, fontSize: 11, color: 'var(--muted)' }}>{t.loading}</div>
+          <div style={{ padding: 10, fontSize: 13, color: 'var(--muted)' }}>{t.loading}</div>
         ) : entries.length === 0 ? (
-          <div style={{ padding: 10, fontSize: 11, color: 'var(--muted)' }}>—</div>
+          <div style={{ padding: 10, fontSize: 13, color: 'var(--muted)' }}>—</div>
         ) : entries.map(entry => (
           <div key={entry.path}
             onClick={() => handleClick(entry)}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 8px', cursor: 'pointer', fontSize: 11,
+              padding: '4px 8px', cursor: 'pointer', fontSize: 13,
               borderBottom: '1px solid var(--ctp-surface0)',
               background: selected === entry.path ? 'var(--ctp-surface1)' : 'transparent',
               color: selected === entry.path ? 'var(--blue)' : 'var(--text)',
             }}
           >
-            <span style={{ fontSize: 10, width: 14, textAlign: 'center' }}>{entry.is_dir ? '📁' : '📄'}</span>
+            <span style={{ fontSize: 12, width: 14, textAlign: 'center' }}>{entry.is_dir ? '📁' : '📄'}</span>
             <span style={{ flex: 1, fontWeight: selected === entry.path ? 600 : 400 }}>{entry.name}</span>
-            {entry.is_dir && <span style={{ color: 'var(--muted)', fontSize: 10 }}>▸</span>}
+            {entry.is_dir && <span style={{ color: 'var(--muted)', fontSize: 12 }}>▸</span>}
           </div>
         ))}
       </div>

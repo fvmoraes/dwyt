@@ -142,20 +142,20 @@ export default function SetupWizard() {
     return (
       <div style={{ minHeight: '100vh', padding: '24px 20px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Logo size={22} showText />
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--cyan)' }}>{t.installing}</div>
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.toolsInstalling}</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--cyan)' }}>{t.installing}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{t.toolsInstalling}</div>
 
         {/* ── Progress bar ── */}
         {total > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               {/* thin label */}
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                 {done} / {total} {t.of} {total}
               </span>
               {/* percentage */}
               <span style={{
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 600,
                 fontFamily: 'monospace',
                 color: pct === 100 ? 'var(--green)' : 'var(--cyan)',
@@ -185,7 +185,7 @@ export default function SetupWizard() {
         {/* ── Tool list ── */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           {Object.keys(installProgress).length === 0 ? (
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.starting}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>{t.starting}</div>
           ) : Object.entries(installProgress).map(([tool, s]) => {
             const isActive = s === 'installing'
             const isOk     = s === 'ok'
@@ -193,15 +193,15 @@ export default function SetupWizard() {
             const isErr    = s.startsWith('error')
             return (
               <div key={tool} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, width: 16, textAlign: 'center' }}>{installIcon(s)}</span>
+                <span style={{ fontSize: 14, width: 16, textAlign: 'center' }}>{installIcon(s)}</span>
                 <span style={{
                   flex: 1,
-                  fontSize: 11,
+                  fontSize: 13,
                   color: isActive ? 'var(--cyan)' : isOk ? 'var(--text)' : isErr ? 'var(--red)' : 'var(--muted)',
                   fontWeight: isActive ? 600 : 400,
                 }}>{toolLabel(tool)}</span>
                 <span style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   color: isOk ? 'var(--green)' : isErr ? 'var(--red)' : isActive ? 'var(--cyan)' : isSkipped ? 'var(--muted)' : 'var(--muted)',
                 }}>{s}</span>
               </div>
@@ -216,7 +216,7 @@ export default function SetupWizard() {
   if (!ready) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.loading}</span>
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>{t.loading}</span>
       </div>
     )
   }
@@ -246,16 +246,16 @@ export default function SetupWizard() {
                 checked={tools.includes(tool.id)} disabled={tool.id === 'obsidian'}
                 onChange={() => toggle(tools, tool.id, setTools)} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 8 }}>
-                <span style={{ fontSize: 10, color: 'var(--muted)' }}>{t.toolSource}:</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t.toolSource}:</span>
                 {(['dwyt', 'external'] as const).map(mode => <button key={mode} type="button"
                   onClick={() => setToolSources(prev => ({ ...prev, [tool.id]: { ...prev[tool.id], mode } }))}
-                  style={{ fontSize: 10, padding: '2px 7px', color: source.mode === mode ? 'var(--cyan)' : 'var(--muted)', borderColor: source.mode === mode ? 'var(--cyan)' : undefined }}>
+                  style={{ fontSize: 12, padding: '2px 7px', color: source.mode === mode ? 'var(--cyan)' : 'var(--muted)', borderColor: source.mode === mode ? 'var(--cyan)' : undefined }}>
                   {mode === 'dwyt' ? t.toolSourceManaged : t.toolSourceExternal}
                 </button>)}
               </div>
               {source.mode === 'external' && <input value={source.path || ''}
                 onChange={e => setToolSources(prev => ({ ...prev, [tool.id]: { mode: 'external', path: e.target.value } }))}
-                placeholder={t.toolSourcePath} style={{ marginLeft: 8, fontSize: 10 }} />}
+                placeholder={t.toolSourcePath} style={{ marginLeft: 8, fontSize: 12 }} />}
             </div>
           })}
         </div>
@@ -283,11 +283,11 @@ export default function SetupWizard() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <Logo size={22} showText />
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <button className="primary" style={{ fontSize: 11, padding: '4px 10px' }}
+          <button className="primary" style={{ fontSize: 13, padding: '4px 10px' }}
             onClick={handleSave} disabled={saving || !projectPath}>
             {saving ? t.installing : t.install}
           </button>
-          <button style={{ fontSize: 11, padding: '4px 10px' }}
+          <button style={{ fontSize: 13, padding: '4px 10px' }}
             onClick={() => navigate('/dashboard?' + searchParams.toString())}>
             {t.dashboard}
           </button>
@@ -299,7 +299,7 @@ export default function SetupWizard() {
       {clientWarning && (
         <div role="alert" style={{
           marginBottom: 10, padding: '8px 10px', borderRadius: 6,
-          fontSize: 11, fontWeight: 600,
+          fontSize: 13, fontWeight: 600,
           color: 'var(--danger)',
           background: 'rgba(243, 139, 168, 0.08)',
           border: '1px solid var(--danger)',
@@ -307,7 +307,7 @@ export default function SetupWizard() {
           {t.selectAtLeastOneClient}
         </div>
       )}
-      {saveError && <div role="alert" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, fontSize: 11, color: 'var(--danger)', border: '1px solid var(--danger)' }}>{saveError}</div>}
+      {saveError && <div role="alert" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, fontSize: 13, color: 'var(--danger)', border: '1px solid var(--danger)' }}>{saveError}</div>}
 
       {/* Accordion */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -317,10 +317,10 @@ export default function SetupWizard() {
             <div key={idx}>
               <div className="accordion-header" onClick={() => toggleSection(idx)}>
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600 }}>{section.title}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{section.subtitle}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{section.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{section.subtitle}</div>
                 </div>
-                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{isOpen ? '▾' : '▸'}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 13 }}>{isOpen ? '▾' : '▸'}</span>
               </div>
               <div className={`accordion-body ${isOpen ? 'expanded' : 'collapsed'}`}>
                 <div style={{ padding: '8px 10px 6px' }}>{section.content}</div>

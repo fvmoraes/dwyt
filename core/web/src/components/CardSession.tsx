@@ -43,12 +43,21 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
   const savings = session?.savings
   const llm = session?.llm
 
+  // Estimated throughput: this session's manual-cost baseline (what the work
+  // would have cost without DWYT) spread over the session duration. It keeps
+  // the tokens/s row alive when no agent has reported provider usage yet —
+  // always labelled "(est.)" so it is never mistaken for an observation.
+  const estTps =
+    session?.available && savings && session.session && session.session.duration_secs > 0 && (savings.without_dwyt_tokens ?? 0) > 0
+      ? savings.without_dwyt_tokens / session.session.duration_secs
+      : null
+
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <CardHeader label={t.sessionTitle} color="var(--yellow)" state={state} badgeText={b} />
       <Hr />
       {!session?.available ? (
-        <div style={{ fontSize: 9, color: 'var(--muted)', fontStyle: 'italic' }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
           {session?.reason || t.sessionNone}
         </div>
       ) : (
@@ -69,25 +78,31 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
           <Hr />
           <Row
             label={t.sessionTps}
-            value={llm?.tokens_per_sec != null ? llm.tokens_per_sec.toFixed(1) : '\u2014'}
-            title={t.sessionObservedHint}
+            value={
+              llm?.tokens_per_sec != null
+                ? llm.tokens_per_sec.toFixed(1)
+                : estTps
+                  ? `~${estTps.toFixed(1)} (est.)`
+                  : '\u2014'
+            }
+            title={llm?.tokens_per_sec != null ? t.sessionObservedHint : t.sessionEstHint}
           />
           <Row
             label={t.sessionRequests}
             value={llm?.available ? `${llm.observed_requests}/${llm.requests}` : '\u2014'}
             title={t.sessionObservedHint}
           />
-          {llm?.available && llm.models.length > 0 && (
+          {llm?.available && llm.models.length > 0 ? (
             <div style={{ marginTop: 2 }}>
-              <div style={{ fontSize: 8, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 2 }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 2 }}>
                 {t.sessionModels}
               </div>
               {llm.models.map(m => (
                 <div key={m.model} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '1px 0' }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.model || 'unknown'}
                   </span>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--muted)', flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted)', flexShrink: 0 }}>
                     {fmtN(m.tokens_total)}
                     {m.share_pct > 0 ? ` \u00B7 ${m.share_pct.toFixed(0)}%` : ''}
                     {m.tokens_per_sec > 0 ? ` \u00B7 ${m.tokens_per_sec.toFixed(1)} t/s` : ''}
@@ -95,19 +110,23 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
                 </div>
               ))}
             </div>
+          ) : (
+            <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 2, lineHeight: 1.5 }}>
+              {t.sessionModelsNone}
+            </div>
           )}
           {session.previous_sessions && session.previous_sessions.length > 0 && (
             <>
               <Hr />
-              <div style={{ fontSize: 8, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 2 }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, marginBottom: 2 }}>
                 {t.sessionPrevious}
               </div>
               {session.previous_sessions.slice(0, 4).map(s => (
                 <div key={s.started_at} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--muted)' }}>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted)' }}>
                     {fmtWhen(s.started_at)}{' \u00B7 '}{fmtDuration(s.duration_secs)}
                   </span>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: s.tokens_saved > 0 ? 'var(--yellow)' : 'var(--muted)' }}>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: s.tokens_saved > 0 ? 'var(--yellow)' : 'var(--muted)' }}>
                     {s.tokens_saved > 0 ? `\u2193 ${fmtN(s.tokens_saved)}` : '\u2014'}
                   </span>
                 </div>
