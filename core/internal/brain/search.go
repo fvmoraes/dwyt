@@ -340,8 +340,8 @@ func firstNonZeroTime(values ...time.Time) time.Time {
 	return time.Time{}
 }
 
-// estimateTokens mirrors contextgov.EstimateTokens. Duplicated to keep the
-// brain independent of the governor package.
+// estimateTokens mirrors contextopt.EstimateTokens. Duplicated to keep the
+// brain independent of the optimizer package.
 func estimateTokens(content string) int {
 	if content == "" {
 		return 0

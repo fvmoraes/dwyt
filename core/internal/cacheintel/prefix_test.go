@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 )
 
 func blocks() []Block {
 	return []Block{
-		{ID: "user", Class: contextgov.CacheVolatile, Content: "fix the delete flow"},
-		{ID: "task", Class: contextgov.CacheSession, Content: "task state: active"},
-		{ID: "system", Class: contextgov.CacheImmutable, Content: "you are a coding agent"},
-		{ID: "project", Class: contextgov.CacheLongLived, Content: "project: dwyt, Go plus React"},
+		{ID: "user", Class: contextopt.CacheVolatile, Content: "fix the delete flow"},
+		{ID: "task", Class: contextopt.CacheSession, Content: "task state: active"},
+		{ID: "system", Class: contextopt.CacheImmutable, Content: "you are a coding agent"},
+		{ID: "project", Class: contextopt.CacheLongLived, Content: "project: dwyt, Go plus React"},
 	}
 }
 
@@ -56,7 +56,7 @@ func TestPrefixHashIsStableAcrossVolatileChanges(t *testing.T) {
 	if first.PrefixHash != second.PrefixHash {
 		t.Fatal("changing only volatile content must not change the prefix hash")
 	}
-	if first.ClassHashes[contextgov.CacheVolatile] == second.ClassHashes[contextgov.CacheVolatile] {
+	if first.ClassHashes[contextopt.CacheVolatile] == second.ClassHashes[contextopt.CacheVolatile] {
 		t.Fatal("the volatile class hash should change")
 	}
 }
@@ -78,9 +78,9 @@ func TestPrefixHashChangesWhenStableContentChanges(t *testing.T) {
 // request. The builder must demote it and say so.
 func TestBuildDemotesVolatileMetadataOutOfTheStablePrefix(t *testing.T) {
 	p := Build([]Block{
-		{ID: "system", Class: contextgov.CacheImmutable, Content: "you are an agent"},
-		{ID: "meta", Class: contextgov.CacheImmutable, Content: "generated_at: 2026-09-06T12:00:00Z"},
-		{ID: "user", Class: contextgov.CacheVolatile, Content: "hello"},
+		{ID: "system", Class: contextopt.CacheImmutable, Content: "you are an agent"},
+		{ID: "meta", Class: contextopt.CacheImmutable, Content: "generated_at: 2026-09-06T12:00:00Z"},
+		{ID: "user", Class: contextopt.CacheVolatile, Content: "hello"},
 	})
 
 	if len(p.Violations) != 1 {
@@ -93,7 +93,7 @@ func TestBuildDemotesVolatileMetadataOutOfTheStablePrefix(t *testing.T) {
 		t.Fatalf("volatile metadata leaked into the stable prefix: %q", p.StablePrefix)
 	}
 	// And the demoted block must still be present, at the tail.
-	if last := p.Blocks[len(p.Blocks)-1]; last.Class != contextgov.CacheVolatile {
+	if last := p.Blocks[len(p.Blocks)-1]; last.Class != contextopt.CacheVolatile {
 		t.Fatalf("the demoted block should be volatile, got %s", last.Class)
 	}
 	if !containsID(p.Blocks, "meta") {
@@ -103,7 +103,7 @@ func TestBuildDemotesVolatileMetadataOutOfTheStablePrefix(t *testing.T) {
 
 func TestBlocksWithoutAClassAreTreatedAsVolatile(t *testing.T) {
 	p := Build([]Block{{ID: "mystery", Content: "who knows"}})
-	if p.Blocks[0].Class != contextgov.CacheVolatile {
+	if p.Blocks[0].Class != contextopt.CacheVolatile {
 		t.Fatalf("an unclassified block must default to volatile, got %s", p.Blocks[0].Class)
 	}
 	if p.StablePrefix != "" {
@@ -112,7 +112,7 @@ func TestBlocksWithoutAClassAreTreatedAsVolatile(t *testing.T) {
 }
 
 func TestBuildDerivesHashesAndTokens(t *testing.T) {
-	p := Build([]Block{{ID: "a", Class: contextgov.CacheImmutable, Content: "some content"}})
+	p := Build([]Block{{ID: "a", Class: contextopt.CacheImmutable, Content: "some content"}})
 	if p.Blocks[0].Hash == "" {
 		t.Fatal("the block hash should be derived from its content")
 	}
@@ -225,10 +225,10 @@ func TestDiagnoseNamesTheChangedClass(t *testing.T) {
 	if d.PrefixStable {
 		t.Fatal("the prefix changed")
 	}
-	if !containsString(d.ChangedClasses, string(contextgov.CacheLongLived)) {
+	if !containsString(d.ChangedClasses, string(contextopt.CacheLongLived)) {
 		t.Fatalf("the changed class should be named: %v", d.ChangedClasses)
 	}
-	if containsString(d.ChangedClasses, string(contextgov.CacheImmutable)) {
+	if containsString(d.ChangedClasses, string(contextopt.CacheImmutable)) {
 		t.Fatalf("the immutable class did not change: %v", d.ChangedClasses)
 	}
 }
@@ -257,21 +257,21 @@ func TestPlanLongContextNoOpBelowThreshold(t *testing.T) {
 
 func TestPlanLongContextDropsVolatileBeforeSessionAndNeverTheStablePrefix(t *testing.T) {
 	p := Build([]Block{
-		{ID: "system", Class: contextgov.CacheImmutable, Content: strings.Repeat("s", 4000)},
-		{ID: "project", Class: contextgov.CacheLongLived, Content: strings.Repeat("p", 4000)},
-		{ID: "task", Class: contextgov.CacheSession, Content: strings.Repeat("t", 4000)},
-		{ID: "log", Class: contextgov.CacheVolatile, Content: strings.Repeat("l", 4000)},
+		{ID: "system", Class: contextopt.CacheImmutable, Content: strings.Repeat("s", 4000)},
+		{ID: "project", Class: contextopt.CacheLongLived, Content: strings.Repeat("p", 4000)},
+		{ID: "task", Class: contextopt.CacheSession, Content: strings.Repeat("t", 4000)},
+		{ID: "log", Class: contextopt.CacheVolatile, Content: strings.Repeat("l", 4000)},
 	})
 
 	plan := PlanLongContext(p, p.TotalTokens-1200)
 	if len(plan.Candidates) == 0 {
 		t.Fatalf("expected candidates: %+v", plan)
 	}
-	if plan.Candidates[0].Class != contextgov.CacheVolatile {
+	if plan.Candidates[0].Class != contextopt.CacheVolatile {
 		t.Fatalf("volatile content must be dropped first, got %s", plan.Candidates[0].Class)
 	}
 	for _, c := range plan.Candidates {
-		if c.Class == contextgov.CacheImmutable || c.Class == contextgov.CacheLongLived {
+		if c.Class == contextopt.CacheImmutable || c.Class == contextopt.CacheLongLived {
 			t.Fatalf("the stable prefix must never be offered up to dodge a multiplier: %s", c.ID)
 		}
 	}
@@ -279,8 +279,8 @@ func TestPlanLongContextDropsVolatileBeforeSessionAndNeverTheStablePrefix(t *tes
 
 func TestPlanLongContextReportsWhenUnachievable(t *testing.T) {
 	p := Build([]Block{
-		{ID: "system", Class: contextgov.CacheImmutable, Content: strings.Repeat("s", 40000)},
-		{ID: "log", Class: contextgov.CacheVolatile, Content: strings.Repeat("l", 400)},
+		{ID: "system", Class: contextopt.CacheImmutable, Content: strings.Repeat("s", 40000)},
+		{ID: "log", Class: contextopt.CacheVolatile, Content: strings.Repeat("l", 400)},
 	})
 	plan := PlanLongContext(p, 100)
 	if plan.Achievable {

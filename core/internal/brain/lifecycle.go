@@ -35,9 +35,9 @@ const (
 	RetentionEphemeral RetentionClass = "ephemeral"
 )
 
-// NoteState mirrors contextgov.State for persisted notes. It is duplicated as a
+// NoteState mirrors contextopt.State for persisted notes. It is duplicated as a
 // string type rather than imported so the brain does not depend on the
-// governor: the dependency runs the other way (the governor asks the brain for
+// optimizer: the dependency runs the other way (the optimizer asks the brain for
 // health).
 type NoteState string
 

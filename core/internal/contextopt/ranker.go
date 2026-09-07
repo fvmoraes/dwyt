@@ -1,11 +1,11 @@
-package contextgov
+package contextopt
 
 import (
 	"sort"
 	"strings"
 )
 
-// Token ROI ranking (spec §8). The governor optimizes useful information per
+// Token ROI ranking (spec §8). The optimizer optimizes useful information per
 // *effective* token cost, not raw token count: a large block that a provider
 // already has cached can be cheaper than a small block that would break the
 // cached prefix.

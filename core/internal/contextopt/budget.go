@@ -1,4 +1,4 @@
-package contextgov
+package contextopt
 
 // Budgeter turns a task profile into a concrete token allowance before any
 // broad retrieval happens (spec §7). The defaults are the operational
@@ -56,7 +56,7 @@ type Budget struct {
 	ToolResults     int `json:"tool_results"`
 
 	// OutputTarget is the visible-token target for the response, chosen from
-	// the same phase profile so input and output governance stay consistent.
+	// the same phase profile so input and output optimization stay consistent.
 	OutputTarget int `json:"output_target"`
 
 	// MaxTotal is the ceiling progressive expansion may grow Total to.
@@ -218,7 +218,7 @@ func pctOf(v, pct int) int {
 
 // OutputTargetForPhase returns the visible-token target for a phase
 // (spec §33). These are targets, not hard truncation limits: the output
-// governor documents the artifact exception separately.
+// optimizer documents the artifact exception separately.
 func OutputTargetForPhase(p Phase) int {
 	switch p {
 	case PhaseClassify:

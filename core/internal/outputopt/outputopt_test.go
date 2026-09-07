@@ -1,15 +1,15 @@
-package outputgov
+package outputopt
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 )
 
 func TestArtifactPhaseIsNeverCapped(t *testing.T) {
-	p := ProfileFor(contextgov.PhaseArtifact)
+	p := ProfileFor(contextopt.PhaseArtifact)
 	if !p.ArtifactException {
 		t.Fatal("the artifact phase must carry the exception")
 	}
@@ -25,9 +25,9 @@ func TestArtifactPhaseIsNeverCapped(t *testing.T) {
 }
 
 func TestOperationalPhasesTargetSmallOutput(t *testing.T) {
-	for _, phase := range []contextgov.Phase{
-		contextgov.PhaseClassify, contextgov.PhaseRetrieve,
-		contextgov.PhaseToolLoop, contextgov.PhaseFix,
+	for _, phase := range []contextopt.Phase{
+		contextopt.PhaseClassify, contextopt.PhaseRetrieve,
+		contextopt.PhaseToolLoop, contextopt.PhaseFix,
 	} {
 		p := ProfileFor(phase)
 		if p.TargetTokens <= 0 || p.TargetTokens > OperationalTarget+100 {
@@ -43,8 +43,8 @@ func TestOperationalPhasesTargetSmallOutput(t *testing.T) {
 }
 
 func TestReviewAndPlanGetRoomToBeUseful(t *testing.T) {
-	review := ProfileFor(contextgov.PhaseReview)
-	plan := ProfileFor(contextgov.PhasePlan)
+	review := ProfileFor(contextopt.PhaseReview)
+	plan := ProfileFor(contextopt.PhasePlan)
 	if review.TargetTokens <= OperationalTarget {
 		t.Fatalf("a review needs more than an operational answer: %d", review.TargetTokens)
 	}
@@ -66,7 +66,7 @@ func TestProfileForTaskTypeMapsDocumentationToArtifact(t *testing.T) {
 }
 
 func TestExplicitPhaseOverridesTaskType(t *testing.T) {
-	p := ProfileForTaskType("document", contextgov.PhaseFix)
+	p := ProfileForTaskType("document", contextopt.PhaseFix)
 	if p.ArtifactException {
 		t.Fatal("an explicit phase must win over the inferred task type")
 	}

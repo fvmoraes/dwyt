@@ -51,9 +51,9 @@ func bigOutput() string {
 	return b.String()
 }
 
-// runGoverned feeds a request then a response through the governed pipeline and
+// runOptimized feeds a request then a response through the optimized pipeline and
 // returns what the client would see.
-func runGoverned(t *testing.T, tool string, response string, compactor CompactClient) (string, *responseGovernor) {
+func runOptimized(t *testing.T, tool string, response string, compactor CompactClient) (string, *responseOptimizer) {
 	t.Helper()
 	pending := newPendingCalls()
 	counter := &callCounter{server: "codebase", pending: pending}
@@ -61,7 +61,7 @@ func runGoverned(t *testing.T, tool string, response string, compactor CompactCl
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase", compactor, pending, &out)
+	gov := newResponseOptimizer("codebase", compactor, pending, &out)
 	if _, err := gov.Write([]byte(response)); err != nil {
 		t.Fatal(err)
 	}
@@ -72,15 +72,22 @@ func runGoverned(t *testing.T, tool string, response string, compactor CompactCl
 }
 
 func TestParseModeDefaultsToTransparent(t *testing.T) {
-	if ParseMode("governed") != ModeGoverned {
-		t.Fatal("governed should parse")
+	if ParseMode("optimized") != ModeOptimized {
+		t.Fatal("optimized should parse")
 	}
-	if ParseMode("GOVERNED") != ModeGoverned {
+	if ParseMode("OPTIMIZED") != ModeOptimized {
 		t.Fatal("mode parsing should be case-insensitive")
 	}
 	for _, in := range []string{"", "transparent", "nonsense", "   "} {
 		if ParseMode(in) != ModeTransparent {
 			t.Fatalf("%q must default to transparent", in)
+		}
+	}
+	// The pre-rename name must keep working, or a config written before the
+	// rename would silently fall back to transparent.
+	for _, legacy := range []string{"governed", "GOVERNED"} {
+		if ParseMode(legacy) != ModeOptimized {
+			t.Fatalf("%q is the legacy name of optimized mode and must still parse", legacy)
 		}
 	}
 }
@@ -89,7 +96,7 @@ func TestGovernedCompactsKnownLargeResponse(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: "status: pass\nsummary: 400 lines suppressed\n", rawRef: "dwyt://objects/abc123"}
 
-	out, gov := runGoverned(t, "run_tests", resultFrame(1, raw), stub)
+	out, gov := runOptimized(t, "run_tests", resultFrame(1, raw), stub)
 	if gov.compressed != 1 {
 		t.Fatalf("expected the response to be compacted, got compressed=%d bypassed=%d", gov.compressed, gov.bypassed)
 	}
@@ -117,7 +124,7 @@ func TestGovernedBypassesUnknownTools(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: "summary", rawRef: "dwyt://objects/abc"}
 
-	out, gov := runGoverned(t, "some_unknown_tool", resultFrame(1, raw), stub)
+	out, gov := runOptimized(t, "some_unknown_tool", resultFrame(1, raw), stub)
 	if gov.compressed != 0 {
 		t.Fatal("an unknown tool must never be compacted: DWYT does not know its schema")
 	}
@@ -131,7 +138,7 @@ func TestGovernedBypassesUnknownTools(t *testing.T) {
 
 func TestGovernedBypassesSmallResponses(t *testing.T) {
 	stub := &stubCompactor{rendered: "s", rawRef: "dwyt://objects/abc"}
-	out, gov := runGoverned(t, "run_tests", resultFrame(1, "ok"), stub)
+	out, gov := runOptimized(t, "run_tests", resultFrame(1, "ok"), stub)
 	if gov.compressed != 0 {
 		t.Fatal("a tiny response must not be compacted")
 	}
@@ -144,7 +151,7 @@ func TestGovernedBypassesWhenArchivingFails(t *testing.T) {
 	raw := bigOutput()
 
 	// Daemon unreachable.
-	out, gov := runGoverned(t, "run_tests", resultFrame(1, raw), &stubCompactor{err: errors.New("connection refused")})
+	out, gov := runOptimized(t, "run_tests", resultFrame(1, raw), &stubCompactor{err: errors.New("connection refused")})
 	if gov.compressed != 0 {
 		t.Fatal("a failed compaction must bypass, not drop the output")
 	}
@@ -154,7 +161,7 @@ func TestGovernedBypassesWhenArchivingFails(t *testing.T) {
 
 	// Daemon answered but produced no raw reference: compressing would discard
 	// evidence with no way to retrieve it.
-	out, gov = runGoverned(t, "run_tests", resultFrame(1, raw), &stubCompactor{rendered: "summary only"})
+	out, gov = runOptimized(t, "run_tests", resultFrame(1, raw), &stubCompactor{rendered: "summary only"})
 	if gov.compressed != 0 {
 		t.Fatal("without a raw_ref the compaction must be refused")
 	}
@@ -167,7 +174,7 @@ func TestGovernedBypassesWhenCompactionDoesNotReduce(t *testing.T) {
 	raw := bigOutput()
 	stub := &stubCompactor{rendered: raw + raw, rawRef: "dwyt://objects/abc"}
 
-	_, gov := runGoverned(t, "run_tests", resultFrame(1, raw), stub)
+	_, gov := runOptimized(t, "run_tests", resultFrame(1, raw), stub)
 	if gov.compressed != 0 {
 		t.Fatal("a compaction that grows the payload is pure risk and must be refused")
 	}
@@ -190,7 +197,7 @@ func TestGovernedBypassesNonTextContent(t *testing.T) {
 	data, _ := json.Marshal(payload)
 
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase", &stubCompactor{rendered: "x", rawRef: "dwyt://objects/a"}, pending, &out)
+	gov := newResponseOptimizer("codebase", &stubCompactor{rendered: "x", rawRef: "dwyt://objects/a"}, pending, &out)
 	gov.Write(append(data, '\n'))
 	if gov.compressed != 0 {
 		t.Fatal("non-text content has an unknown schema and must pass through")
@@ -207,7 +214,7 @@ func TestGovernedBypassesErrorResponses(t *testing.T) {
 
 	frame := `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"boom"}}` + "\n"
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase", &stubCompactor{rendered: "x", rawRef: "dwyt://objects/a"}, pending, &out)
+	gov := newResponseOptimizer("codebase", &stubCompactor{rendered: "x", rawRef: "dwyt://objects/a"}, pending, &out)
 	gov.Write([]byte(frame))
 
 	if gov.compressed != 0 {
@@ -226,7 +233,7 @@ func TestGovernedPreservesUnrelatedFramesByteExactly(t *testing.T) {
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase", &stubCompactor{}, newPendingCalls(), &out)
+	gov := newResponseOptimizer("codebase", &stubCompactor{}, newPendingCalls(), &out)
 	gov.Write([]byte(frames))
 	if err := gov.Flush(); err != nil {
 		t.Fatal(err)
@@ -254,7 +261,7 @@ func TestGovernedPreservesIsErrorAndExtensionFields(t *testing.T) {
 	data, _ := json.Marshal(payload)
 
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase",
+	gov := newResponseOptimizer("codebase",
 		&stubCompactor{rendered: "status: fail\n", rawRef: "dwyt://objects/abc"}, pending, &out)
 	gov.Write(append(data, '\n'))
 	if gov.compressed != 1 {
@@ -299,9 +306,9 @@ func TestPendingCallsAreBounded(t *testing.T) {
 	}
 }
 
-func TestResponseGovernorFlushesPartialFrames(t *testing.T) {
+func TestResponseOptimizerFlushesPartialFrames(t *testing.T) {
 	var out bytes.Buffer
-	gov := newResponseGovernor("codebase", &stubCompactor{}, newPendingCalls(), &out)
+	gov := newResponseOptimizer("codebase", &stubCompactor{}, newPendingCalls(), &out)
 	// A final frame with no trailing newline must still reach the client.
 	gov.Write([]byte(`{"jsonrpc":"2.0","id":9,"result":{}}`))
 	if out.Len() != 0 {

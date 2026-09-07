@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
-	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
@@ -37,12 +37,12 @@ func brainServer(t *testing.T) *DashboardServer {
 	if err := pb.EnsureCanonicalLayout(); err != nil {
 		t.Fatal(err)
 	}
-	gov := governor.New(governor.DefaultConfig(), dwytHome)
+	gov := optimizer.New(optimizer.DefaultConfig(), dwytHome)
 	ds := &DashboardServer{
 		DwytHome:        dwytHome,
 		DefaultProject:  projectPath,
 		ProjectObsidian: pb,
-		Governor:        gov,
+		Optimizer:       gov,
 		Housekeeper:     housekeeper.New(housekeeper.DefaultConfig(), pb, gov.RawStore()),
 	}
 	gov.SetMemoryHealthProvider(ds)
@@ -241,8 +241,8 @@ func TestMemoryHealthReportsCanonicalVersusSessions(t *testing.T) {
 	ds.ProjectObsidian.UpsertCanonical("architecture", "", "Go plus React\n", brain.SourceRef{})
 	ds.ProjectObsidian.SaveCompactSnapshot(brain.CompactSnapshot{Objective: "some work"})
 
-	rec, payload := do(t, ds, ds.apiGovernorMemoryHealth,
-		httptest.NewRequest(http.MethodGet, "/api/governor/memory-health", nil))
+	rec, payload := do(t, ds, ds.apiOptimizerMemoryHealth,
+		httptest.NewRequest(http.MethodGet, "/api/optimizer/memory-health", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -359,11 +359,11 @@ func TestTelemetrySummaryReportsUnmeasuredRatiosAsNull(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds.Telemetry = store
-	ds.Governor.SetUsageRecorder(ds)
+	ds.Optimizer.SetUsageRecorder(ds)
 
 	// A report with only input tokens: nothing about cache or context.
 	input := 1000
-	ds.Governor.ReportUsage(governor.Usage{
+	ds.Optimizer.ReportUsage(optimizer.Usage{
 		TaskID: "t1", Provider: "openai", InputTokens: &input, Observed: true,
 	})
 

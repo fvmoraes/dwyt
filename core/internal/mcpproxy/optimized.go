@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// Governed mode (spec §32).
+// Optimized mode (spec §32).
 //
 // `transparent` is and remains the default: byte-exact passthrough with passive
-// counting. `governed` is opt-in and compresses *responses* of known tools whose
+// counting. `optimized` is opt-in and compresses *responses* of known tools whose
 // output is large, replacing the bulk with a deterministic summary plus a
 // `dwyt://objects/<id>` reference.
 //
@@ -38,30 +38,37 @@ type Mode string
 const (
 	// ModeTransparent is byte-exact passthrough. The default and the fallback.
 	ModeTransparent Mode = "transparent"
-	// ModeGoverned compresses known large responses. Opt-in.
-	ModeGoverned Mode = "governed"
+	// ModeOptimized compresses known large responses. Opt-in.
+	ModeOptimized Mode = "optimized"
 )
+
+// legacyOptimizedMode is the pre-rename name of ModeOptimized. It is still
+// accepted so a config file or client entry written before the rename keeps
+// working instead of silently falling back to transparent.
+const legacyOptimizedMode = "governed"
 
 // ParseMode maps a string to a Mode, defaulting to transparent. An unknown value
 // is not an error: an unrecognised mode must degrade to the safe behaviour rather
 // than refuse to start the MCP server.
 func ParseMode(s string) Mode {
-	if strings.EqualFold(strings.TrimSpace(s), string(ModeGoverned)) {
-		return ModeGoverned
+	trimmed := strings.TrimSpace(s)
+	if strings.EqualFold(trimmed, string(ModeOptimized)) ||
+		strings.EqualFold(trimmed, legacyOptimizedMode) {
+		return ModeOptimized
 	}
 	return ModeTransparent
 }
 
-// governedMinTokens is the size below which compression is not worth the risk.
+// optimizedMinTokens is the size below which compression is not worth the risk.
 // A small response is cheap to send verbatim, and compressing it could only
 // introduce a failure mode for no gain.
-const governedMinTokens = 400
+const optimizedMinTokens = 400
 
 // knownCompressibleTools are the tools whose responses DWYT knows how to
 // summarize deterministically: build, test, lint and log-shaped output.
 //
 // The list is explicit rather than pattern-based because spec §32 restricts
-// governed mode to "known schemas". Adding a tool here is a deliberate act.
+// optimized mode to "known schemas". Adding a tool here is a deliberate act.
 var knownCompressibleTools = map[string]bool{
 	// Codebase MCP: large graph and snippet payloads.
 	"search_graph":     true,
@@ -86,7 +93,7 @@ var knownCompressibleTools = map[string]bool{
 }
 
 // CompactClient asks the DWYT daemon to compact a payload and archive the raw
-// bytes. It is an interface so tests can exercise governed mode without a
+// bytes. It is an interface so tests can exercise optimized mode without a
 // running daemon.
 type CompactClient interface {
 	// Compact returns the rendered summary and the raw reference. An error means
@@ -94,7 +101,7 @@ type CompactClient interface {
 	Compact(content, kind, label string) (rendered string, rawRef string, err error)
 }
 
-// HTTPCompactClient talks to /api/governor/compact.
+// HTTPCompactClient talks to /api/optimizer/compact.
 type HTTPCompactClient struct {
 	url    string
 	client *http.Client
@@ -102,7 +109,7 @@ type HTTPCompactClient struct {
 
 // NewHTTPCompactClient builds a client for the daemon compaction endpoint.
 //
-// The timeout is short on purpose: governed mode sits in the live response path
+// The timeout is short on purpose: optimized mode sits in the live response path
 // of an MCP call, so a slow daemon must degrade to passthrough quickly rather
 // than stall the agent's turn.
 func NewHTTPCompactClient(url string) *HTTPCompactClient {
@@ -188,8 +195,8 @@ func idKey(raw json.RawMessage) string {
 	return ""
 }
 
-// responseGovernor rewrites server→client frames in governed mode.
-type responseGovernor struct {
+// responseOptimizer rewrites server→client frames in optimized mode.
+type responseOptimizer struct {
 	server  string
 	client  CompactClient
 	pending *pendingCalls
@@ -201,8 +208,8 @@ type responseGovernor struct {
 	compressed int
 }
 
-func newResponseGovernor(server string, client CompactClient, pending *pendingCalls, out io.Writer) *responseGovernor {
-	return &responseGovernor{server: server, client: client, pending: pending, out: out}
+func newResponseOptimizer(server string, client CompactClient, pending *pendingCalls, out io.Writer) *responseOptimizer {
+	return &responseOptimizer{server: server, client: client, pending: pending, out: out}
 }
 
 // Write consumes server output, rewriting complete newline-delimited frames when
@@ -210,7 +217,7 @@ func newResponseGovernor(server string, client CompactClient, pending *pendingCa
 //
 // It always reports len(p) consumed: this writer sits in the live response path,
 // so a short write would look like a broken pipe to the child process.
-func (g *responseGovernor) Write(p []byte) (int, error) {
+func (g *responseOptimizer) Write(p []byte) (int, error) {
 	g.buf = append(g.buf, p...)
 	for {
 		i := bytes.IndexByte(g.buf, '\n')
@@ -238,7 +245,7 @@ func (g *responseGovernor) Write(p []byte) (int, error) {
 
 // Flush writes any buffered partial frame. Called when the child's stdout closes,
 // so a final frame without a trailing newline is not lost.
-func (g *responseGovernor) Flush() error {
+func (g *responseOptimizer) Flush() error {
 	if len(g.buf) == 0 {
 		return nil
 	}
@@ -266,7 +273,7 @@ type callToolResult struct {
 
 // transform returns the frame to forward: either a rewritten frame or the
 // original bytes.
-func (g *responseGovernor) transform(frame []byte) []byte {
+func (g *responseOptimizer) transform(frame []byte) []byte {
 	trimmed := bytes.TrimSpace(frame)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		g.bypassed++
@@ -305,7 +312,7 @@ func (g *responseGovernor) transform(frame []byte) []byte {
 		textParts = append(textParts, part.Text)
 	}
 	joined := strings.Join(textParts, "\n")
-	if estimateTokens(joined) < governedMinTokens {
+	if estimateTokens(joined) < optimizedMinTokens {
 		g.bypassed++
 		return frame
 	}
@@ -356,9 +363,9 @@ func rewriteResult(frame []byte, rendered string) ([]byte, error) {
 	return json.Marshal(envelope)
 }
 
-// estimateTokens mirrors contextgov.EstimateTokens. Duplicated so the proxy — a
+// estimateTokens mirrors contextopt.EstimateTokens. Duplicated so the proxy — a
 // process that must start fast and depend on as little as possible — does not
-// pull in the governor package.
+// pull in the optimizer package.
 func estimateTokens(content string) int {
 	if content == "" {
 		return 0

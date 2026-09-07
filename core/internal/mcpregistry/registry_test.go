@@ -33,19 +33,19 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if _, ok := reg.MCPServers["codebase"]; !ok {
+	if _, ok := reg.MCPServers[ServerCodebase]; !ok {
 		t.Fatal("expected canonical codebase entry")
 	}
-	if _, ok := reg.MCPServers["obsidian"]; !ok {
+	if _, ok := reg.MCPServers[ServerObsidian]; !ok {
 		t.Fatal("expected canonical obsidian entry")
 	}
-	// v5: "dwyt" is the Governor's canonical key, seeded on every Load.
-	gov, ok := reg.MCPServers["dwyt"]
+	// v5: "dwyt" is the Optimizer's canonical key, seeded on every Load.
+	gov, ok := reg.MCPServers[ServerOptimizer]
 	if !ok {
-		t.Fatal("expected canonical dwyt governor entry")
+		t.Fatal("expected canonical dwyt optimizer entry")
 	}
-	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
-		t.Fatalf("expected governor args [governor-mcp], got %#v", gov.Args)
+	if len(gov.Args) != 1 || gov.Args[0] != "optimizer-mcp" {
+		t.Fatalf("expected optimizer args [optimizer-mcp], got %#v", gov.Args)
 	}
 	for _, legacyName := range []string{"dwyt-codebase", "dwyt-obsidian", "obsidian-mcp"} {
 		if _, ok := reg.MCPServers[legacyName]; ok {
@@ -56,8 +56,8 @@ func TestLoadMigratesLegacyMCPNames(t *testing.T) {
 
 // A pre-v5 registry stored the Codebase server under the "dwyt" key. Load must
 // rename it to "codebase" (recognising it by its wiring, not its name) and then
-// seed the v5 Governor under "dwyt" without inheriting the old command.
-func TestLoadRenamesLegacyDwytCodebaseKeyAndSeedsGovernor(t *testing.T) {
+// seed the v5 Optimizer under "dwyt" without inheriting the old command.
+func TestLoadRenamesLegacyDwytCodebaseKeyAndSeedsOptimizer(t *testing.T) {
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
 	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
@@ -76,24 +76,24 @@ func TestLoadRenamesLegacyDwytCodebaseKeyAndSeedsGovernor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if _, ok := reg.MCPServers["codebase"]; !ok {
+	if _, ok := reg.MCPServers[ServerCodebase]; !ok {
 		t.Fatal("legacy dwyt entry should have been renamed to codebase")
 	}
-	gov, ok := reg.MCPServers["dwyt"]
+	gov, ok := reg.MCPServers[ServerOptimizer]
 	if !ok {
-		t.Fatal("expected the v5 governor to be seeded under dwyt")
+		t.Fatal("expected the v5 optimizer to be seeded under dwyt")
 	}
-	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
-		t.Fatalf("governor entry inherited legacy wiring: %#v", gov)
+	if len(gov.Args) != 1 || gov.Args[0] != "optimizer-mcp" {
+		t.Fatalf("optimizer entry inherited legacy wiring: %#v", gov)
 	}
 	if !reg.MigrationPerformed() {
 		t.Fatal("expected MigrationPerformed to report the rename")
 	}
 }
 
-// An already-migrated registry must be left alone: a v5 Governor entry keyed
+// An already-migrated registry must be left alone: a v5 Optimizer entry keyed
 // "dwyt" must never be mistaken for the legacy Codebase alias.
-func TestLoadPreservesGovernorEntry(t *testing.T) {
+func TestLoadPreservesOptimizerEntry(t *testing.T) {
 	dwytHome := t.TempDir()
 	t.Setenv("DWYT_HOME", dwytHome)
 	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
@@ -104,7 +104,7 @@ func TestLoadPreservesGovernorEntry(t *testing.T) {
 	existing := Registry{MCPServers: map[string]MCPServerEntry{
 		"dwyt": {
 			Command: filepath.Join(dwytHome, "bin", exeName("dwyt")),
-			Args:    []string{"governor-mcp"},
+			Args:    []string{"optimizer-mcp"},
 			Enabled: false,
 		},
 	}}
@@ -117,19 +117,19 @@ func TestLoadPreservesGovernorEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	gov, ok := reg.MCPServers["dwyt"]
+	gov, ok := reg.MCPServers[ServerOptimizer]
 	if !ok {
-		t.Fatal("governor entry disappeared")
+		t.Fatal("optimizer entry disappeared")
 	}
-	if len(gov.Args) != 1 || gov.Args[0] != "governor-mcp" {
-		t.Fatalf("governor wiring changed: %#v", gov)
+	if len(gov.Args) != 1 || gov.Args[0] != "optimizer-mcp" {
+		t.Fatalf("optimizer wiring changed: %#v", gov)
 	}
 	// The user-tunable Enabled flag must survive a heal pass.
 	if gov.Enabled {
 		t.Fatal("Load must not re-enable a server the user disabled")
 	}
-	if _, ok := reg.MCPServers["codebase"]; !ok {
-		t.Fatal("expected codebase to be seeded alongside the governor")
+	if _, ok := reg.MCPServers[ServerCodebase]; !ok {
+		t.Fatal("expected codebase to be seeded alongside the optimizer")
 	}
 }
 
@@ -247,11 +247,11 @@ func TestConfigureMCPSyncsSupportedClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(codex), "[mcp_servers.codebase]") ||
-		!strings.Contains(string(codex), "[mcp_servers.codebase.env]") ||
+	if !strings.Contains(string(codex), "[mcp_servers.dwyt_codebase]") ||
+		!strings.Contains(string(codex), "[mcp_servers.dwyt_codebase.env]") ||
 		!strings.Contains(string(codex), "CBM_CACHE_DIR") ||
-		!strings.Contains(string(codex), "[mcp_servers.obsidian]") ||
-		!strings.Contains(string(codex), "[mcp_servers.obsidian.env]") {
+		!strings.Contains(string(codex), "[mcp_servers.dwyt_obsidian]") ||
+		!strings.Contains(string(codex), "[mcp_servers.dwyt_obsidian.env]") {
 		t.Fatalf("expected Codex MCP tables, got:\n%s", string(codex))
 	}
 }
@@ -319,7 +319,7 @@ func TestSyncCodexGlobalRewritesCRLFManagedBlock(t *testing.T) {
 	if _, ok := parsed.MCPServers["stale"]; ok {
 		t.Fatalf("stale managed table survived full sync: %#v", parsed.MCPServers)
 	}
-	for _, name := range []string{"codebase", "obsidian"} {
+	for _, name := range []string{ServerCodebase, ServerObsidian} {
 		if got := parsed.MCPServers[name].Command; got != reg.MCPServers[name].Command {
 			t.Fatalf("%s command = %q, want %q", name, got, reg.MCPServers[name].Command)
 		}
@@ -436,7 +436,7 @@ func TestSyncKiroPreservesExistingServers(t *testing.T) {
 	if _, ok := servers["user-tool"]; !ok {
 		t.Fatalf("expected existing Kiro MCP server to be preserved: %#v", servers)
 	}
-	if _, ok := servers["codebase"]; !ok {
+	if _, ok := servers[ServerCodebase]; !ok {
 		t.Fatalf("expected DWYT codebase server: %#v", servers)
 	}
 	if kiro["custom"] != true {
@@ -579,9 +579,9 @@ func TestConfigureMCPRemovesOnlyDisabledOrMissingCanonicalServers(t *testing.T) 
 	}
 	existing := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
-			"user-tool": map[string]interface{}{"command": "/tmp/user-tool"},
-			"codebase":  map[string]interface{}{"command": "/tmp/stale-codebase"},
-			"obsidian":  map[string]interface{}{"command": "/tmp/stale-obsidian"},
+			"user-tool":    map[string]interface{}{"command": "/tmp/user-tool"},
+			ServerCodebase: map[string]interface{}{"command": "/tmp/stale-codebase"},
+			ServerObsidian: map[string]interface{}{"command": "/tmp/stale-obsidian"},
 		},
 		"custom": true,
 	}
@@ -591,19 +591,19 @@ func TestConfigureMCPRemovesOnlyDisabledOrMissingCanonicalServers(t *testing.T) 
 
 	// A full sync must remove the disabled canonical entry but retain active
 	// DWYT entries and every server the user owns.
-	obsidian := reg.MCPServers["obsidian"]
+	obsidian := reg.MCPServers[ServerObsidian]
 	obsidian.Enabled = false
 	reg.Set("obsidian", obsidian)
 	if err := reg.ConfigureMCP(projectPath, []string{"cursor"}); err != nil {
 		t.Fatal(err)
 	}
 	assertMCPServerPresence(t, cursorPath, "mcpServers", "user-tool", true)
-	assertMCPServerPresence(t, cursorPath, "mcpServers", "codebase", true)
-	assertMCPServerPresence(t, cursorPath, "mcpServers", "obsidian", false)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", ServerCodebase, true)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", ServerObsidian, false)
 
 	// If the real Codebase target disappears, the stale canonical config must
 	// be removed on the next full sync; the user entry is still untouched.
-	codebase := reg.MCPServers["codebase"]
+	codebase := reg.MCPServers[ServerCodebase]
 	if codebase.Target == "" {
 		t.Fatalf("expected proxied codebase entry with target, got %#v", codebase)
 	}
@@ -614,8 +614,8 @@ func TestConfigureMCPRemovesOnlyDisabledOrMissingCanonicalServers(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertMCPServerPresence(t, cursorPath, "mcpServers", "user-tool", true)
-	assertMCPServerPresence(t, cursorPath, "mcpServers", "codebase", false)
-	assertMCPServerPresence(t, cursorPath, "mcpServers", "obsidian", false)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", ServerCodebase, false)
+	assertMCPServerPresence(t, cursorPath, "mcpServers", ServerObsidian, false)
 }
 
 func TestConfigureMCPByNameOnlyMutatesRequestedServer(t *testing.T) {
@@ -641,9 +641,9 @@ func TestConfigureMCPByNameOnlyMutatesRequestedServer(t *testing.T) {
 		"mcpServers": map[string]interface{}{
 			// This represents an existing Codebase card configuration. Reconfiguring
 			// the Obsidian card must not replace it with the current registry value.
-			"codebase":  map[string]interface{}{"command": "/tmp/keep-codebase"},
-			"obsidian":  map[string]interface{}{"command": "/tmp/old-obsidian"},
-			"user-tool": map[string]interface{}{"command": "/tmp/user-tool"},
+			ServerCodebase: map[string]interface{}{"command": "/tmp/keep-codebase"},
+			ServerObsidian: map[string]interface{}{"command": "/tmp/old-obsidian"},
+			"user-tool":    map[string]interface{}{"command": "/tmp/user-tool"},
 		},
 	}
 	if err := writeJSONFile(cursorPath, existing); err != nil {
@@ -657,12 +657,12 @@ func TestConfigureMCPByNameOnlyMutatesRequestedServer(t *testing.T) {
 	var got map[string]interface{}
 	readJSONFile(t, cursorPath, &got)
 	servers := got["mcpServers"].(map[string]interface{})
-	codebase := servers["codebase"].(map[string]interface{})
+	codebase := servers[ServerCodebase].(map[string]interface{})
 	if codebase["command"] != "/tmp/keep-codebase" {
 		t.Fatalf("scoped Obsidian sync rewrote Codebase: %#v", codebase)
 	}
-	obsidian := servers["obsidian"].(map[string]interface{})
-	if obsidian["command"] != reg.MCPServers["obsidian"].Command {
+	obsidian := servers[ServerObsidian].(map[string]interface{})
+	if obsidian["command"] != reg.MCPServers[ServerObsidian].Command {
 		t.Fatalf("expected Obsidian to be refreshed, got %#v", obsidian)
 	}
 	if _, ok := servers["user-tool"]; !ok {
@@ -684,9 +684,9 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	windowsCommand := `C:\Program Files\DWYT\dwyt.exe`
-	obsidian := reg.MCPServers["obsidian"]
+	obsidian := reg.MCPServers[ServerObsidian]
 	obsidian.Command = windowsCommand
-	reg.MCPServers["obsidian"] = obsidian
+	reg.MCPServers[ServerObsidian] = obsidian
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
@@ -696,7 +696,7 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 		`model = "keep-user-setting"`,
 		"",
 		"# dwyt:mcp:start",
-		"[mcp_servers.codebase]",
+		"[mcp_servers.dwyt_codebase]",
 		`command = "/tmp/keep-codebase"`,
 		"args = []",
 		"startup_timeout_sec = 20",
@@ -724,8 +724,8 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 	if !strings.Contains(content, "model = \"keep-user-setting\"") || !strings.Contains(content, "command = \"/tmp/keep-codebase\"") {
 		t.Fatalf("scoped Codex sync changed unrelated configuration:\n%s", content)
 	}
-	obsidianCommand := "command = " + strconv.Quote(reg.MCPServers["obsidian"].Command)
-	if !strings.Contains(content, "[mcp_servers.obsidian]") || !strings.Contains(content, obsidianCommand) {
+	obsidianCommand := "command = " + strconv.Quote(reg.MCPServers[ServerObsidian].Command)
+	if !strings.Contains(content, "[mcp_servers.dwyt_obsidian]") || !strings.Contains(content, obsidianCommand) {
 		t.Fatalf("expected scoped sync to add refreshed Obsidian table:\n%s", content)
 	}
 
@@ -741,10 +741,10 @@ func TestConfigureMCPByNamePreservesOtherCodexTable(t *testing.T) {
 	if parsed.Model != "keep-user-setting" {
 		t.Fatalf("model = %q, want keep-user-setting", parsed.Model)
 	}
-	if got := parsed.MCPServers["codebase"].Command; got != "/tmp/keep-codebase" {
+	if got := parsed.MCPServers[ServerCodebase].Command; got != "/tmp/keep-codebase" {
 		t.Fatalf("codebase command = %q, want /tmp/keep-codebase", got)
 	}
-	if got := parsed.MCPServers["obsidian"].Command; got != windowsCommand {
+	if got := parsed.MCPServers[ServerObsidian].Command; got != windowsCommand {
 		t.Fatalf("obsidian command = %q, want %q", got, windowsCommand)
 	}
 }
@@ -754,7 +754,7 @@ func TestRemoveManagedBlockPreservesCRLFBoundaries(t *testing.T) {
 		`model = "keep-user-setting"`,
 		"",
 		"# dwyt:mcp:start",
-		"[mcp_servers.codebase]",
+		"[mcp_servers.dwyt_codebase]",
 		`command = "C:\\Program Files\\DWYT\\codebase.exe"`,
 		"args = []",
 		"# dwyt:mcp:end",
@@ -838,7 +838,7 @@ func assertRegistryServerMap(t *testing.T, path string, config map[string]interf
 	if !ok {
 		t.Fatalf("%s: expected %s config: %#v", path, key, config)
 	}
-	for _, name := range []string{"codebase", "obsidian"} {
+	for _, name := range []string{ServerCodebase, ServerObsidian} {
 		server, ok := servers[name].(map[string]interface{})
 		if !ok {
 			t.Fatalf("%s: expected %s server in %#v", path, name, servers)
@@ -848,11 +848,11 @@ func assertRegistryServerMap(t *testing.T, path string, config map[string]interf
 			env, _ = server["environment"].(map[string]interface{})
 		}
 		switch name {
-		case "codebase":
+		case ServerCodebase:
 			if env["CBM_CACHE_DIR"] == "" {
 				t.Fatalf("%s: expected codebase CBM_CACHE_DIR env in %#v", path, server)
 			}
-		case "obsidian":
+		case ServerObsidian:
 			if env["DWYT_API_URL"] != "http://localhost:2737/api" {
 				t.Fatalf("%s: expected obsidian DWYT_API_URL env in %#v", path, server)
 			}
@@ -870,7 +870,7 @@ func TestCodebaseRoutedThroughShim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, ok := reg.MCPServers["codebase"]
+	entry, ok := reg.MCPServers[ServerCodebase]
 	if !ok {
 		t.Fatal("expected codebase entry")
 	}
@@ -907,7 +907,7 @@ func TestCodebaseFallsBackToDirectWhenShimMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := reg.MCPServers["codebase"]
+	entry := reg.MCPServers[ServerCodebase]
 	if filepath.Base(entry.Command) != "codebase-memory-mcp" && filepath.Base(entry.Command) != "codebase-memory-mcp.exe" {
 		t.Fatalf("expected direct codebase command without shim, got %q", entry.Command)
 	}
@@ -939,7 +939,7 @@ func TestLoadHealsLegacyRawCodebaseCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := reg.MCPServers["codebase"]
+	entry := reg.MCPServers[ServerCodebase]
 	if len(entry.Args) == 0 || entry.Args[0] != "mcp-proxy" {
 		t.Fatalf("expected legacy codebase entry healed to shim, got %#v", entry)
 	}
@@ -960,7 +960,7 @@ func TestLoadCanonicalObsidianCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, ok := reg.MCPServers["obsidian"]
+	entry, ok := reg.MCPServers[ServerObsidian]
 	if !ok {
 		t.Fatal("expected canonical obsidian entry")
 	}
@@ -1004,7 +1004,7 @@ func TestLoadHealsLegacyObsidianCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := reg.MCPServers["obsidian"]
+	entry := reg.MCPServers[ServerObsidian]
 	if filepath.Base(entry.Command) != "dwyt" && filepath.Base(entry.Command) != "dwyt.exe" {
 		t.Fatalf("expected command to be healed to dwyt, got %q", entry.Command)
 	}
@@ -1043,7 +1043,7 @@ func TestLoadRemovesLegacyObsidianKey(t *testing.T) {
 			t.Fatalf("legacy key %q should be gone", key)
 		}
 	}
-	if _, ok := reg.MCPServers["obsidian"]; !ok {
+	if _, ok := reg.MCPServers[ServerObsidian]; !ok {
 		t.Fatal("canonical obsidian key should exist")
 	}
 }
@@ -1079,5 +1079,138 @@ func TestObsidianInstalledViaLegacyCopy(t *testing.T) {
 	// still report true thanks to the legacy fallback.
 	if !reg.IsBinaryInstalled("obsidian") {
 		t.Fatal("obsidian must be reported installed when the legacy copy exists")
+	}
+}
+
+// Every DWYT MCP is namespaced with a `dwyt_` prefix, so an unprefixed
+// "codebase" or "obsidian" in a client config cannot collide with another
+// vendor's server of the same name.
+func TestCanonicalNamesAreNamespaced(t *testing.T) {
+	for _, name := range CanonicalNames() {
+		if !strings.HasPrefix(name, "dwyt_") {
+			t.Fatalf("MCP server name %q is not namespaced", name)
+		}
+	}
+	if len(CanonicalNames()) != 3 {
+		t.Fatalf("expected exactly three official MCPs, got %v", CanonicalNames())
+	}
+}
+
+func TestServerNameResolvesEverySpelling(t *testing.T) {
+	cases := map[string]string{
+		"dwyt_optimizer": ServerOptimizer,
+		"optimizer":      ServerOptimizer,
+		"dwyt":           ServerOptimizer,
+		"dwyt-optimizer": ServerOptimizer,
+		"dwyt_codebase":  ServerCodebase,
+		"codebase":       ServerCodebase,
+		"dwyt-codebase":  ServerCodebase,
+		"dwyt_obsidian":  ServerObsidian,
+		"obsidian":       ServerObsidian,
+		"obsidian-mcp":   ServerObsidian,
+		"dwyt-obsidian":  ServerObsidian,
+	}
+	for in, want := range cases {
+		if got := ServerName(in); got != want {
+			t.Fatalf("ServerName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// A third-party server must never be rewritten.
+	for _, foreign := range []string{"github", "postgres", "my-own-server", ""} {
+		if got := ServerName(foreign); got != foreign {
+			t.Fatalf("ServerName(%q) rewrote a user-managed server to %q", foreign, got)
+		}
+	}
+}
+
+func TestLogicalNameIsTheInverse(t *testing.T) {
+	cases := map[string]string{
+		ServerOptimizer: "optimizer",
+		ServerCodebase:  "codebase",
+		ServerObsidian:  "obsidian",
+		"obsidian":      "obsidian",
+		"github":        "github",
+	}
+	for in, want := range cases {
+		if got := LogicalName(in); got != want {
+			t.Fatalf("LogicalName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A registry written before the namespacing must migrate every entry, and a
+// server the user had disabled must not come back enabled.
+func TestLoadMigratesUnprefixedNamesPreservingEnabledFlag(t *testing.T) {
+	dwytHome := t.TempDir()
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutable(t, filepath.Join(dwytHome, "bin", "dwyt"))
+	configPath := filepath.Join(dwytHome, "config", "mcp-registry.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Registry{MCPServers: map[string]MCPServerEntry{
+		"codebase": {
+			Command: filepath.Join(dwytHome, "bin", "codebase-memory-mcp"),
+			Enabled: true,
+		},
+		"obsidian": {
+			Command: filepath.Join(dwytHome, "bin", exeName("dwyt")),
+			Args:    []string{"obsidian-mcp"},
+			Enabled: false,
+		},
+	}}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range CanonicalNames() {
+		if _, ok := reg.MCPServers[name]; !ok {
+			t.Fatalf("canonical entry %q missing after migration: %v", name, reg.MCPServers)
+		}
+	}
+	for _, legacyKey := range []string{"codebase", "obsidian", "dwyt"} {
+		if _, ok := reg.MCPServers[legacyKey]; ok {
+			t.Fatalf("unprefixed key %q survived the migration", legacyKey)
+		}
+	}
+	if reg.MCPServers[ServerObsidian].Enabled {
+		t.Fatal("a server the user disabled must not be re-enabled by the rename")
+	}
+	if !reg.MCPServers[ServerCodebase].Enabled {
+		t.Fatal("an enabled server must stay enabled")
+	}
+	if !reg.MigrationPerformed() {
+		t.Fatal("the rename must be reported as a migration")
+	}
+}
+
+// An entry still using the pre-rename `governor-mcp` subcommand is the
+// Optimizer and must be recognised rather than treated as an unknown server.
+func TestLegacyGovernorSubcommandIsRecognised(t *testing.T) {
+	entry := MCPServerEntry{Command: "/tmp/dwyt", Args: []string{"governor-mcp"}}
+	if !isOptimizerEntry("", entry) {
+		t.Fatal("the pre-rename subcommand must still identify the Optimizer")
+	}
+	if isLegacyCodebaseWiring(entry) {
+		t.Fatal("an Optimizer entry must never be mistaken for legacy codebase wiring")
+	}
+}
+
+// A full sync removes the ambiguous bare "dwyt" key; a scoped sync must not,
+// because it belongs to no single card.
+func TestBareDwytKeyRemovedOnlyOnFullSync(t *testing.T) {
+	servers := map[string]interface{}{"dwyt": map[string]interface{}{"command": "/tmp/old"}}
+	removeLegacyServerKeysFor(servers, []string{ServerObsidian})
+	if _, ok := servers["dwyt"]; !ok {
+		t.Fatal("a scoped sync must not delete the ambiguous bare key")
+	}
+	removeLegacyServerKeysFor(servers, nil)
+	if _, ok := servers["dwyt"]; ok {
+		t.Fatal("a full sync should remove the ambiguous bare key")
 	}
 }

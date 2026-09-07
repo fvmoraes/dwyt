@@ -18,13 +18,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 )
 
 // Block is one span of prompt content with its cache class.
 type Block struct {
 	ID    string                `json:"id"`
-	Class contextgov.CacheClass `json:"class"`
+	Class contextopt.CacheClass `json:"class"`
 	// Content is the text of the block.
 	Content string `json:"content,omitempty"`
 	// Hash identifies the content. Computed from Content when empty.
@@ -38,13 +38,13 @@ func (b *Block) normalize() {
 	if b.Class == "" {
 		// Unknown class means volatile: that keeps it *behind* the stable prefix,
 		// which is the safe direction to be wrong in.
-		b.Class = contextgov.CacheVolatile
+		b.Class = contextopt.CacheVolatile
 	}
 	if b.Hash == "" && b.Content != "" {
-		b.Hash = contextgov.HashContent(b.Content)
+		b.Hash = contextopt.HashContent(b.Content)
 	}
 	if b.Tokens == 0 && b.Content != "" {
-		b.Tokens = contextgov.EstimateTokens(b.Content)
+		b.Tokens = contextopt.EstimateTokens(b.Content)
 	}
 }
 
@@ -75,7 +75,7 @@ type Prompt struct {
 	PrefixHash string `json:"prefix_hash"`
 	// ClassHashes carries one hash per cache class, so a diagnostic can point at
 	// *which* class changed.
-	ClassHashes map[contextgov.CacheClass]string `json:"class_hashes"`
+	ClassHashes map[contextopt.CacheClass]string `json:"class_hashes"`
 	// PrefixTokens is the size of the reusable prefix.
 	PrefixTokens int `json:"prefix_tokens"`
 	// TotalTokens is the size of the whole prompt.
@@ -91,7 +91,7 @@ type Prompt struct {
 // the "immutable" span would silently destroy the cache for every request, while
 // moving it to the tail costs nothing.
 func Build(blocks []Block) Prompt {
-	p := Prompt{ClassHashes: map[contextgov.CacheClass]string{}}
+	p := Prompt{ClassHashes: map[contextopt.CacheClass]string{}}
 
 	working := make([]Block, 0, len(blocks))
 	for _, b := range blocks {
@@ -102,7 +102,7 @@ func Build(blocks []Block) Prompt {
 				Reason:  "volatile metadata in a stable block; demoted to volatile so the prefix stays reusable",
 				Fixed:   true,
 			})
-			b.Class = contextgov.CacheVolatile
+			b.Class = contextopt.CacheVolatile
 		}
 		working = append(working, b)
 	}
@@ -112,12 +112,12 @@ func Build(blocks []Block) Prompt {
 	// and reordering within a class would break it just as surely as reordering
 	// across classes.
 	sort.SliceStable(working, func(i, j int) bool {
-		return contextgov.CacheClassRank(working[i].Class) < contextgov.CacheClassRank(working[j].Class)
+		return contextopt.CacheClassRank(working[i].Class) < contextopt.CacheClassRank(working[j].Class)
 	})
 	p.Blocks = working
 
 	var stable strings.Builder
-	perClass := map[contextgov.CacheClass]*strings.Builder{}
+	perClass := map[contextopt.CacheClass]*strings.Builder{}
 	for _, b := range working {
 		p.TotalTokens += b.Tokens
 		if perClass[b.Class] == nil {
@@ -138,8 +138,8 @@ func Build(blocks []Block) Prompt {
 	return p
 }
 
-func isStable(c contextgov.CacheClass) bool {
-	return c == contextgov.CacheImmutable || c == contextgov.CacheLongLived
+func isStable(c contextopt.CacheClass) bool {
+	return c == contextopt.CacheImmutable || c == contextopt.CacheLongLived
 }
 
 func hasVolatileMarker(content string) bool {
@@ -179,7 +179,7 @@ type IdentityInput struct {
 	Provider string
 	// ProjectHash is DWYT's project id (already a hash, never a path).
 	ProjectHash string
-	// PolicyVersion changes when the governor's rules change, because a prefix
+	// PolicyVersion changes when the optimizer's rules change, because a prefix
 	// built under different rules is not interchangeable.
 	PolicyVersion  string
 	System         string
@@ -266,7 +266,7 @@ func Diagnose(previous, current Prompt, obs Observation) Diagnosis {
 			d.Findings = append(d.Findings,
 				"stable prefix changed: a cache miss on the reusable span is expected")
 		}
-		for _, class := range contextgov.CacheClasses() {
+		for _, class := range contextopt.CacheClasses() {
 			if previous.ClassHashes[class] != current.ClassHashes[class] {
 				d.ChangedClasses = append(d.ChangedClasses, string(class))
 			}
@@ -306,7 +306,7 @@ func Diagnose(previous, current Prompt, obs Observation) Diagnosis {
 
 // TrimOrder is the normative order in which content must be dropped when a
 // prompt has to shrink (spec §43). Exported so the dashboard and the MCP share
-// one vocabulary with the context governor.
+// one vocabulary with the context optimizer.
 func TrimOrder() []string {
 	return []string{
 		"discardable",
@@ -348,14 +348,14 @@ func PlanLongContext(p Prompt, threshold int) LongContextPlan {
 
 	eligible := make([]Block, 0, len(p.Blocks))
 	for _, b := range p.Blocks {
-		if b.Class == contextgov.CacheVolatile || b.Class == contextgov.CacheSession {
+		if b.Class == contextopt.CacheVolatile || b.Class == contextopt.CacheSession {
 			eligible = append(eligible, b)
 		}
 	}
 	// Largest first: fewest blocks removed to reach the target.
 	sort.SliceStable(eligible, func(i, j int) bool {
-		ri := contextgov.CacheClassRank(eligible[i].Class)
-		rj := contextgov.CacheClassRank(eligible[j].Class)
+		ri := contextopt.CacheClassRank(eligible[i].Class)
+		rj := contextopt.CacheClassRank(eligible[j].Class)
 		if ri != rj {
 			// Volatile (rank 3) before session (rank 2): drop the least reusable
 			// content first.

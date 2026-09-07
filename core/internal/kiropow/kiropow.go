@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 )
 
 type PowerStatus struct {
@@ -116,7 +118,7 @@ func IsKiroEnabled(setupConfig map[string]interface{}) bool {
 }
 
 func ValidateMCPBinaries(dwytBin string) map[string]bool {
-	// Both DWYT-owned MCPs — the Governor (`dwyt governor-mcp`) and the Brain
+	// Both DWYT-owned MCPs — the Optimizer (`dwyt optimizer-mcp`) and the Brain
 	// (`dwyt obsidian-mcp`) — are served by the main `dwyt` binary, so its
 	// presence is the canonical signal for both. A legacy
 	// `dwyt-obsidian-mcp` copy (left over from older installs) is also
@@ -126,9 +128,9 @@ func ValidateMCPBinaries(dwytBin string) map[string]bool {
 	obsidianLegacy := executableName("dwyt-obsidian-mcp")
 	mainPresent := fileExists(filepath.Join(dwytBin, dwyt))
 	return map[string]bool{
-		"dwyt":     mainPresent,
-		"codebase": fileExists(filepath.Join(dwytBin, executableName("codebase-memory-mcp"))),
-		"obsidian": mainPresent || fileExists(filepath.Join(dwytBin, obsidianLegacy)),
+		mcpregistry.ServerOptimizer: mainPresent,
+		mcpregistry.ServerCodebase:  fileExists(filepath.Join(dwytBin, executableName("codebase-memory-mcp"))),
+		mcpregistry.ServerObsidian:  mainPresent || fileExists(filepath.Join(dwytBin, obsidianLegacy)),
 	}
 }
 
@@ -136,17 +138,17 @@ func ValidateMCPBinaries(dwytBin string) map[string]bool {
 //
 // Like the instruction files, this is the v5 *entry contract* and not the
 // policy itself (spec §4, §60.3). Shipping the full policy here as well as in
-// the DWYT MCP would duplicate thousands of tokens per request and reduce cache
+// the DWYT Optimizer would duplicate thousands of tokens per request and reduce cache
 // reuse — the exact failure the spec calls out. The Power points Kiro at the
-// Governor; the Governor supplies the rules on demand.
+// Optimizer; the Optimizer supplies the rules on demand.
 func GeneratePowerMD(dwytBin, projectPath string, mcps map[string]bool) string {
 	return fmt.Sprintf(`---
 name: dwyt-power
 displayName: DWYT Project Context
-description: DWYT context governor plus Obsidian project memory and the Codebase graph, with RTK terminal compression.
+description: DWYT context optimizer plus Obsidian project memory and the Codebase graph, with RTK terminal compression.
 keywords:
   - dwyt
-  - context governor
+  - context optimizer
   - codebase
   - obsidian
   - mcp
@@ -164,15 +166,15 @@ author: DWYT
 
 # DWYT Project Context
 
-DWYT (Don't Waste Your Tokens) governs how much context a task loads, so the
+DWYT (Don't Waste Your Tokens) optimizes how much context a task loads, so the
 model receives the minimum sufficient context instead of the maximum available.
 
 ## Three MCPs
 
-- **dwyt** — the Context Governor: budgets, retrieval boundaries, output
-  profiles, cache guidance, tool-output compaction and raw retrieval.
-- **obsidian** — the Brain: canonical project knowledge and compact sessions.
-- **codebase** — Code Intelligence: symbols, references, dependencies, ranges.
+- **dwyt_optimizer** — the Context Optimizer: budgets, retrieval boundaries,
+  output profiles, cache guidance, tool-output compaction and raw retrieval.
+- **dwyt_obsidian** — the Brain: canonical project knowledge and compact sessions.
+- **dwyt_codebase** — Code Intelligence: symbols, references, dependencies, ranges.
 
 RTK compresses terminal output. It is a CLI tool, not a fourth MCP.
 
@@ -198,30 +200,33 @@ DWYT bin: %s
 
 ## MCP Availability
 
-- dwyt: %t
-- codebase: %t
-- obsidian: %t
-`, projectPath, dwytBin, mcps["dwyt"], mcps["codebase"], mcps["obsidian"])
+- dwyt_optimizer: %t
+- dwyt_codebase: %t
+- dwyt_obsidian: %t
+`, projectPath, dwytBin,
+		mcps[mcpregistry.ServerOptimizer],
+		mcps[mcpregistry.ServerCodebase],
+		mcps[mcpregistry.ServerObsidian])
 }
 
 func GenerateMCPJSON(dwytBin string, mcps map[string]bool) (string, error) {
 	servers := map[string]interface{}{}
-	if mcps["dwyt"] {
-		servers["dwyt"] = map[string]interface{}{
+	if mcps[mcpregistry.ServerOptimizer] {
+		servers[mcpregistry.ServerOptimizer] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("dwyt")),
-			"args":    []string{"governor-mcp"},
+			"args":    []string{"optimizer-mcp"},
 			"env":     map[string]string{"DWYT_API_URL": "http://localhost:2737/api"},
 		}
 	}
-	if mcps["codebase"] {
-		servers["codebase"] = map[string]interface{}{
+	if mcps[mcpregistry.ServerCodebase] {
+		servers[mcpregistry.ServerCodebase] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("codebase-memory-mcp")),
 			"args":    []string{"--ui=true", "--port=9749"},
 			"env":     map[string]string{"CBM_CACHE_DIR": filepath.Join(dwytBin, "..", "codebase")},
 		}
 	}
-	if mcps["obsidian"] {
-		servers["obsidian"] = map[string]interface{}{
+	if mcps[mcpregistry.ServerObsidian] {
+		servers[mcpregistry.ServerObsidian] = map[string]interface{}{
 			"command": filepath.Join(dwytBin, executableName("dwyt")),
 			"args":    []string{"obsidian-mcp"},
 			"env":     map[string]string{"DWYT_API_URL": "http://localhost:2737/api"},
@@ -284,11 +289,15 @@ func NeedsUpdate(powerDir, dwytBin string) bool {
 	// binary, two subcommand args). An older `dwyt-obsidian-mcp` reference is
 	// still accepted while a migration is in flight, so we update when both
 	// are missing.
-	return (mcps["codebase"] && !strings.Contains(text, executableName("codebase-memory-mcp"))) ||
-		(mcps["obsidian"] && !containsObsidianMCPCommand(text)) ||
-		// A Power generated before v5 has no Governor entry; regenerate so the
+	return (mcps[mcpregistry.ServerCodebase] && !strings.Contains(text, executableName("codebase-memory-mcp"))) ||
+		(mcps[mcpregistry.ServerObsidian] && !containsObsidianMCPCommand(text)) ||
+		// A Power generated before v5 has no Optimizer entry; regenerate so the
 		// three official MCPs are all present.
-		(mcps["dwyt"] && !strings.Contains(text, "\"governor-mcp\""))
+		(mcps[mcpregistry.ServerOptimizer] && !strings.Contains(text, "\"optimizer-mcp\"")) ||
+		// A Power generated before the servers were namespaced lists them under
+		// their unprefixed keys; regenerate so the client config matches the
+		// registry, otherwise the same server is started twice under two names.
+		!strings.Contains(text, `"`+mcpregistry.ServerOptimizer+`"`)
 }
 
 // containsObsidianMCPCommand reports whether the generated Kiro Power
@@ -345,8 +354,9 @@ inclusion: always
 
 # DWYT Context Rules
 
-Three MCPs: **dwyt** (context governor), **obsidian** (project memory),
-**codebase** (code structure). RTK compresses terminal output and is not an MCP.
+Three MCPs: **dwyt_optimizer** (context optimizer), **dwyt_obsidian**
+(project memory), **dwyt_codebase** (code structure). RTK compresses terminal
+output and is not an MCP.
 
 ## Order of Operations
 
@@ -415,7 +425,7 @@ inclusion: manual
 
 # Codebase - Code Knowledge Graph
 
-The Codebase MCP is the source of truth for symbols, calls, dependencies,
+The dwyt_codebase MCP is the source of truth for symbols, calls, dependencies,
 relationships and impact. Retrieve progressively; never start by reading the
 repository.
 

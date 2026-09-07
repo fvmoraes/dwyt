@@ -365,7 +365,7 @@ export async function refreshKiroPower(): Promise<KiroPowerStatus> {
   return r.json()
 }
 
-// ── DWYT v5: Governor, Brain lifecycle and telemetry ─────────────────────
+// ── DWYT v5: Optimizer, Brain lifecycle and telemetry ─────────────────────
 //
 // Every ratio below is nullable on purpose. The backend returns null when no
 // request reported the underlying numbers, and the UI must render "—" rather
@@ -462,7 +462,7 @@ export async function getTelemetrySummary(window = '24h'): Promise<TelemetryPayl
   return parseJSON(r) as Promise<TelemetryPayload>
 }
 
-export interface GovernorPolicy {
+export interface OptimizerPolicy {
   policy_version: string
   catalog_version?: string
   providers?: string[]
@@ -471,9 +471,9 @@ export interface GovernorPolicy {
   config?: Record<string, unknown>
 }
 
-export async function getGovernorPolicy(): Promise<GovernorPolicy> {
-  const r = await fetch(`${API}/governor/policy`)
-  return parseJSON(r) as Promise<GovernorPolicy>
+export async function getOptimizerPolicy(): Promise<OptimizerPolicy> {
+  const r = await fetch(`${API}/optimizer/policy`)
+  return parseJSON(r) as Promise<OptimizerPolicy>
 }
 
 export interface HousekeeperReport {

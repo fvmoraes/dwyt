@@ -1,16 +1,16 @@
-package governor
+package optimizer
 
 import (
 	"context"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
-	"github.com/fvmoraes/dwyt/internal/outputgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
+	"github.com/fvmoraes/dwyt/internal/outputopt"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
 )
 
-// Routing surface of the Governor (spec §46, §50).
+// Routing surface of the Optimizer (spec §46, §50).
 //
-// The Governor exposes routing as a *recommendation*, not an instruction. DWYT
+// The Optimizer exposes routing as a *recommendation*, not an instruction. DWYT
 // does not control which model an IDE sends a request to, so pretending to
 // dictate it would be the same overreach as claiming enforced cache control. What
 // it can do — and does here — is classify deterministically and say why.
@@ -39,14 +39,14 @@ type RouteRequest struct {
 // RouteResponse is the routing recommendation.
 type RouteResponse struct {
 	TaskID   string                   `json:"task_id"`
-	Decision contextgov.RouteDecision `json:"decision"`
+	Decision contextopt.RouteDecision `json:"decision"`
 	// Budget is the context budget implied by the classification, so a caller
 	// gets one coherent answer rather than having to ask twice.
-	Budget contextgov.Budget `json:"budget"`
+	Budget contextopt.Budget `json:"budget"`
 	// Output is the output profile for the routed phase.
-	Output outputgov.Profile `json:"output"`
+	Output outputopt.Profile `json:"output"`
 	// Limits are the cost/token stop limits adapted to the routed tier.
-	Limits contextgov.StopLimits `json:"limits"`
+	Limits contextopt.StopLimits `json:"limits"`
 	// Note states plainly that this is a recommendation.
 	Note          string `json:"note"`
 	PolicyVersion string `json:"policy_version"`
@@ -57,15 +57,15 @@ type RouteResponse struct {
 // Signals the caller does not supply are simply absent: an unknown task routes to
 // the mid tier, because guessing "cheap" for something DWYT knows nothing about
 // risks a failure that costs more than the saving.
-func (g *Governor) Route(req RouteRequest) RouteResponse {
+func (g *Optimizer) Route(req RouteRequest) RouteResponse {
 	_, span := g.Tracer().Start(context.Background(), telemetry.SpanClassification, map[string]interface{}{
 		"phase": req.Phase,
 		"files": req.Files,
 	})
 	defer span.End()
 
-	phase := contextgov.ParsePhase(req.Phase)
-	signals := contextgov.Signals{
+	phase := contextopt.ParsePhase(req.Phase)
+	signals := contextopt.Signals{
 		Files:                 req.Files,
 		Modules:               req.Modules,
 		Languages:             req.Languages,
@@ -79,7 +79,7 @@ func (g *Governor) Route(req RouteRequest) RouteResponse {
 		Confidence:            req.Confidence,
 		Phase:                 phase,
 	}
-	// Failure history the governor already observed outranks what the caller
+	// Failure history the optimizer already observed outranks what the caller
 	// reported: the session state is measured, the argument is claimed.
 	if sess, ok := g.Session(req.TaskID); ok {
 		state := sess.State()
@@ -94,9 +94,9 @@ func (g *Governor) Route(req RouteRequest) RouteResponse {
 	}
 
 	cfg := g.Config()
-	decision := contextgov.Route(signals, cfg.Routing)
+	decision := contextopt.Route(signals, cfg.Routing)
 
-	budget := contextgov.ComputeBudget(contextgov.BudgetProfile{
+	budget := contextopt.ComputeBudget(contextopt.BudgetProfile{
 		Phase:          phase,
 		Complexity:     decision.Classification,
 		DefaultBudget:  cfg.DefaultBudget,
@@ -116,7 +116,7 @@ func (g *Governor) Route(req RouteRequest) RouteResponse {
 		Decision: decision,
 		Budget:   budget,
 		Output:   g.OutputProfile("", string(decision.OutputPhase)),
-		Limits:   contextgov.AdaptiveBudget(cfg.StopLimits, decision),
+		Limits:   contextopt.AdaptiveBudget(cfg.StopLimits, decision),
 		Note: "A recommendation, not an instruction: DWYT does not control which " +
 			"model the client sends the request to. Tiers are deliberately not " +
 			"mapped to model names, which change too often to hardcode.",

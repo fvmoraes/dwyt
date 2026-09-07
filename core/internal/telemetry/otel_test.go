@@ -282,7 +282,7 @@ func TestSpanNamesCoverThePipeline(t *testing.T) {
 		SpanRequest, SpanClassification, SpanContextPlan, SpanContextBudget,
 		SpanRetrieval, SpanMemorySearch, SpanSemanticDedup, SpanContextCompression,
 		SpanCachePolicy, SpanLLMRequest, SpanToolCall, SpanToolCompression,
-		SpanOutputGovernor, SpanMemoryCompile, SpanHousekeeper,
+		SpanOutputOptimizer, SpanMemoryCompile, SpanHousekeeper,
 	}
 	seen := map[string]bool{}
 	for _, name := range required {

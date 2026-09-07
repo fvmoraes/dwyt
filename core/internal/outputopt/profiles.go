@@ -1,22 +1,22 @@
-// Package outputgov governs the *output* side of a request (spec §33–§36).
+// Package outputopt optimizes the *output* side of a request (spec §33–§36).
 //
 // Reducing input and then letting the model emit ten thousand tokens of
-// narration is not a saving. The output governor assigns a visible-token
+// narration is not a saving. The output optimizer assigns a visible-token
 // target per phase, states the Output Efficiency Contract in a form small
 // enough to inject into a prompt, and — critically — encodes the artifact
 // exception so a requested document is never truncated to satisfy an
 // operational rule.
-package outputgov
+package outputopt
 
 import (
 	"strings"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 )
 
 // Profile is the output allowance for one phase of the agent loop.
 type Profile struct {
-	Phase contextgov.Phase `json:"phase"`
+	Phase contextopt.Phase `json:"phase"`
 	// TargetTokens is the visible-token target. Zero means "no operational
 	// cap" — used by the artifact phase.
 	TargetTokens int `json:"target_tokens"`
@@ -40,8 +40,8 @@ const (
 )
 
 // ProfileFor returns the output profile for a phase.
-func ProfileFor(phase contextgov.Phase) Profile {
-	target := contextgov.OutputTargetForPhase(phase)
+func ProfileFor(phase contextopt.Phase) Profile {
+	target := contextopt.OutputTargetForPhase(phase)
 	p := Profile{
 		Phase:             phase,
 		TargetTokens:      target,
@@ -49,16 +49,16 @@ func ProfileFor(phase contextgov.Phase) Profile {
 		SuppressNarration: true,
 	}
 	switch phase {
-	case contextgov.PhaseArtifact:
+	case contextopt.PhaseArtifact:
 		// The artifact exception: the requested output is the product.
 		p.TargetTokens = 0
 		p.MaxTokens = 0
 		p.Structured = false
 		p.ArtifactException = true
-	case contextgov.PhaseReview:
+	case contextopt.PhaseReview:
 		p.MaxTokens = 2000
 		p.Structured = false
-	case contextgov.PhasePlan:
+	case contextopt.PhasePlan:
 		p.MaxTokens = 6000
 		p.Structured = false
 	default:
@@ -73,7 +73,7 @@ func ProfileFor(phase contextgov.Phase) Profile {
 // ProfileForTaskType maps a task type string to a profile. It is the entry
 // point used by the MCP tool, where the caller says "review" or "document"
 // rather than naming an internal phase.
-func ProfileForTaskType(taskType string, phase contextgov.Phase) Profile {
+func ProfileForTaskType(taskType string, phase contextopt.Phase) Profile {
 	if phase == "" {
 		phase = phaseFromTaskType(taskType)
 	}
@@ -83,24 +83,24 @@ func ProfileForTaskType(taskType string, phase contextgov.Phase) Profile {
 // phaseFromTaskType maps user-facing task vocabulary onto phases. Anything
 // that produces a document for the user maps to the artifact phase so it is
 // never truncated.
-func phaseFromTaskType(taskType string) contextgov.Phase {
+func phaseFromTaskType(taskType string) contextopt.Phase {
 	switch strings.ToLower(strings.TrimSpace(taskType)) {
 	case "classify", "classification", "route":
-		return contextgov.PhaseClassify
+		return contextopt.PhaseClassify
 	case "retrieve", "search", "explore":
-		return contextgov.PhaseRetrieve
+		return contextopt.PhaseRetrieve
 	case "tool", "tools", "build", "test", "execute":
-		return contextgov.PhaseToolLoop
+		return contextopt.PhaseToolLoop
 	case "fix", "bug", "patch", "edit", "implement":
-		return contextgov.PhaseFix
+		return contextopt.PhaseFix
 	case "review", "audit":
-		return contextgov.PhaseReview
+		return contextopt.PhaseReview
 	case "plan", "spec", "design":
-		return contextgov.PhasePlan
+		return contextopt.PhasePlan
 	case "artifact", "document", "documentation", "readme", "report", "explain":
-		return contextgov.PhaseArtifact
+		return contextopt.PhaseArtifact
 	}
-	return contextgov.PhaseFix
+	return contextopt.PhaseFix
 }
 
 // Contract is the Output Efficiency Contract (spec §34) in the exact compact

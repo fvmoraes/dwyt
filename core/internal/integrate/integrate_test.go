@@ -126,11 +126,11 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 		t.Fatalf("%s: expected one DWYT instruction block:\n%s", path, content)
 	}
 	// v5 entry contract (spec §4): the block names the three MCPs, points at
-	// the governor, and states the retrieval preferences — nothing more.
+	// the optimizer, and states the retrieval preferences — nothing more.
 	for _, want := range []string{
-		"**DWYT MCP** — context governor",
-		"**Obsidian MCP** — persistent project memory",
-		"**Codebase MCP** — structural code retrieval",
+		"**dwyt_optimizer** — context optimizer",
+		"**dwyt_obsidian** — persistent project memory",
+		"**dwyt_codebase** — structural code retrieval",
 		"`dwyt_context_plan`",
 		"`obsidian_save_context`",
 		"`dwyt_get_raw`",
@@ -145,7 +145,7 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 			t.Fatalf("%s: expected generated instructions to contain %q:\n%s", path, want, content)
 		}
 	}
-	// The v5 contract must not re-state the policy the Governor owns. Each of
+	// The v5 contract must not re-state the policy the Optimizer owns. Each of
 	// these strings marks a whole section that was deliberately moved into the
 	// DWYT MCP; their reappearance means the duplication regressed.
 	for _, forbidden := range []string{
@@ -168,7 +168,7 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 	const maxContractBytes = 2500
 	if len(content) > maxContractBytes {
 		t.Fatalf("%s: DWYT instruction block grew to %d bytes (max %d); "+
-			"detailed policy belongs in the DWYT MCP, not in instruction files",
+			"detailed policy belongs in the DWYT Optimizer, not in instruction files",
 			path, len(content), maxContractBytes)
 	}
 }

@@ -1,23 +1,23 @@
-package governor
+package optimizer
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 	"github.com/fvmoraes/dwyt/internal/provider"
 )
 
 var jsonMarshal = json.Marshal
 
-func newGovernor(t *testing.T) *Governor {
+func newOptimizer(t *testing.T) *Optimizer {
 	t.Helper()
 	return New(DefaultConfig(), t.TempDir())
 }
 
 func TestContextPlanReturnsBudgetAndBoundaries(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	resp := g.ContextPlan(PlanRequest{TaskID: "t1", Task: "fix the delete flow"})
 
 	if resp.TaskID != "t1" || resp.PolicyVersion != PolicyVersion {
@@ -41,10 +41,10 @@ func TestContextPlanReturnsBudgetAndBoundaries(t *testing.T) {
 }
 
 func TestContextPlanIsCompact(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	resp := g.ContextPlan(PlanRequest{Task: "refactor the resource table", Complexity: "complex"})
 
-	// The governor must not become another source of waste (spec §3.1). The
+	// The optimizer must not become another source of waste (spec §3.1). The
 	// whole plan, serialized, has to stay far below a single operational answer.
 	size := len(mustJSON(t, resp))
 	if size > 2500 {
@@ -52,7 +52,7 @@ func TestContextPlanIsCompact(t *testing.T) {
 	}
 	// And it must not echo the policy text back.
 	if strings.Contains(mustJSON(t, resp), "DWYT TOKEN EFFICIENCY POLICY") {
-		t.Fatal("the governor must not re-send the policy on every call")
+		t.Fatal("the optimizer must not re-send the policy on every call")
 	}
 }
 
@@ -85,7 +85,7 @@ func TestContextPlanRespectsTightenedOperationalTarget(t *testing.T) {
 }
 
 func TestContextPlanPreservesAnExpandedBudgetAcrossTurns(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	first := g.ContextPlan(PlanRequest{TaskID: "t1", Task: "work"})
 
 	sess, ok := g.Session("t1")
@@ -136,7 +136,7 @@ func TestRegisterContextKeepsDropsAndReuses(t *testing.T) {
 }
 
 func TestRegisterContextReusesUnchangedSymbols(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "fix"})
 
 	item := RegisterItem{
@@ -158,7 +158,7 @@ func TestRegisterContextReusesUnchangedSymbols(t *testing.T) {
 }
 
 func TestRegisterContextHashesContentWhenNotSupplied(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	resp := g.RegisterContext(RegisterRequest{
 		TaskID: "t1",
 		Items:  []RegisterItem{{ID: "a", Kind: "file_summary", Content: "package main\n"}},
@@ -169,7 +169,7 @@ func TestRegisterContextHashesContentWhenNotSupplied(t *testing.T) {
 }
 
 func TestRegisterContextGrantsProgressiveExpansion(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "big refactor", Complexity: "trivial", Phase: "classify"})
 	budget := g.ContextStatus("t1").Budget
 
@@ -195,7 +195,7 @@ func TestRegisterContextGrantsProgressiveExpansion(t *testing.T) {
 }
 
 func TestContextStatusForUnknownTaskIsSafe(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	st := g.ContextStatus("never-seen")
 	if st.Budget.Total <= 0 {
 		t.Fatal("an unknown task must still get a usable default budget")
@@ -206,7 +206,7 @@ func TestContextStatusForUnknownTaskIsSafe(t *testing.T) {
 }
 
 func TestCompactToolOutputArchivesRawAndReturnsRef(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	var b strings.Builder
 	for i := 0; i < 300; i++ {
 		b.WriteString("[INFO] compiling something\n")
@@ -234,7 +234,7 @@ func TestCompactToolOutputArchivesRawAndReturnsRef(t *testing.T) {
 }
 
 func TestCompactToolOutputResolvesAnExistingRawRef(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	meta, err := g.PutRaw("src/a.ts(1,1): error TS1: boom\n", "tool_output", "tsc")
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestCompactToolOutputResolvesAnExistingRawRef(t *testing.T) {
 }
 
 func TestCompactToolOutputRequiresInput(t *testing.T) {
-	if _, err := newGovernor(t).CompactToolOutput(CompactRequest{}); err == nil {
+	if _, err := newOptimizer(t).CompactToolOutput(CompactRequest{}); err == nil {
 		t.Fatal("compaction without content or a reference must be rejected")
 	}
 }
@@ -276,7 +276,7 @@ func TestRawStoreDisabledDegradesGracefully(t *testing.T) {
 }
 
 func TestReportUsageUpdatesObservedCacheOnly(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "work"})
 
 	g.ReportUsage(Usage{TaskID: "t1", CachedHashes: []string{"h1"}, Observed: false})
@@ -328,7 +328,7 @@ type testError struct{ msg string }
 func (e *testError) Error() string { return e.msg }
 
 func TestReportUsageSurvivesTelemetryFailure(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	rec := &failingRecorder{}
 	g.SetUsageRecorder(rec)
 
@@ -348,7 +348,7 @@ func TestReportUsageSurvivesTelemetryFailure(t *testing.T) {
 }
 
 func TestCacheGuidanceIsHonestAboutCapability(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	guidance := g.CacheGuidance("openai", "some-model")
 
 	if guidance.CapabilityState != CapabilityAdvised {
@@ -358,7 +358,7 @@ func TestCacheGuidanceIsHonestAboutCapability(t *testing.T) {
 	if guidance.CapabilityState == CapabilityEnforced {
 		t.Fatal("claiming enforcement without controlling the request is forbidden")
 	}
-	want := contextgov.CacheClasses()
+	want := contextopt.CacheClasses()
 	if len(guidance.Order) != len(want) {
 		t.Fatalf("expected the canonical order, got %v", guidance.Order)
 	}
@@ -377,7 +377,7 @@ func TestCacheGuidanceIsHonestAboutCapability(t *testing.T) {
 }
 
 func TestUnwiredProvidersReportUnavailableInsteadOfFailing(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	if available, _ := g.MemoryHealth()["available"].(bool); available {
 		t.Fatal("an unwired brain must report unavailable")
 	}
@@ -387,7 +387,7 @@ func TestUnwiredProvidersReportUnavailableInsteadOfFailing(t *testing.T) {
 }
 
 func TestSessionsAreBounded(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	for i := 0; i < maxSessions+10; i++ {
 		g.ContextPlan(PlanRequest{TaskID: taskName(i), Task: "work"})
 	}
@@ -443,7 +443,7 @@ func mustJSON(t *testing.T, v interface{}) string {
 }
 
 func TestCacheGuidanceIsCapabilityDriven(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 
 	anthropic := g.CacheGuidance("anthropic", "claude-x")
 	if !anthropic.Capabilities.ExplicitBreakpoints {
@@ -470,7 +470,7 @@ func TestCacheGuidanceIsCapabilityDriven(t *testing.T) {
 }
 
 func TestCacheGuidanceBecomesObservedAfterAReport(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	if g.CacheGuidance("some-vendor", "m1").CapabilityState == CapabilityObserved {
 		t.Fatal("nothing has been observed yet")
 	}
@@ -487,7 +487,7 @@ func TestCacheGuidanceBecomesObservedAfterAReport(t *testing.T) {
 }
 
 func TestUnobservedReportTeachesNothingAboutTheProvider(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	cached := 1200
 	g.ReportUsage(Usage{
 		TaskID: "t1", Provider: "some-vendor", Model: "m1",
@@ -499,7 +499,7 @@ func TestUnobservedReportTeachesNothingAboutTheProvider(t *testing.T) {
 }
 
 func TestReportUsageFillsInAnEstimateWhenPricingIsKnown(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	g.Pricing().Register(provider.Pricing{
 		Provider: "openai", Model: "gpt-x", InputPerMTok: 2, OutputPerMTok: 8,
 	})
@@ -521,7 +521,7 @@ func TestReportUsageFillsInAnEstimateWhenPricingIsKnown(t *testing.T) {
 }
 
 func TestReportUsageLeavesCostUnknownWithoutPricing(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	input, output := 1_000_000, 100_000
 	g.ReportUsage(Usage{
 		TaskID: "t1", Provider: "unpriced-vendor",
@@ -536,13 +536,13 @@ func TestReportUsageLeavesCostUnknownWithoutPricing(t *testing.T) {
 }
 
 func TestRouteReturnsOneCoherentAnswer(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	resp := g.Route(RouteRequest{
 		TaskID: "t1", Task: "harden the delete flow", Phase: "fix",
 		Files: 3, TouchesSecurity: true, Destructive: true,
 	})
 
-	if resp.Decision.Tier != contextgov.TierPremium {
+	if resp.Decision.Tier != contextopt.TierPremium {
 		t.Fatalf("security plus destructive should route premium, got %s", resp.Decision.Tier)
 	}
 	// The caller must not have to ask twice: budget, output and limits come with
@@ -564,13 +564,13 @@ func TestRouteReturnsOneCoherentAnswer(t *testing.T) {
 	}
 }
 
-// Failure history the governor observed outranks what the caller claims.
+// Failure history the optimizer observed outranks what the caller claims.
 func TestRouteUsesObservedFailureHistory(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "work"})
 	sess, _ := g.Session("t1")
 
-	sig := contextgov.ErrorSignature{Code: "E1", File: "a.go"}
+	sig := contextopt.ErrorSignature{Code: "E1", File: "a.go"}
 	for i := 0; i < 3; i++ {
 		sess.RecordError(sig)
 	}
@@ -583,7 +583,7 @@ func TestRouteUsesObservedFailureHistory(t *testing.T) {
 }
 
 func TestRouteBudgetTracksClassification(t *testing.T) {
-	g := newGovernor(t)
+	g := newOptimizer(t)
 	small := g.Route(RouteRequest{TaskID: "a", Phase: "fix", Files: 1, DiffLines: 3})
 	big := g.Route(RouteRequest{TaskID: "b", Phase: "fix", Files: 20, Modules: 5,
 		Languages: 2, DiffLines: 900, TouchesArchitecture: true})
@@ -600,7 +600,7 @@ func TestRouteRespectsDisabledRoutingConfig(t *testing.T) {
 	g := New(cfg, t.TempDir())
 
 	resp := g.Route(RouteRequest{TouchesSecurity: true})
-	if resp.Decision.Tier != contextgov.TierMid {
+	if resp.Decision.Tier != contextopt.TierMid {
 		t.Fatalf("disabled routing must stay neutral, got %s", resp.Decision.Tier)
 	}
 }

@@ -122,9 +122,12 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 
 	// Report the entry that was actually configured. For the all-servers
 	// flow (no name), obsidian is the entry the dashboard cards display.
-	entryName := body.Name
-	if entryName == "" {
-		entryName = "obsidian"
+	//
+	// The lookup goes through ServerName so a caller sending a short logical
+	// name ("obsidian") resolves to the namespaced key the registry stores.
+	entryName := mcpregistry.ServerName(body.Name)
+	if body.Name == "" {
+		entryName = mcpregistry.ServerObsidian
 	}
 	entry := reg.MCPServers[entryName]
 	log.Info("mcp configure success", log.Fields{

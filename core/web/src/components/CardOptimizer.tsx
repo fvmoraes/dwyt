@@ -25,7 +25,7 @@ interface Props {
 //     DWYT's own favour (it makes "before DWYT" look worse).
 //   - Observed and estimated cost are separate rows. Merging them would produce
 //     a number the user cannot act on.
-export default function CardGovernor({ t, badge, fmtN, window: windowName }: Props) {
+export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Props) {
   const [payload, setPayload] = useState<TelemetryPayload | null>(null)
   const [report, setReport] = useState<HousekeeperReport | null>(null)
   const [busy, setBusy] = useState(false)
@@ -79,62 +79,62 @@ export default function CardGovernor({ t, badge, fmtN, window: windowName }: Pro
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.governorTitle} color="var(--accent)" state={state} badgeText={b} />
+      <CardHeader label={t.optimizerTitle} color="var(--accent)" state={state} badgeText={b} />
       <Hr />
 
-      <Row label={t.governorContextReduction} value={pct(summary?.context_reduction_pct)} />
-      <Row label={t.governorAvoidedTokens} value={fmtN(summary?.avoided_tokens)} />
-      <Row label={t.governorCacheHit} value={pct(summary?.cache_hit_pct)} />
+      <Row label={t.optimizerContextReduction} value={pct(summary?.context_reduction_pct)} />
+      <Row label={t.optimizerAvoidedTokens} value={fmtN(summary?.avoided_tokens)} />
+      <Row label={t.optimizerCacheHit} value={pct(summary?.cache_hit_pct)} />
       <Row
-        label={t.governorCostObserved}
+        label={t.optimizerCostObserved}
         value={usd(summary?.observed_cost_usd, summary?.coverage.cost_reported_requests)}
-        title={t.governorObservedHint}
+        title={t.optimizerObservedHint}
       />
       <Row
-        label={t.governorCostEstimated}
+        label={t.optimizerCostEstimated}
         value={summary && summary.estimated_cost_usd > 0 ? `~$${summary.estimated_cost_usd.toFixed(4)}` : '\u2014'}
-        title={t.governorEstimatedHint}
+        title={t.optimizerEstimatedHint}
       />
-      <Row label={t.governorCostPerTask} value={usdOrDash(summary?.cost_per_completed_task)} />
-      <Row label={t.governorCompletion} value={pct(summary?.completion_pct)} />
+      <Row label={t.optimizerCostPerTask} value={usdOrDash(summary?.cost_per_completed_task)} />
+      <Row label={t.optimizerCompletion} value={pct(summary?.completion_pct)} />
 
       <Hr />
-      <Row label={t.governorCanonicalNotes} value={fmtN(brain?.canonical_notes)} />
-      <Row label={t.governorSessions} value={sessionsLabel} />
-      <Row label={t.governorStaleNotes} value={fmtN(brain?.stale_notes)} />
-      <Row label={t.governorExpiringSoon} value={fmtN(brain?.expiring_within_24h)} />
+      <Row label={t.optimizerCanonicalNotes} value={fmtN(brain?.canonical_notes)} />
+      <Row label={t.optimizerSessions} value={sessionsLabel} />
+      <Row label={t.optimizerStaleNotes} value={fmtN(brain?.stale_notes)} />
+      <Row label={t.optimizerExpiringSoon} value={fmtN(brain?.expiring_within_24h)} />
       <Row
-        label={t.governorRawObjects}
+        label={t.optimizerRawObjects}
         value={raw?.enabled ? `${fmtN(raw.objects)} (${fmtBytes(raw.bytes)})` : '\u2014'}
       />
-      <Row label={t.governorLastHousekeeping} value={keeper?.last_run ? fmtWhen(keeper.last_run) : t.governorNever} />
+      <Row label={t.optimizerLastHousekeeping} value={keeper?.last_run ? fmtWhen(keeper.last_run) : t.optimizerNever} />
 
       {summary && summary.requests > 0 && summary.observed_requests < summary.requests && (
         <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>
-          * {t.governorPartialCoverage
+          * {t.optimizerPartialCoverage
             .replace('{observed}', String(summary.observed_requests))
             .replace('{total}', String(summary.requests))}
         </div>
       )}
       {payload && !payload.available && (
-        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic' }}>{payload.reason || t.governorUnavailable}</div>
+        <div style={{ fontSize: 8, color: 'var(--muted)', fontStyle: 'italic' }}>{payload.reason || t.optimizerUnavailable}</div>
       )}
 
       <Hr />
       <div style={{ display: 'flex', gap: 4 }}>
         <button className="btn" style={{ fontSize: 8, padding: '2px 5px' }} disabled={busy} onClick={() => preview(false)}>
-          {t.governorPreviewCleanup}
+          {t.optimizerPreviewCleanup}
         </button>
         <button className="btn" style={{ fontSize: 8, padding: '2px 5px' }} disabled={busy} onClick={() => preview(true)}>
-          {t.governorRunCleanup}
+          {t.optimizerRunCleanup}
         </button>
       </div>
 
       {report && (
         <div style={{ fontSize: 8, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>
           <div>
-            {report.dry_run ? t.governorDryRunPrefix : t.governorAppliedPrefix}{' '}
-            {t.governorReportLine
+            {report.dry_run ? t.optimizerDryRunPrefix : t.optimizerAppliedPrefix}{' '}
+            {t.optimizerReportLine
               .replace('{sessions}', String(report.sessions_removed))
               .replace('{expired}', String(report.expired_removed))
               .replace('{stale}', String(report.stale_marked))
@@ -142,7 +142,7 @@ export default function CardGovernor({ t, badge, fmtN, window: windowName }: Pro
           </div>
           {report.knowledge_promoted && report.knowledge_promoted.length > 0 && (
             <div style={{ color: 'var(--accent)' }}>
-              {t.governorPromoted.replace('{count}', String(report.knowledge_promoted.length))}
+              {t.optimizerPromoted.replace('{count}', String(report.knowledge_promoted.length))}
             </div>
           )}
           {report.skipped && <div>{report.skipped}</div>}

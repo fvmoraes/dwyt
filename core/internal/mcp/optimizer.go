@@ -10,66 +10,66 @@ import (
 	"time"
 )
 
-// DWYT MCP — the Governor (spec §3.1).
+// DWYT MCP — the Optimizer (spec §3.1).
 //
 // This is the third and final official MCP alongside Obsidian (Brain) and
 // Codebase (Code Intelligence). It is a thin stdio shim over the daemon's HTTP
-// API so every AI client shares one governor state.
+// API so every AI client shares one optimizer state.
 //
-// Tool responses are deliberately terse. The governor exists to reduce token
-// spend; a chatty governor would defeat its own purpose. Nothing here echoes
+// Tool responses are deliberately terse. The optimizer exists to reduce token
+// spend; a chatty optimizer would defeat its own purpose. Nothing here echoes
 // the policy text back to the caller.
 
-// GovernorTools is the DWYT MCP tool implementation.
-type GovernorTools struct {
+// OptimizerTools is the DWYT MCP tool implementation.
+type OptimizerTools struct {
 	client *http.Client
 }
 
-// NewGovernorTools builds the tool set. The timeout is generous enough for a
+// NewOptimizerTools builds the tool set. The timeout is generous enough for a
 // cold daemon start but short enough that a hung daemon does not stall the
 // agent's turn.
-func NewGovernorTools() *GovernorTools {
-	return &GovernorTools{client: &http.Client{Timeout: 15 * time.Second}}
+func NewOptimizerTools() *OptimizerTools {
+	return &OptimizerTools{client: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // postJSON sends args as a JSON body and returns the pretty-printed response.
 // Errors carry the endpoint so a misconfigured DWYT_API_URL is obvious.
-func (gt *GovernorTools) postJSON(path string, payload interface{}) (string, error) {
+func (gt *OptimizerTools) postJSON(path string, payload interface{}) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode request: %w", err)
 	}
 	resp, err := gt.client.Post(dwytAPI+path, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("dwyt governor %s failed: %w", path, err)
+		return "", fmt.Errorf("%s failed: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return decodeGovernorResponse(resp, path)
+	return decodeOptimizerResponse(resp, path)
 }
 
-func (gt *GovernorTools) getJSON(path string, query url.Values) (string, error) {
+func (gt *OptimizerTools) getJSON(path string, query url.Values) (string, error) {
 	target := dwytAPI + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
 	resp, err := gt.client.Get(target)
 	if err != nil {
-		return "", fmt.Errorf("dwyt governor %s failed: %w", path, err)
+		return "", fmt.Errorf("%s failed: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return decodeGovernorResponse(resp, path)
+	return decodeOptimizerResponse(resp, path)
 }
 
-func decodeGovernorResponse(resp *http.Response, path string) (string, error) {
+func decodeOptimizerResponse(resp *http.Response, path string) (string, error) {
 	var payload interface{}
 	decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
 	if resp.StatusCode >= 400 {
 		if m, ok := payload.(map[string]interface{}); ok {
 			if msg, ok := m["error"].(string); ok {
-				return "", fmt.Errorf("dwyt governor %s: %s", path, msg)
+				return "", fmt.Errorf("%s: %s", path, msg)
 			}
 		}
-		return "", fmt.Errorf("dwyt governor %s returned HTTP %d", path, resp.StatusCode)
+		return "", fmt.Errorf("%s returned HTTP %d", path, resp.StatusCode)
 	}
 	if decodeErr != nil {
 		return "", fmt.Errorf("parse %s response: %w", path, decodeErr)
@@ -82,7 +82,7 @@ func decodeGovernorResponse(resp *http.Response, path string) (string, error) {
 }
 
 // ContextPlan implements dwyt_context_plan.
-func (gt *GovernorTools) ContextPlan(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) ContextPlan(args map[string]interface{}) (string, error) {
 	task, _ := args["task"].(string)
 	if strings.TrimSpace(task) == "" {
 		return "", fmt.Errorf("task is required")
@@ -92,31 +92,31 @@ func (gt *GovernorTools) ContextPlan(args map[string]interface{}) (string, error
 	copyStringSlice(payload, args, "hints", "missing_context")
 	copyNumber(payload, args, "confidence", "model_context_window", "long_context_threshold")
 	copyBool(payload, args, "allow_long_context")
-	return gt.postJSON("/governor/plan", payload)
+	return gt.postJSON("/optimizer/plan", payload)
 }
 
 // ContextStatus implements dwyt_context_status.
-func (gt *GovernorTools) ContextStatus(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) ContextStatus(args map[string]interface{}) (string, error) {
 	query := url.Values{}
 	if v, ok := args["task_id"].(string); ok && v != "" {
 		query.Set("task_id", v)
 	}
-	return gt.getJSON("/governor/status", query)
+	return gt.getJSON("/optimizer/status", query)
 }
 
 // RegisterContext implements dwyt_register_context.
-func (gt *GovernorTools) RegisterContext(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) RegisterContext(args map[string]interface{}) (string, error) {
 	items, ok := args["items"].([]interface{})
 	if !ok || len(items) == 0 {
 		return "", fmt.Errorf("items is required and must be a non-empty array")
 	}
 	payload := map[string]interface{}{"items": items}
 	copyString(payload, args, "task_id")
-	return gt.postJSON("/governor/register", payload)
+	return gt.postJSON("/optimizer/register", payload)
 }
 
 // OutputProfile implements dwyt_output_profile.
-func (gt *GovernorTools) OutputProfile(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) OutputProfile(args map[string]interface{}) (string, error) {
 	query := url.Values{}
 	if v, ok := args["task_type"].(string); ok && v != "" {
 		query.Set("task_type", v)
@@ -124,22 +124,22 @@ func (gt *GovernorTools) OutputProfile(args map[string]interface{}) (string, err
 	if v, ok := args["phase"].(string); ok && v != "" {
 		query.Set("phase", v)
 	}
-	return gt.getJSON("/governor/output-profile", query)
+	return gt.getJSON("/optimizer/output-profile", query)
 }
 
 // CacheGuidance implements dwyt_cache_guidance.
-func (gt *GovernorTools) CacheGuidance(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) CacheGuidance(args map[string]interface{}) (string, error) {
 	query := url.Values{}
 	for _, key := range []string{"provider", "model"} {
 		if v, ok := args[key].(string); ok && v != "" {
 			query.Set(key, v)
 		}
 	}
-	return gt.getJSON("/governor/cache-guidance", query)
+	return gt.getJSON("/optimizer/cache-guidance", query)
 }
 
 // CompactToolOutput implements dwyt_compact_tool_output.
-func (gt *GovernorTools) CompactToolOutput(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) CompactToolOutput(args map[string]interface{}) (string, error) {
 	content, _ := args["content"].(string)
 	rawRef, _ := args["raw_ref"].(string)
 	if strings.TrimSpace(content) == "" && strings.TrimSpace(rawRef) == "" {
@@ -148,20 +148,20 @@ func (gt *GovernorTools) CompactToolOutput(args map[string]interface{}) (string,
 	payload := map[string]interface{}{}
 	copyString(payload, args, "task_id", "content", "raw_ref", "kind", "label")
 	copyBool(payload, args, "already_compact")
-	return gt.postJSON("/governor/compact", payload)
+	return gt.postJSON("/optimizer/compact", payload)
 }
 
 // GetRaw implements dwyt_get_raw.
-func (gt *GovernorTools) GetRaw(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) GetRaw(args map[string]interface{}) (string, error) {
 	ref, _ := args["ref"].(string)
 	if strings.TrimSpace(ref) == "" {
 		return "", fmt.Errorf("ref is required")
 	}
-	return gt.getJSON("/governor/raw", url.Values{"ref": {ref}})
+	return gt.getJSON("/optimizer/raw", url.Values{"ref": {ref}})
 }
 
 // ReportUsage implements dwyt_report_usage.
-func (gt *GovernorTools) ReportUsage(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) ReportUsage(args map[string]interface{}) (string, error) {
 	payload := map[string]interface{}{}
 	copyString(payload, args, "task_id", "provider", "model", "phase", "cache_key_hash", "prefix_hash")
 	copyNumber(payload, args,
@@ -174,23 +174,23 @@ func (gt *GovernorTools) ReportUsage(args map[string]interface{}) (string, error
 	if len(payload) == 0 {
 		return "", fmt.Errorf("at least one usage field is required")
 	}
-	return gt.postJSON("/governor/usage", payload)
+	return gt.postJSON("/optimizer/usage", payload)
 }
 
 // Route implements dwyt_route.
-func (gt *GovernorTools) Route(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) Route(args map[string]interface{}) (string, error) {
 	payload := map[string]interface{}{}
 	copyString(payload, args, "task_id", "task", "phase")
 	copyNumber(payload, args, "files", "modules", "languages", "diff_lines",
 		"prior_failures", "confidence")
 	copyBool(payload, args, "touches_architecture", "touches_security",
 		"touches_infrastructure", "destructive", "has_tests")
-	return gt.postJSON("/governor/route", payload)
+	return gt.postJSON("/optimizer/route", payload)
 }
 
 // HousekeeperStatus implements dwyt_housekeeper_status.
-func (gt *GovernorTools) HousekeeperStatus(args map[string]interface{}) (string, error) {
-	return gt.getJSON("/governor/housekeeper", nil)
+func (gt *OptimizerTools) HousekeeperStatus(args map[string]interface{}) (string, error) {
+	return gt.getJSON("/optimizer/housekeeper", nil)
 }
 
 // HousekeeperRun implements dwyt_housekeeper_run.
@@ -198,7 +198,7 @@ func (gt *GovernorTools) HousekeeperStatus(args map[string]interface{}) (string,
 // It defaults to a dry run. A housekeeping pass deletes notes, and an agent
 // should have to opt in explicitly before that happens rather than discovering
 // it after the fact.
-func (gt *GovernorTools) HousekeeperRun(args map[string]interface{}) (string, error) {
+func (gt *OptimizerTools) HousekeeperRun(args map[string]interface{}) (string, error) {
 	query := url.Values{}
 	if v, ok := args["depth"].(string); ok && v != "" {
 		query.Set("depth", v)
@@ -212,17 +212,17 @@ func (gt *GovernorTools) HousekeeperRun(args map[string]interface{}) (string, er
 		return "", fmt.Errorf("housekeeper run failed: %w", err)
 	}
 	defer resp.Body.Close()
-	return decodeGovernorResponse(resp, "/housekeeper/run")
+	return decodeOptimizerResponse(resp, "/housekeeper/run")
 }
 
 // MemoryHealth implements dwyt_memory_health.
-func (gt *GovernorTools) MemoryHealth(args map[string]interface{}) (string, error) {
-	return gt.getJSON("/governor/memory-health", nil)
+func (gt *OptimizerTools) MemoryHealth(args map[string]interface{}) (string, error) {
+	return gt.getJSON("/optimizer/memory-health", nil)
 }
 
-// RegisterGovernorTools registers the DWYT MCP tool surface.
-func RegisterGovernorTools(s *Server) {
-	gt := NewGovernorTools()
+// RegisterOptimizerTools registers the DWYT MCP tool surface.
+func RegisterOptimizerTools(s *Server) {
+	gt := NewOptimizerTools()
 
 	s.RegisterTool("dwyt_context_plan",
 		"Get the DWYT context plan before any broad repository or memory retrieval. "+
@@ -258,7 +258,7 @@ func RegisterGovernorTools(s *Server) {
 	)
 
 	s.RegisterTool("dwyt_register_context",
-		"Register the context you actually obtained so the governor can rank it by token ROI, "+
+		"Register the context you actually obtained so the optimizer can rank it by token ROI, "+
 			"fit it into the budget and tell you what to keep, drop or reuse. Send metadata "+
 			"(kind, tokens, path, symbol, content_hash) rather than full content when possible.",
 		map[string]Property{
@@ -335,7 +335,7 @@ func RegisterGovernorTools(s *Server) {
 			"output_tokens":         {Type: "number", Description: "Output tokens"},
 			"reasoning_tokens":      {Type: "number", Description: "Reasoning/thinking tokens, when billed"},
 			"tool_tokens":           {Type: "number", Description: "Tokens spent on tool payloads"},
-			"context_before_dwyt":   {Type: "number", Description: "Context size before DWYT governance"},
+			"context_before_dwyt":   {Type: "number", Description: "Context size before DWYT optimization"},
 			"context_after_dwyt":    {Type: "number", Description: "Context size actually sent"},
 			"estimated_cost_usd":    {Type: "number", Description: "DWYT cost estimate"},
 			"actual_cost_usd":       {Type: "number", Description: "Provider-reported cost, when available"},

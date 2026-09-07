@@ -105,28 +105,47 @@ func Load() (*Registry, error) {
 	}
 
 	migrated := false
-	// "dwyt" used to be the key of the Codebase MCP. In v5 the name belongs to
-	// the Governor, so a legacy "dwyt" entry must be recognised by its wiring,
-	// not by its name: an entry whose command/target points at
-	// codebase-memory-mcp is the old Codebase server and gets renamed;
-	// anything already wired to the `governor-mcp` subcommand is the v5
-	// Governor and is left alone.
-	if entry, ok := r.MCPServers["dwyt"]; ok && isLegacyCodebaseWiring(entry) {
-		if _, exists := r.MCPServers["codebase"]; !exists {
-			r.MCPServers["codebase"] = entry
+	// "dwyt" used to be the key of the Codebase MCP, and later of the Optimizer.
+	// It is now neither: every DWYT MCP is namespaced (dwyt_optimizer,
+	// dwyt_codebase, dwyt_obsidian). A bare "dwyt" entry is therefore resolved by
+	// its *wiring*, not its name — an entry pointing at codebase-memory-mcp is
+	// the old Codebase server, and one wired to the optimizer subcommand is the
+	// Optimizer.
+	if entry, ok := r.MCPServers["dwyt"]; ok {
+		target := ServerCodebase
+		if isOptimizerEntry("", entry) {
+			target = ServerOptimizer
+		} else if !isLegacyCodebaseWiring(entry) {
+			// Neither marker: the only DWYT MCP that ever used a bare "dwyt" key
+			// without codebase wiring was the Optimizer.
+			target = ServerOptimizer
+		}
+		if _, exists := r.MCPServers[target]; !exists {
+			r.MCPServers[target] = entry
 		}
 		delete(r.MCPServers, "dwyt")
 		migrated = true
 	}
+	// Every historical spelling maps onto the namespaced name. Preserving the
+	// user's Enabled flag matters here: a server they had disabled must not come
+	// back enabled just because it was renamed.
 	legacyNames := map[string]string{
-		"dwyt-codebase": "codebase",
-		"dwyt-obsidian": "obsidian",
-		"obsidian-mcp":  "obsidian",
+		"codebase":       ServerCodebase,
+		"dwyt-codebase":  ServerCodebase,
+		"dwyt_codebase":  ServerCodebase,
+		"obsidian":       ServerObsidian,
+		"dwyt-obsidian":  ServerObsidian,
+		"obsidian-mcp":   ServerObsidian,
+		"dwyt-optimizer": ServerOptimizer,
+		"optimizer":      ServerOptimizer,
 	}
-	for legacy, canonical := range legacyNames {
+	for legacy, canonicalName := range legacyNames {
+		if legacy == canonicalName {
+			continue
+		}
 		if entry, ok := r.MCPServers[legacy]; ok {
-			if _, exists := r.MCPServers[canonical]; !exists {
-				r.MCPServers[canonical] = entry
+			if _, exists := r.MCPServers[canonicalName]; !exists {
+				r.MCPServers[canonicalName] = entry
 			}
 			delete(r.MCPServers, legacy)
 			migrated = true
@@ -142,7 +161,7 @@ func Load() (*Registry, error) {
 	// DWYT's accounting proxy. Preserve it on Load instead of "healing" it
 	// back to the bundled binary; setup explicitly switches this field when
 	// ownership changes back to DWYT-managed mode.
-	if existing, ok := r.MCPServers["codebase"]; ok && strings.TrimSpace(existing.Target) != "" {
+	if existing, ok := r.MCPServers[ServerCodebase]; ok && strings.TrimSpace(existing.Target) != "" {
 		codebaseTarget = existing.Target
 	}
 
@@ -161,18 +180,18 @@ func Load() (*Registry, error) {
 	// vice-versa).
 	codebaseEntry := newCodebaseEntry(dwytShim, codebaseTarget)
 	canonical := map[string]MCPServerEntry{
-		"codebase": codebaseEntry,
-		"obsidian": {
+		ServerCodebase: codebaseEntry,
+		ServerObsidian: {
 			Command: dwytShim,
 			Args:    []string{"obsidian-mcp"},
 			Enabled: true,
 		},
-		// The DWYT MCP Governor (v5). Like Obsidian it is served by the main
+		// The DWYT Optimizer MCP (v5). Like Obsidian it is served by the main
 		// binary through a subcommand, so it needs no separate install step
 		// and is "installed" whenever DWYT itself is.
-		"dwyt": {
+		ServerOptimizer: {
 			Command: dwytShim,
-			Args:    []string{"governor-mcp"},
+			Args:    []string{"optimizer-mcp"},
 			Enabled: true,
 		},
 	}
@@ -292,16 +311,24 @@ func (r *Registry) Save() error {
 	return os.WriteFile(r.path, data, 0644)
 }
 
+// Get looks up a server, accepting either the canonical `dwyt_*` name or any of
+// the short logical names DWYT uses internally.
 func (r *Registry) Get(name string) (MCPServerEntry, bool) {
-	entry, ok := r.MCPServers[name]
+	if entry, ok := r.MCPServers[name]; ok {
+		return entry, true
+	}
+	entry, ok := r.MCPServers[ServerName(name)]
 	return entry, ok
 }
 
+// Set stores a server under its canonical name, so a caller passing a logical
+// name cannot create a duplicate entry.
 func (r *Registry) Set(name string, entry MCPServerEntry) {
-	r.MCPServers[name] = entry
+	r.MCPServers[ServerName(name)] = entry
 }
 
 func (r *Registry) IsBinaryInstalled(name string) bool {
+	name = ServerName(name)
 	entry, ok := r.MCPServers[name]
 	if !ok {
 		return false
@@ -337,9 +364,9 @@ func (r *Registry) IsBinaryInstalled(name string) bool {
 			return true
 		}
 	}
-	// The Governor is served by the main `dwyt` binary through the
-	// `governor-mcp` subcommand, so it is installed exactly when DWYT is.
-	if isGovernorEntry(name, entry) {
+	// The Optimizer is served by the main `dwyt` binary through the
+	// `optimizer-mcp` subcommand, so it is installed exactly when DWYT is.
+	if isOptimizerEntry(name, entry) {
 		if fileExists(filepath.Join(dwytHome(), "bin", exeName("dwyt"))) {
 			return true
 		}
@@ -374,13 +401,71 @@ func fileExists(path string) bool {
 	return false
 }
 
-// canonicalDWYTMCPNames are the only server keys DWYT owns in client config
-// files. Sync may remove these stale entries when they are disabled or no
-// longer installed, but it must never remove user-managed MCP servers.
-// The three official v5 MCPs (spec §3): the Governor, the Brain and Code
-// Intelligence. RTK is deliberately absent — it is a terminal-output tool, not
-// an MCP (spec §31).
-var canonicalDWYTMCPNames = []string{"dwyt", "codebase", "obsidian"}
+// The three official v5 MCP server names. Every DWYT-owned MCP is namespaced
+// with a `dwyt_` prefix so it is unambiguous in a client config that also holds
+// third-party servers — an unprefixed "codebase" or "obsidian" is exactly the
+// kind of name another vendor is likely to claim.
+//
+// RTK is deliberately absent: it is a terminal-output tool, not an MCP.
+const (
+	ServerOptimizer = "dwyt_optimizer"
+	ServerCodebase  = "dwyt_codebase"
+	ServerObsidian  = "dwyt_obsidian"
+)
+
+// canonicalDWYTMCPNames are the only server keys DWYT owns in a client config.
+var canonicalDWYTMCPNames = []string{ServerOptimizer, ServerCodebase, ServerObsidian}
+
+// CanonicalNames returns the official MCP server names.
+func CanonicalNames() []string {
+	return append([]string(nil), canonicalDWYTMCPNames...)
+}
+
+// logicalAliases maps the short logical names used throughout DWYT's own code,
+// CLI and metrics ledger onto the namespaced server names.
+//
+// Keeping the short names internally is deliberate: they key the mcp_usage table,
+// the ProcessManager services and the dashboard's tool-details map. Renaming
+// those would orphan every historical metric row for no user-visible gain, so the
+// prefix is applied only where the name is actually exposed to a client.
+var logicalAliases = map[string]string{
+	"optimizer":      ServerOptimizer,
+	"dwyt":           ServerOptimizer,
+	"dwyt-optimizer": ServerOptimizer,
+	"codebase":       ServerCodebase,
+	"dwyt-codebase":  ServerCodebase,
+	"obsidian":       ServerObsidian,
+	"dwyt-obsidian":  ServerObsidian,
+	"obsidian-mcp":   ServerObsidian,
+}
+
+// ServerName resolves any accepted spelling of a DWYT MCP to its canonical
+// server name. An unrecognised name is returned unchanged, so a user-managed
+// third-party server is never rewritten.
+func ServerName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if isCanonicalDWYTMCP(trimmed) {
+		return trimmed
+	}
+	if canonicalName, ok := logicalAliases[strings.ToLower(trimmed)]; ok {
+		return canonicalName
+	}
+	return trimmed
+}
+
+// LogicalName is the inverse of ServerName: the short name used by the metrics
+// ledger and the ProcessManager.
+func LogicalName(name string) string {
+	switch ServerName(name) {
+	case ServerOptimizer:
+		return "optimizer"
+	case ServerCodebase:
+		return "codebase"
+	case ServerObsidian:
+		return "obsidian"
+	}
+	return strings.TrimSpace(name)
+}
 
 func isCanonicalDWYTMCP(name string) bool {
 	for _, candidate := range canonicalDWYTMCPNames {
@@ -414,8 +499,11 @@ func (r *Registry) entriesForSync(names []string) map[string]MCPServerEntry {
 }
 
 // canonicalNamesForSync tells a writer which DWYT-owned keys it may reconcile.
-// Full sync reconciles both canonical keys; a scoped sync may only touch the
-// named canonical key, preserving the other card's configuration verbatim.
+// A full sync reconciles all three canonical keys; a scoped sync may only touch
+// the named one, preserving the other cards' configuration verbatim.
+//
+// Names are resolved through ServerName so a caller may pass a short logical
+// name ("obsidian") and still scope the sync correctly.
 func canonicalNamesForSync(names []string) []string {
 	if len(names) == 0 {
 		return append([]string(nil), canonicalDWYTMCPNames...)
@@ -423,9 +511,10 @@ func canonicalNamesForSync(names []string) []string {
 	result := make([]string, 0, len(names))
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {
-		if isCanonicalDWYTMCP(name) && !seen[name] {
-			result = append(result, name)
-			seen[name] = true
+		resolved := ServerName(name)
+		if isCanonicalDWYTMCP(resolved) && !seen[resolved] {
+			result = append(result, resolved)
+			seen[resolved] = true
 		}
 	}
 	return result
@@ -437,18 +526,30 @@ func removeCanonicalDWYTMCPEntries(servers map[string]interface{}, names []strin
 	}
 }
 
+// removeLegacyServerKeysFor deletes the historical spellings of a DWYT MCP from a
+// client config, so a rename does not leave two entries starting the same server.
+//
+// Only keys DWYT itself ever wrote are listed. A bare "dwyt" is included because
+// DWYT used it for both the Codebase server and, briefly, the Optimizer — but it
+// is only removed when *both* affected canonical names are in scope, since a
+// scoped sync of one card must not delete the other's leftover entry before that
+// card has had a chance to rewrite it.
 func removeLegacyServerKeysFor(servers map[string]interface{}, names []string) {
-	// "dwyt" is no longer a legacy alias of codebase: in v5 it is the
-	// Governor's own canonical key, so removing it while reconciling codebase
-	// would delete the Governor from the client config on every sync.
 	legacyByCanonical := map[string][]string{
-		"codebase": {"dwyt-codebase"},
-		"obsidian": {"dwyt-obsidian", "obsidian-mcp"},
+		ServerCodebase:  {"codebase", "dwyt-codebase"},
+		ServerObsidian:  {"obsidian", "dwyt-obsidian", "obsidian-mcp"},
+		ServerOptimizer: {"optimizer", "dwyt-optimizer"},
 	}
-	for _, canonical := range canonicalNamesForSync(names) {
-		for _, legacy := range legacyByCanonical[canonical] {
+	scoped := canonicalNamesForSync(names)
+	for _, canonicalName := range scoped {
+		for _, legacy := range legacyByCanonical[canonicalName] {
 			delete(servers, legacy)
 		}
+	}
+	// The ambiguous bare key belongs to no single card, so it is only safe to
+	// drop during a full sync.
+	if len(names) == 0 {
+		delete(servers, "dwyt")
 	}
 }
 
@@ -753,21 +854,24 @@ func mcpServerEnv(name string, entry MCPServerEntry) map[string]interface{} {
 	}
 	// Both DWYT-owned MCP servers are stdio shims over the daemon HTTP API, so
 	// both need to know where the daemon lives.
-	if isObsidianEntry(name, entry) || isGovernorEntry(name, entry) {
+	if isObsidianEntry(name, entry) || isOptimizerEntry(name, entry) {
 		env["DWYT_API_URL"] = "http://localhost:2737/api"
 	}
 	return env
 }
 
-// isGovernorEntry reports whether an entry is the DWYT MCP Governor. The
-// canonical signal is the `governor-mcp` subcommand, because the command path
+// isOptimizerEntry reports whether an entry is the DWYT MCP Optimizer. The
+// canonical signal is the `optimizer-mcp` subcommand, because the command path
 // is the shared `dwyt` binary that every DWYT-owned MCP uses.
-func isGovernorEntry(name string, entry MCPServerEntry) bool {
-	if name == "dwyt" {
+func isOptimizerEntry(name string, entry MCPServerEntry) bool {
+	if name != "" && ServerName(name) == ServerOptimizer {
 		return true
 	}
 	for _, a := range entry.Args {
-		if a == "governor-mcp" {
+		// `governor-mcp` is the pre-rename subcommand; an entry still using it is
+		// the Optimizer and must be recognised as such rather than reported as an
+		// unknown server.
+		if a == "optimizer-mcp" || a == "governor-mcp" {
 			return true
 		}
 	}
@@ -776,27 +880,19 @@ func isGovernorEntry(name string, entry MCPServerEntry) bool {
 
 // isLegacyCodebaseWiring reports whether a registry entry keyed "dwyt" is in
 // fact the pre-v5 Codebase server. Checked by wiring rather than by key so a
-// v5 Governor entry is never mistaken for a legacy alias.
+// v5 Optimizer entry is never mistaken for a legacy alias.
 func isLegacyCodebaseWiring(entry MCPServerEntry) bool {
-	for _, a := range entry.Args {
-		if a == "governor-mcp" {
-			return false
-		}
+	if isOptimizerEntry("", entry) {
+		return false
 	}
 	if strings.Contains(filepath.Base(entry.Target), "codebase-memory-mcp") {
 		return true
 	}
-	if strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp") {
-		return true
-	}
-	// An entry with neither marker is ambiguous. Treating it as legacy is the
-	// safe reading: the v5 Governor is always written with the subcommand, so
-	// an entry lacking it cannot be a valid Governor.
-	return true
+	return strings.Contains(filepath.Base(entry.Command), "codebase-memory-mcp")
 }
 
 func isCodebaseEntry(name string, entry MCPServerEntry) bool {
-	if name == "codebase" {
+	if name != "" && ServerName(name) == ServerCodebase {
 		return true
 	}
 	// With the stdio shim the codebase binary appears as Target, not Command.
@@ -807,11 +903,8 @@ func isCodebaseEntry(name string, entry MCPServerEntry) bool {
 }
 
 func isObsidianEntry(name string, entry MCPServerEntry) bool {
-	if name == "obsidian" {
-		return true
-	}
-	// Logical name fallback for legacy keys being migrated.
-	if name == "dwyt-obsidian" || name == "obsidian-mcp" {
+	// ServerName resolves the canonical key and every historical spelling.
+	if name != "" && ServerName(name) == ServerObsidian {
 		return true
 	}
 	// The canonical command runs `dwyt obsidian-mcp` — match by args.
@@ -962,10 +1055,16 @@ func trimPreviousLineEnding(content string, position int) int {
 
 // ConfigureMCPByName writes MCP configuration for a specific MCP server only,
 // limited to the AI clients the user selected.
+//
+// The name may be the canonical `dwyt_*` server name or any short logical name;
+// both resolve to the same entry, so a dashboard card that still sends
+// "obsidian" keeps working.
 func (r *Registry) ConfigureMCPByName(projectPath, name string, clients []string) error {
-	if _, ok := r.MCPServers[name]; !ok {
+	resolved := ServerName(name)
+	if _, ok := r.MCPServers[resolved]; !ok {
 		return fmt.Errorf("mcp server %s not found in registry", name)
 	}
+	name = resolved
 	if err := r.Save(); err != nil {
 		return fmt.Errorf("mcp registry save failed: %w", err)
 	}

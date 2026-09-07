@@ -14,7 +14,7 @@ func TestTemperatureOfKeys(t *testing.T) {
 		"conventions":        Warm,
 		"known-issues":       Warm,
 		"lessons":            Warm,
-		"module:contextgov":  Warm,
+		"module:contextopt":  Warm,
 		"unknown-key":        Cold,
 	}
 	for key, want := range cases {
@@ -106,7 +106,7 @@ func TestCanonicalMemoryOmitsMissingNotes(t *testing.T) {
 func TestCanonicalMemoryIncludesModulesAndDecisions(t *testing.T) {
 	pb := testVault(t)
 	pb.EnsureCanonicalLayout()
-	pb.UpsertCanonical("module:governor", "", "the context governor\n", SourceRef{})
+	pb.UpsertCanonical("module:optimizer", "", "the context optimizer\n", SourceRef{})
 	if _, err := pb.appendDecisionLog("Adopted the three-MCP architecture"); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestCanonicalMemoryIncludesModulesAndDecisions(t *testing.T) {
 	for _, n := range pb.CanonicalMemory(All) {
 		keys[n.Key] = true
 	}
-	if !keys["module:governor"] {
+	if !keys["module:optimizer"] {
 		t.Fatalf("module summaries must be part of canonical memory: %v", keys)
 	}
 	if !keys["decisions"] {

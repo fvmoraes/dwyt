@@ -1,4 +1,4 @@
-package contextgov
+package contextopt
 
 import "sort"
 
@@ -11,7 +11,7 @@ import "sort"
 // token count at any cost").
 
 // TrimReason explains why the GC dropped a candidate. Surfacing it keeps the
-// governor auditable: a user who loses context can see which rule removed it.
+// optimizer auditable: a user who loses context can see which rule removed it.
 type TrimReason string
 
 const (

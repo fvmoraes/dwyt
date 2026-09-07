@@ -124,17 +124,17 @@ func TestModuleCanonicalKeys(t *testing.T) {
 	pb := testVault(t)
 	pb.EnsureCanonicalLayout()
 
-	if _, err := pb.UpsertCanonical("module:contextgov", "", "The context governor.\n", SourceRef{}); err != nil {
+	if _, err := pb.UpsertCanonical("module:contextopt", "", "The context optimizer.\n", SourceRef{}); err != nil {
 		t.Fatal(err)
 	}
-	note, ok := pb.ReadCanonical("module:contextgov")
+	note, ok := pb.ReadCanonical("module:contextopt")
 	if !ok {
 		t.Fatal("module note should exist")
 	}
-	if !strings.Contains(note.Path, filepath.Join(string(AreaModules), "contextgov.md")) {
+	if !strings.Contains(note.Path, filepath.Join(string(AreaModules), "contextopt.md")) {
 		t.Fatalf("module note in the wrong place: %s", note.Path)
 	}
-	if note.Title != "Module: contextgov" {
+	if note.Title != "Module: contextopt" {
 		t.Fatalf("unexpected title %q", note.Title)
 	}
 }

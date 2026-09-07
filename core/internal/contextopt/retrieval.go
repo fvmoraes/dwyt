@@ -1,4 +1,4 @@
-package contextgov
+package contextopt
 
 import (
 	"fmt"
@@ -110,12 +110,12 @@ type PlanRequest struct {
 	BudgetProfile BudgetProfile `json:"budget_profile,omitempty"`
 }
 
-// ConfidenceActThreshold is the point at which the governor tells the agent to
+// ConfidenceActThreshold is the point at which the optimizer tells the agent to
 // stop retrieving and act (spec §15 "stop when sufficient", §47).
 const ConfidenceActThreshold = 0.75
 
 // Plan is the compact answer the DWYT MCP returns. It is intentionally small:
-// the governor must not become another source of token waste (spec §3.1).
+// the optimizer must not become another source of token waste (spec §3.1).
 type Plan struct {
 	Budget Budget `json:"budget"`
 
@@ -134,7 +134,7 @@ type Plan struct {
 	// when the ladder is exhausted.
 	NextLevel string `json:"next_level,omitempty"`
 
-	// Action is either "retrieve" or "act". "act" means the governor judges
+	// Action is either "retrieve" or "act". "act" means the optimizer judges
 	// the current context sufficient.
 	Action string `json:"action"`
 
@@ -262,7 +262,7 @@ func (Planner) Plan(req PlanRequest, sess *Session) Plan {
 	}
 
 	// Stop when sufficient. A confident agent is told to act, not to keep
-	// reading — that is the single biggest token sink the governor prevents.
+	// reading — that is the single biggest token sink the optimizer prevents.
 	if req.Confidence >= ConfidenceActThreshold && len(req.MissingContext) == 0 {
 		plan.Action = "act"
 		plan.Code = nil
@@ -392,7 +392,7 @@ type LoopObservation struct {
 	Expansions     int     `json:"expansions,omitempty"`
 }
 
-// StopDecision is the governor's verdict on whether the loop may continue.
+// StopDecision is the optimizer's verdict on whether the loop may continue.
 type StopDecision struct {
 	// Continue is false when a hard limit was hit.
 	Continue bool `json:"continue"`

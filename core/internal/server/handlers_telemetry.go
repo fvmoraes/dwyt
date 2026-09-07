@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
-	"github.com/fvmoraes/dwyt/internal/governor"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
@@ -16,9 +16,9 @@ import (
 // behind it comes back as null rather than zero. That is the difference between a
 // dashboard the user can act on and one that flatters DWYT.
 
-// RecordUsage implements governor.UsageRecorder, letting the Governor persist
+// RecordUsage implements optimizer.UsageRecorder, letting the Optimizer persist
 // usage reports without importing the telemetry or db packages.
-func (ds *DashboardServer) RecordUsage(u governor.Usage) error {
+func (ds *DashboardServer) RecordUsage(u optimizer.Usage) error {
 	if ds.Telemetry == nil {
 		return nil
 	}
@@ -96,9 +96,9 @@ func (ds *DashboardServer) apiTelemetrySummary(c *gin.Context) {
 	}
 	// The Brain and raw-store health belong on the same panel (spec §55), so the
 	// dashboard needs one request rather than four.
-	if ds.Governor != nil {
-		payload["raw_store"] = ds.Governor.RawUsage()
-		payload["pricing"] = ds.Governor.Pricing().Meta()
+	if ds.Optimizer != nil {
+		payload["raw_store"] = ds.Optimizer.RawUsage()
+		payload["pricing"] = ds.Optimizer.Pricing().Meta()
 	}
 	if ds.Housekeeper != nil {
 		payload["housekeeper"] = ds.Housekeeper.HousekeeperStatus()

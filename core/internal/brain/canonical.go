@@ -37,7 +37,7 @@ const (
 
 // canonicalLayout maps a canonical key to its file and note type. Keys are the
 // stable identifiers the DWYT MCP returns in a context plan's `memory` list, so
-// they are part of the governor's contract and must not be renamed casually.
+// they are part of the optimizer's contract and must not be renamed casually.
 var canonicalLayout = map[string]struct {
 	Area CanonicalArea
 	File string

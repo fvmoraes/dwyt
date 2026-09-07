@@ -18,12 +18,12 @@ import (
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
-	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/security"
@@ -73,7 +73,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	}
 
 	// The consolidated v5 configuration (spec §57). Loaded before anything that
-	// depends on it so the Governor and Housekeeper are built from the user's
+	// depends on it so the Optimizer and Housekeeper are built from the user's
 	// values rather than being reconfigured after the fact.
 	v5cfg := loadedV5Config(dwytHome)
 
@@ -157,18 +157,18 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		ProjectObsidian: pb,
 		ProcMan:         procmanInstance,
 		RuntimeState:    rs,
-		Governor:        governor.New(v5cfg.cfg.GovernorConfig(), dwytHome),
+		Optimizer:       optimizer.New(v5cfg.cfg.OptimizerConfig(), dwytHome),
 		V5Config:        v5cfg.cfg,
 		HeadroomPort:    headroomPort,
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
 	}
 	ds.setHeadroomPort(headroomPort)
-	// The Governor reports Brain health and housekeeping state, but must not
+	// The Optimizer reports Brain health and housekeeping state, but must not
 	// import the brain package (the brain's handlers already call into the
-	// governor). Wiring it through narrow interfaces keeps the dependency
+	// optimizer). Wiring it through narrow interfaces keeps the dependency
 	// one-directional.
-	ds.Governor.SetMemoryHealthProvider(ds)
+	ds.Optimizer.SetMemoryHealthProvider(ds)
 	// A malformed config is surfaced but not fatal: the daemon runs on defaults
 	// rather than refusing to start, and the dashboard shows the error.
 	if v5cfg.err != nil {
@@ -198,18 +198,18 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 			log.Warn("brain: v5 migration issue", log.Fields{"error": e})
 		}
 	}
-	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Governor.RawStore())
-	ds.Governor.SetHousekeeperStatusProvider(ds.Housekeeper)
+	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Optimizer.RawStore())
+	ds.Optimizer.SetHousekeeperStatusProvider(ds.Housekeeper)
 
 	// Telemetry lives in the same SQLite file as the rest of DWYT's state. A
 	// failure to initialize it is non-fatal: metrics are observability, and
-	// losing them must not stop the daemon from governing context.
+	// losing them must not stop the daemon from optimizing context.
 	if store != nil {
 		if ts, err := telemetry.New(store.DB()); err != nil {
 			log.Warn("telemetry: init failed", log.Fields{"error": err.Error()})
 		} else {
 			ds.Telemetry = ts
-			ds.Governor.SetUsageRecorder(ds)
+			ds.Optimizer.SetUsageRecorder(ds)
 		}
 	}
 

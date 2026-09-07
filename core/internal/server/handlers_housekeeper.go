@@ -47,10 +47,10 @@ func (ds *DashboardServer) apiHousekeeperRun(c *gin.Context) {
 		report = ds.Housekeeper.Run(depth)
 		return nil
 	}
-	if ds.Governor != nil {
+	if ds.Optimizer != nil {
 		// Housekeeping is a pipeline phase (spec §54), so it belongs in a trace
 		// alongside the retrieval and LLM spans.
-		_ = ds.Governor.TraceSpan(telemetry.SpanHousekeeper,
+		_ = ds.Optimizer.TraceSpan(telemetry.SpanHousekeeper,
 			map[string]interface{}{"depth": string(depth), "dry_run": dryRun}, run)
 	} else {
 		_ = run()
@@ -165,8 +165,8 @@ func (ds *DashboardServer) apiMemoryCompile(c *gin.Context) {
 		result = pb.Compile(snapshot)
 		return nil
 	}
-	if ds.Governor != nil {
-		_ = ds.Governor.TraceSpan(telemetry.SpanMemoryCompile, nil, compile)
+	if ds.Optimizer != nil {
+		_ = ds.Optimizer.TraceSpan(telemetry.SpanMemoryCompile, nil, compile)
 	} else {
 		_ = compile()
 	}

@@ -254,7 +254,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	}
 }
 
-func TestGovernorProjection(t *testing.T) {
+func TestOptimizerProjection(t *testing.T) {
 	cfg := Default()
 	cfg.Context.DefaultBudget = 20000
 	cfg.Context.ConfidenceGated = false
@@ -262,7 +262,7 @@ func TestGovernorProjection(t *testing.T) {
 	cfg.Output.TargetOperationalTokens = 150
 	cfg.Retention.ToolOutputs = Duration(12 * time.Hour)
 
-	g := cfg.GovernorConfig()
+	g := cfg.OptimizerConfig()
 	if g.DefaultBudget != 20000 || g.DefaultTopK != 3 || g.OperationalOutputTarget != 150 {
 		t.Fatalf("projection lost values: %+v", g)
 	}
@@ -316,9 +316,9 @@ func TestProxyModeDefaultsToTransparent(t *testing.T) {
 		t.Fatalf("the safe default must be transparent, got %s", got)
 	}
 	cfg := Default()
-	cfg.MCPProxy.DefaultMode = "governed"
-	if string(cfg.ProxyMode()) != "governed" {
-		t.Fatal("an explicit governed mode must be honoured")
+	cfg.MCPProxy.DefaultMode = "optimized"
+	if string(cfg.ProxyMode()) != "optimized" {
+		t.Fatal("an explicit optimized mode must be honoured")
 	}
 	cfg.MCPProxy.DefaultMode = "nonsense"
 	if string(cfg.ProxyMode()) != "transparent" {

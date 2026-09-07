@@ -411,9 +411,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// estimateTokens mirrors contextgov.EstimateTokens. It is duplicated (four
+// estimateTokens mirrors contextopt.EstimateTokens. It is duplicated (four
 // lines) rather than imported to keep rawstore free of a dependency on the
-// governor: the store is also used by the housekeeper and the installer.
+// optimizer: the store is also used by the housekeeper and the installer.
 func estimateTokens(content string) int {
 	if content == "" {
 		return 0

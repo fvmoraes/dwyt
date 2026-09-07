@@ -6,7 +6,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
 	"time"
+
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 )
 
 func TestEnsurePower_FirstRun(t *testing.T) {
@@ -34,11 +37,11 @@ func TestEnsurePower_FirstRun(t *testing.T) {
 		t.Fatalf("expected DWYT Project Context display name, got:\n%s", string(powerMD))
 	}
 	// v5 entry contract: the Power names the three MCPs and points at the
-	// Governor instead of restating the whole policy (spec §4, §60.3).
+	// Optimizer instead of restating the whole policy (spec §4, §60.3).
 	for _, want := range []string{
-		"**dwyt** — the Context Governor",
-		"**obsidian** — the Brain",
-		"**codebase** — Code Intelligence",
+		"**dwyt_optimizer** — the Context Optimizer",
+		"**dwyt_obsidian** — the Brain",
+		"**dwyt_codebase** — Code Intelligence",
 		"`dwyt_context_plan`",
 		"RTK compresses terminal output. It is a CLI tool, not a fourth MCP.",
 	} {
@@ -48,7 +51,7 @@ func TestEnsurePower_FirstRun(t *testing.T) {
 	}
 	for _, forbidden := range []string{"## Codebase Law", "## Obsidian Law", "Required completion payload"} {
 		if strings.Contains(string(powerMD), forbidden) {
-			t.Fatalf("POWER.md still duplicates governor policy (%q):\n%s", forbidden, string(powerMD))
+			t.Fatalf("POWER.md still duplicates optimizer policy (%q):\n%s", forbidden, string(powerMD))
 		}
 	}
 }
@@ -211,7 +214,10 @@ func TestNeedsUpdate_MissingFile(t *testing.T) {
 
 func TestGenerateMCPJSON_OnlyExistingBinaries(t *testing.T) {
 	dwytBin := "/tmp/bin"
-	data, err := GenerateMCPJSON(dwytBin, map[string]bool{"codebase": true, "obsidian": false})
+	data, err := GenerateMCPJSON(dwytBin, map[string]bool{
+		mcpregistry.ServerCodebase: true,
+		mcpregistry.ServerObsidian: false,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +231,7 @@ func TestGenerateMCPJSON_OnlyExistingBinaries(t *testing.T) {
 
 func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
 	dwytBin := "/tmp/bin"
-	data, err := GenerateMCPJSON(dwytBin, map[string]bool{"codebase": true, "obsidian": true})
+	data, err := GenerateMCPJSON(dwytBin, map[string]bool{mcpregistry.ServerCodebase: true, mcpregistry.ServerObsidian: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +254,7 @@ func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
 
 // v5 moves the per-tool detail to manual inclusion: only the small, stable
 // context contract is loaded on every turn (spec §4). Everything else is
-// fetched on demand from the Governor or by explicitly referencing the file.
+// fetched on demand from the Optimizer or by explicitly referencing the file.
 func TestSteeringUsesValidKiroInclusionModes(t *testing.T) {
 	if !strings.Contains(steeringContext(), "inclusion: always") {
 		t.Fatalf("context steering must stay always-included, got:\n%s", steeringContext())
@@ -274,28 +280,28 @@ func TestSteeringUsesValidKiroInclusionModes(t *testing.T) {
 func TestValidateMCPBinaries(t *testing.T) {
 	_, dwytBin := tempPowerEnv(t)
 	mcps := ValidateMCPBinaries(dwytBin)
-	if !mcps["codebase"] || !mcps["obsidian"] || !mcps["dwyt"] {
+	if !mcps[mcpregistry.ServerCodebase] || !mcps[mcpregistry.ServerObsidian] || !mcps[mcpregistry.ServerOptimizer] {
 		t.Fatalf("expected all three MCPs present: %#v", mcps)
 	}
 }
 
-// The Kiro Power must configure the Governor as a first-class MCP.
-func TestGenerateMCPJSON_IncludesGovernor(t *testing.T) {
+// The Kiro Power must configure the Optimizer as a first-class MCP.
+func TestGenerateMCPJSON_IncludesOptimizer(t *testing.T) {
 	dwytBin := "/tmp/bin"
-	data, err := GenerateMCPJSON(dwytBin, map[string]bool{"dwyt": true, "codebase": true, "obsidian": true})
+	data, err := GenerateMCPJSON(dwytBin, map[string]bool{mcpregistry.ServerOptimizer: true, mcpregistry.ServerCodebase: true, mcpregistry.ServerObsidian: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(data, `"governor-mcp"`) {
-		t.Fatalf("expected governor-mcp subcommand arg, got: %s", data)
+	if !strings.Contains(data, `"optimizer-mcp"`) {
+		t.Fatalf("expected optimizer-mcp subcommand arg, got: %s", data)
 	}
-	if !strings.Contains(data, `"dwyt": {`) {
+	if !strings.Contains(data, `"dwyt_optimizer": {`) {
 		t.Fatalf("expected a dwyt server entry, got: %s", data)
 	}
 }
 
-// A Power written before v5 has no Governor entry; NeedsUpdate must notice.
-func TestNeedsUpdateWhenGovernorMissing(t *testing.T) {
+// A Power written before v5 has no Optimizer entry; NeedsUpdate must notice.
+func TestNeedsUpdateWhenOptimizerMissing(t *testing.T) {
 	dwytHome, dwytBin := tempPowerEnv(t)
 	status, err := EnsurePower(dwytHome, dwytBin, "/tmp/project")
 	if err != nil {
@@ -304,8 +310,8 @@ func TestNeedsUpdateWhenGovernorMissing(t *testing.T) {
 	if NeedsUpdate(status.PowerDir, dwytBin) {
 		t.Fatal("a freshly generated Power should not need an update")
 	}
-	// Simulate the pre-v5 file: same content minus the governor server.
-	legacy, err := GenerateMCPJSON(dwytBin, map[string]bool{"codebase": true, "obsidian": true})
+	// Simulate the pre-v5 file: same content minus the optimizer server.
+	legacy, err := GenerateMCPJSON(dwytBin, map[string]bool{mcpregistry.ServerCodebase: true, mcpregistry.ServerObsidian: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +319,7 @@ func TestNeedsUpdateWhenGovernorMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !NeedsUpdate(status.PowerDir, dwytBin) {
-		t.Fatal("expected NeedsUpdate to detect the missing governor entry")
+		t.Fatal("expected NeedsUpdate to detect the missing optimizer entry")
 	}
 }
 

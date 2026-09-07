@@ -4,7 +4,7 @@
 //
 //	Keep the Brain small, relevant, consistent and useful over time.
 //
-// The governing principle is that knowledge stays and operational evidence
+// The optimizing principle is that knowledge stays and operational evidence
 // expires. Everything here is built around one hard rule: nothing is deleted
 // before the Memory Compiler has had a chance to extract whatever is reusable
 // from it (spec §24). A TTL is never a plain DELETE.
@@ -440,7 +440,7 @@ func (h *Housekeeper) OnSessionClose() Report {
 	return h.Run(Light)
 }
 
-// HousekeeperStatus implements governor.HousekeeperStatusProvider (spec §55).
+// HousekeeperStatus implements optimizer.HousekeeperStatusProvider (spec §55).
 func (h *Housekeeper) HousekeeperStatus() map[string]interface{} {
 	h.mu.RLock()
 	cfg := h.cfg
@@ -553,7 +553,7 @@ func scanVault(brainDir string) []noteRef {
 // isSessionNote reports whether a note is a compact session snapshot.
 //
 // Both the v5 location (90-sessions/) and the pre-v5 one (context/) count, so a
-// vault mid-migration is governed by the same session limit. Navigation notes
+// vault mid-migration is optimized by the same session limit. Navigation notes
 // are excluded: `context/index.md` is the folder's index, not a session, and
 // counting it would make the limit delete the vault's own structure.
 func isSessionNote(n noteRef) bool {

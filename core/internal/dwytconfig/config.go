@@ -23,10 +23,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fvmoraes/dwyt/internal/contextgov"
-	"github.com/fvmoraes/dwyt/internal/governor"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/mcpproxy"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 )
 
 // Version is the configuration schema version.
@@ -199,9 +199,9 @@ type ToolsConfig struct {
 
 // MCPProxyConfig mirrors the `mcp_proxy` block.
 type MCPProxyConfig struct {
-	DefaultMode  string `json:"default_mode"`
-	GovernedMode string `json:"governed_mode"`
-	SafeBypass   bool   `json:"safe_bypass"`
+	DefaultMode   string `json:"default_mode"`
+	OptimizedMode string `json:"optimized_mode"`
+	SafeBypass    bool   `json:"safe_bypass"`
 }
 
 // OutputConfig mirrors the `output` block.
@@ -254,8 +254,8 @@ type Config struct {
 	MCPProxy    MCPProxyConfig           `json:"mcp_proxy"`
 	Output      OutputConfig             `json:"output"`
 	Cache       CacheConfig              `json:"cache"`
-	Routing     contextgov.RoutingConfig `json:"routing"`
-	Limits      contextgov.StopLimits    `json:"limits"`
+	Routing     contextopt.RoutingConfig `json:"routing"`
+	Limits      contextopt.StopLimits    `json:"limits"`
 	Telemetry   TelemetryConfig          `json:"telemetry"`
 
 	// source records where the config came from, for the dashboard.
@@ -269,9 +269,9 @@ func Default() Config {
 
 	c.Context = ContextConfig{
 		Mode:                 "adaptive",
-		DefaultBudget:        contextgov.DefaultBudget,
-		MaxBudget:            contextgov.MaxBudget,
-		ReservePercent:       contextgov.DefaultReservePercent,
+		DefaultBudget:        contextopt.DefaultBudget,
+		MaxBudget:            contextopt.MaxBudget,
+		ReservePercent:       contextopt.DefaultReservePercent,
 		ProgressiveExpansion: true,
 		ConfidenceGated:      true,
 		PreserveCachePrefix:  true,
@@ -318,8 +318,8 @@ func Default() Config {
 		RawOnDemand: true, DeterministicCompression: true,
 	}
 	c.MCPProxy = MCPProxyConfig{
-		DefaultMode:  string(mcpproxy.ModeTransparent),
-		GovernedMode: "opt_in", SafeBypass: true,
+		DefaultMode:   string(mcpproxy.ModeTransparent),
+		OptimizedMode: "opt_in", SafeBypass: true,
 	}
 	c.Output = OutputConfig{
 		Profile: "adaptive", TargetOperationalTokens: 300, OperationalMax: 500,
@@ -333,8 +333,8 @@ func Default() Config {
 		DiagnosePrefixHashes: true, NeverClaimUnobservedHits: true,
 		CacheKeyHashOnly: true,
 	}
-	c.Routing = contextgov.DefaultRoutingConfig()
-	c.Limits = contextgov.DefaultStopLimits()
+	c.Routing = contextopt.DefaultRoutingConfig()
+	c.Limits = contextopt.DefaultStopLimits()
 	c.Telemetry = TelemetryConfig{
 		Enabled: true, RequestLedger: true, TaskLedger: true, CostPerTask: true,
 		DistinguishEstimatedObserved: true, OpenTelemetry: true,
@@ -442,9 +442,9 @@ func Save(dwytHome string, cfg Config) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-// GovernorConfig projects the consolidated config onto the Governor's own.
-func (c Config) GovernorConfig() governor.Config {
-	g := governor.DefaultConfig()
+// OptimizerConfig projects the consolidated config onto the Optimizer's own.
+func (c Config) OptimizerConfig() optimizer.Config {
+	g := optimizer.DefaultConfig()
 	g.DefaultBudget = c.Context.DefaultBudget
 	g.MaxBudget = c.Context.MaxBudget
 	g.ReservePercent = c.Context.ReservePercent

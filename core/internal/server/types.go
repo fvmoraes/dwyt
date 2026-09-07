@@ -7,8 +7,8 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/dwytconfig"
-	"github.com/fvmoraes/dwyt/internal/governor"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
+	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
@@ -67,10 +67,10 @@ type DashboardServer struct {
 	ProjectObsidian *brain.ProjectObsidian
 	ProcMan         *procman.ProcessManager
 	RuntimeState    *state.RuntimeState
-	// Governor is the DWYT v5 Context Governor. It owns the efficiency policy
+	// Optimizer is the DWYT v5 Context Optimizer. It owns the efficiency policy
 	// (budgets, retrieval ladder, output profiles, cache guidance, raw store)
 	// so instruction files can stay small and stable.
-	Governor *governor.Governor
+	Optimizer *optimizer.Optimizer
 	// Housekeeper enforces Brain retention: the 100-session limit, TTLs, stale
 	// detection and raw pruning, always promoting reusable knowledge first.
 	Housekeeper *housekeeper.Housekeeper

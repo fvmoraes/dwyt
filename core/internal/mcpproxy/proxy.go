@@ -69,10 +69,10 @@ type Config struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Mode selects transparent (default, byte-exact) or governed (opt-in
-	// response compaction). See governed.go for the bypass rules.
+	// Mode selects transparent (default, byte-exact) or optimized (opt-in
+	// response compaction). See optimized.go for the bypass rules.
 	Mode Mode
-	// Compactor performs the compaction in governed mode. When nil, governed
+	// Compactor performs the compaction in optimized mode. When nil, optimized
 	// mode degrades to transparent rather than failing to start.
 	Compactor CompactClient
 }
@@ -101,24 +101,24 @@ func Run(cfg Config) (int, error) {
 
 	counter := &callCounter{server: cfg.Name, reporter: cfg.Reporter}
 
-	// Governed mode needs to see the server→client stream, which means giving up
+	// Optimized mode needs to see the server→client stream, which means giving up
 	// the byte-exact fd wiring. It is therefore strictly opt-in, and it silently
 	// degrades to transparent when no compactor was supplied: a misconfiguration
 	// must never turn into a broken MCP server.
-	governed := cfg.Mode == ModeGoverned && cfg.Compactor != nil
-	var respGov *responseGovernor
+	optimized := cfg.Mode == ModeOptimized && cfg.Compactor != nil
+	var respGov *responseOptimizer
 	var childStdout *os.File
 	var stdoutDone chan struct{}
 
-	if governed {
+	if optimized {
 		pending := newPendingCalls()
 		counter.pending = pending
-		respGov = newResponseGovernor(cfg.Name, cfg.Compactor, pending, stdout)
+		respGov = newResponseOptimizer(cfg.Name, cfg.Compactor, pending, stdout)
 
 		rOut, wOut, err := os.Pipe()
 		if err != nil {
 			// Falling back to transparent is better than refusing to run.
-			governed = false
+			optimized = false
 			cmd.Stdout = stdout
 		} else {
 			cmd.Stdout = wOut
@@ -186,7 +186,7 @@ func Run(cfg Config) (int, error) {
 	_ = pr.Close()
 	if childStdout != nil {
 		// Closing our copy of the write end lets the reader see EOF, so the
-		// governor can flush a trailing partial frame before we return.
+		// optimizer can flush a trailing partial frame before we return.
 		_ = childStdout.Close()
 		<-stdoutDone
 	}
@@ -209,8 +209,8 @@ type callCounter struct {
 	server   string
 	reporter Reporter
 	buf      []byte
-	// pending, when set (governed mode), records request id → tool name so the
-	// response governor can match a response to the tool that produced it.
+	// pending, when set (optimized mode), records request id → tool name so the
+	// response optimizer can match a response to the tool that produced it.
 	pending *pendingCalls
 }
 

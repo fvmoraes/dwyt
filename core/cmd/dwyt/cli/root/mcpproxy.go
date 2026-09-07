@@ -22,7 +22,7 @@ var (
 // Two modes (spec §32):
 //
 //   - transparent (default): byte-exact passthrough, passive counting only.
-//   - governed (opt-in): additionally compacts large responses of known tools,
+//   - optimized (opt-in): additionally compacts large responses of known tools,
 //     archiving the full bytes and returning a dwyt:// reference. Every failure
 //     path bypasses to the original bytes.
 //
@@ -47,8 +47,8 @@ var mcpProxyCmd = &cobra.Command{
 			Reporter: mcpproxy.NewHTTPReporter(mcpAPIURL("/mcp/usage")),
 			Mode:     mode,
 		}
-		if mode == mcpproxy.ModeGoverned {
-			cfg.Compactor = mcpproxy.NewHTTPCompactClient(mcpAPIURL("/governor/compact"))
+		if mode == mcpproxy.ModeOptimized {
+			cfg.Compactor = mcpproxy.NewHTTPCompactClient(mcpAPIURL("/optimizer/compact"))
 		}
 
 		code, err := mcpproxy.Run(cfg)
@@ -63,7 +63,7 @@ var mcpProxyCmd = &cobra.Command{
 }
 
 // resolveProxyMode prefers the explicit flag, then the environment. The
-// environment override exists so a user can enable governed mode for an already
+// environment override exists so a user can enable optimized mode for an already
 // written client config without DWYT rewriting it.
 func resolveProxyMode() string {
 	if strings.TrimSpace(mcpProxyMode) != "" {
@@ -89,6 +89,6 @@ func init() {
 	mcpProxyCmd.Flags().StringVar(&mcpProxyTarget, "target", "", "path to the real MCP server binary")
 	mcpProxyCmd.Flags().StringVar(&mcpProxyName, "name", "", "logical MCP server name credited in usage reports")
 	mcpProxyCmd.Flags().StringVar(&mcpProxyMode, "mode", "",
-		"transparent (default, byte-exact) or governed (opt-in response compaction)")
+		"transparent (default, byte-exact) or optimized (opt-in response compaction)")
 	Cmd.AddCommand(mcpProxyCmd)
 }

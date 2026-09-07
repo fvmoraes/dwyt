@@ -1,4 +1,4 @@
-package contextgov
+package contextopt
 
 import (
 	"crypto/sha256"
@@ -12,7 +12,7 @@ import (
 
 // Session state (spec §12) and the delta/hash store (spec §11).
 //
-// The session is the governor's memory of "what this agent already has". It is
+// The session is the optimizer's memory of "what this agent already has". It is
 // what makes "reuse before retrieve" and "delta before full state" possible:
 // without it, every turn would have to re-send the same symbols to be safe.
 
@@ -154,7 +154,7 @@ func (s SymbolState) Key() string {
 	return s.Path + "#" + s.Symbol
 }
 
-// DeltaDecision is what the governor tells the agent to do about a symbol it is
+// DeltaDecision is what the optimizer tells the agent to do about a symbol it is
 // about to retrieve.
 type DeltaDecision string
 
@@ -168,7 +168,7 @@ const (
 	DeltaFull DeltaDecision = "retrieve"
 )
 
-// Session is the mutable per-task governor state. It is safe for concurrent
+// Session is the mutable per-task optimizer state. It is safe for concurrent
 // use because the MCP server and the HTTP API can both touch it.
 type Session struct {
 	mu sync.RWMutex
@@ -192,7 +192,7 @@ type Session struct {
 	lastSnapshotHash string
 }
 
-// NewSession creates a governor session for a task.
+// NewSession creates a optimizer session for a task.
 func NewSession(taskID string, budget Budget) *Session {
 	now := time.Now()
 	return &Session{

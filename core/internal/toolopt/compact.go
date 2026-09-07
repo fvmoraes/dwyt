@@ -1,4 +1,4 @@
-// Package toolgov implements the Tool Output Governor (spec §30–§31).
+// Package toolopt implements the Tool Output Optimizer (spec §30–§31).
 //
 // The rule is "summary first, raw on demand". Large tool output is reduced
 // deterministically — no LLM involved — to status, errors, counts and the
@@ -10,7 +10,7 @@
 // dropping evidence to save tokens is the one failure mode the spec forbids
 // outright (§65: "compression never removes critical evidence without a
 // raw_ref").
-package toolgov
+package toolopt
 
 import (
 	"fmt"
@@ -42,7 +42,7 @@ type Diagnostic struct {
 	Count int `json:"count,omitempty"`
 }
 
-// Compacted is the governed representation of a tool run.
+// Compacted is the optimized representation of a tool run.
 type Compacted struct {
 	// Status is "pass", "fail" or "unknown". "unknown" is honest: not every
 	// tool announces its result in a parseable way.
@@ -77,7 +77,7 @@ type Options struct {
 	TailLines int
 	// MaxTokens is the soft ceiling for the compacted payload.
 	MaxTokens int
-	// AlreadyCompact tells the governor the producer (RTK) already reduced the
+	// AlreadyCompact tells the optimizer the producer (RTK) already reduced the
 	// output, so a second aggressive pass is skipped (spec §31).
 	AlreadyCompact bool
 }

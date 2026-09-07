@@ -1,15 +1,15 @@
-// Package governor is the DWYT MCP Governor runtime (spec §3.1).
+// Package optimizer is the DWYT MCP Optimizer runtime (spec §3.1).
 //
 // It is the single authority that answers: what is the smallest context the
 // agent needs right now, which sources should serve it, how much may be spent,
 // and which rules apply. Everything it returns is compact by construction —
-// the governor must not become another source of token waste, so responses are
+// the optimizer must not become another source of token waste, so responses are
 // small structured payloads, never restatements of the policy text.
 //
 // The runtime is stateful only in the sense that it remembers per-task
-// sessions. All the decision logic lives in contextgov/outputgov/toolgov and is
-// pure, which keeps the governor testable and its answers reproducible.
-package governor
+// sessions. All the decision logic lives in contextopt/outputopt/toolopt and is
+// pure, which keeps the optimizer testable and its answers reproducible.
+package optimizer
 
 import (
 	"context"
@@ -19,22 +19,22 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/cacheintel"
-	"github.com/fvmoraes/dwyt/internal/contextgov"
-	"github.com/fvmoraes/dwyt/internal/outputgov"
+	"github.com/fvmoraes/dwyt/internal/contextopt"
+	"github.com/fvmoraes/dwyt/internal/outputopt"
 	"github.com/fvmoraes/dwyt/internal/provider"
 	"github.com/fvmoraes/dwyt/internal/rawstore"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
-	"github.com/fvmoraes/dwyt/internal/toolgov"
+	"github.com/fvmoraes/dwyt/internal/toolopt"
 )
 
-// PolicyVersion identifies the behaviour of the governor. It is part of the
+// PolicyVersion identifies the behaviour of the optimizer. It is part of the
 // cache identity: a policy change must invalidate a cached prefix, because the
 // rules baked into that prefix are no longer the rules in force.
 const PolicyVersion = "5.0.0"
 
-// MemoryHealthProvider is implemented by the Brain so the governor can report
+// MemoryHealthProvider is implemented by the Brain so the optimizer can report
 // vault health without importing the brain package (which would create a cycle:
-// the brain's HTTP handlers already reach into the governor).
+// the brain's HTTP handlers already reach into the optimizer).
 type MemoryHealthProvider interface {
 	MemoryHealth() map[string]interface{}
 }
@@ -46,7 +46,7 @@ type HousekeeperStatusProvider interface {
 }
 
 // UsageRecorder receives normalized usage reports so telemetry can persist
-// them. It is an interface so the governor works with or without a database.
+// them. It is an interface so the optimizer works with or without a database.
 type UsageRecorder interface {
 	RecordUsage(Usage) error
 }
@@ -68,9 +68,9 @@ type Config struct {
 	OperationalOutputMax    int  `json:"operational_output_max"`
 	StructuredOperational   bool `json:"structured_operational"`
 
-	StopLimits contextgov.StopLimits `json:"stop_limits"`
+	StopLimits contextopt.StopLimits `json:"stop_limits"`
 	// Routing controls deterministic model routing (spec §46).
-	Routing contextgov.RoutingConfig `json:"routing"`
+	Routing contextopt.RoutingConfig `json:"routing"`
 
 	// RawTTL is the retention of tool-output raw objects (spec §22 P3:
 	// 72 hours).
@@ -80,29 +80,29 @@ type Config struct {
 // DefaultConfig returns the operational recommendation from the spec.
 func DefaultConfig() Config {
 	return Config{
-		DefaultBudget:           contextgov.DefaultBudget,
-		MaxBudget:               contextgov.MaxBudget,
-		ReservePercent:          contextgov.DefaultReservePercent,
+		DefaultBudget:           contextopt.DefaultBudget,
+		MaxBudget:               contextopt.MaxBudget,
+		ReservePercent:          contextopt.DefaultReservePercent,
 		ProgressiveExpansion:    true,
 		ConfidenceGated:         true,
 		PreserveCachePrefix:     true,
 		ReuseBeforeRetrieve:     true,
 		DefaultTopK:             5,
-		OperationalOutputTarget: outputgov.OperationalTarget,
-		OperationalOutputMax:    outputgov.OperationalMax,
+		OperationalOutputTarget: outputopt.OperationalTarget,
+		OperationalOutputMax:    outputopt.OperationalMax,
 		StructuredOperational:   true,
-		StopLimits:              contextgov.DefaultStopLimits(),
-		Routing:                 contextgov.DefaultRoutingConfig(),
+		StopLimits:              contextopt.DefaultStopLimits(),
+		Routing:                 contextopt.DefaultRoutingConfig(),
 		RawTTL:                  72 * time.Hour,
 	}
 }
 
-// Governor is the runtime.
-type Governor struct {
+// Optimizer is the runtime.
+type Optimizer struct {
 	mu       sync.RWMutex
 	cfg      Config
-	planner  *contextgov.Planner
-	sessions map[string]*contextgov.Session
+	planner  *contextopt.Planner
+	sessions map[string]*contextopt.Session
 	// sessionOrder tracks insertion order so the oldest idle session is
 	// evicted first when the cap is reached.
 	sessionOrder []string
@@ -124,28 +124,28 @@ type Governor struct {
 
 	// loop accumulates the measured agentic-loop state per task, feeding the
 	// stop conditions.
-	loop map[string]*contextgov.LoopObservation
+	loop map[string]*contextopt.LoopObservation
 }
 
 // maxSessions bounds memory use for a long-running daemon. Sessions are small
 // (a few KB) but unbounded growth in a process that runs for weeks is a leak.
 const maxSessions = 64
 
-// New creates a governor. rawHome is the DWYT home directory; when it is empty
+// New creates a optimizer. rawHome is the DWYT home directory; when it is empty
 // the raw store is disabled and raw-related calls report that honestly instead
 // of failing.
-func New(cfg Config, rawHome string) *Governor {
+func New(cfg Config, rawHome string) *Optimizer {
 	if cfg.DefaultBudget <= 0 {
 		cfg = DefaultConfig()
 	}
-	g := &Governor{
+	g := &Optimizer{
 		cfg:          cfg,
-		planner:      contextgov.NewPlanner(),
-		sessions:     map[string]*contextgov.Session{},
-		loop:         map[string]*contextgov.LoopObservation{},
+		planner:      contextopt.NewPlanner(),
+		sessions:     map[string]*contextopt.Session{},
+		loop:         map[string]*contextopt.LoopObservation{},
 		capabilities: provider.NewCatalog(),
 		pricing:      provider.NewPricingCatalog(),
-		tracer:       telemetry.NewTracer("dwyt-governor"),
+		tracer:       telemetry.NewTracer("dwyt-optimizer"),
 	}
 	if rawHome != "" {
 		if store, err := rawstore.New(rawHome); err == nil {
@@ -162,14 +162,14 @@ func New(cfg Config, rawHome string) *Governor {
 }
 
 // Capabilities exposes the provider capability catalog.
-func (g *Governor) Capabilities() *provider.Catalog {
+func (g *Optimizer) Capabilities() *provider.Catalog {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.capabilities
 }
 
 // Pricing exposes the pricing catalog.
-func (g *Governor) Pricing() *provider.PricingCatalog {
+func (g *Optimizer) Pricing() *provider.PricingCatalog {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.pricing
@@ -177,54 +177,54 @@ func (g *Governor) Pricing() *provider.PricingCatalog {
 
 // Tracer exposes the pipeline tracer. It is never nil, and every method on it is
 // a no-op when no OTLP endpoint is configured.
-func (g *Governor) Tracer() *telemetry.Tracer {
+func (g *Optimizer) Tracer() *telemetry.Tracer {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.tracer
 }
 
-// Close releases the governor's background workers. Safe to call more than once.
-func (g *Governor) Close() {
+// Close releases the optimizer's background workers. Safe to call more than once.
+func (g *Optimizer) Close() {
 	g.Tracer().Close()
 }
 
 // SetMemoryHealthProvider wires the Brain.
-func (g *Governor) SetMemoryHealthProvider(p MemoryHealthProvider) {
+func (g *Optimizer) SetMemoryHealthProvider(p MemoryHealthProvider) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.memory = p
 }
 
 // SetHousekeeperStatusProvider wires the housekeeper.
-func (g *Governor) SetHousekeeperStatusProvider(p HousekeeperStatusProvider) {
+func (g *Optimizer) SetHousekeeperStatusProvider(p HousekeeperStatusProvider) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.housekeeper = p
 }
 
 // SetUsageRecorder wires telemetry persistence.
-func (g *Governor) SetUsageRecorder(r UsageRecorder) {
+func (g *Optimizer) SetUsageRecorder(r UsageRecorder) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.usage = r
 }
 
 // Config returns the active configuration.
-func (g *Governor) Config() Config {
+func (g *Optimizer) Config() Config {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.cfg
 }
 
 // RawStore exposes the raw object store (nil when disabled).
-func (g *Governor) RawStore() *rawstore.Store {
+func (g *Optimizer) RawStore() *rawstore.Store {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.raw
 }
 
 // session returns (creating if needed) the session for a task.
-func (g *Governor) session(taskID string, budget contextgov.Budget) *contextgov.Session {
+func (g *Optimizer) session(taskID string, budget contextopt.Budget) *contextopt.Session {
 	if taskID == "" {
 		taskID = "default"
 	}
@@ -233,7 +233,7 @@ func (g *Governor) session(taskID string, budget contextgov.Budget) *contextgov.
 	if s, ok := g.sessions[taskID]; ok {
 		return s
 	}
-	s := contextgov.NewSession(taskID, budget)
+	s := contextopt.NewSession(taskID, budget)
 	g.sessions[taskID] = s
 	g.sessionOrder = append(g.sessionOrder, taskID)
 	for len(g.sessionOrder) > maxSessions {
@@ -246,7 +246,7 @@ func (g *Governor) session(taskID string, budget contextgov.Budget) *contextgov.
 }
 
 // Session returns the session for a task without creating it.
-func (g *Governor) Session(taskID string) (*contextgov.Session, bool) {
+func (g *Optimizer) Session(taskID string) (*contextopt.Session, bool) {
 	if taskID == "" {
 		taskID = "default"
 	}
@@ -256,8 +256,8 @@ func (g *Governor) Session(taskID string) (*contextgov.Session, bool) {
 	return s, ok
 }
 
-// PlanRequest is the governor's public plan input. It mirrors
-// contextgov.PlanRequest plus the task identity, so the MCP layer has a single
+// PlanRequest is the optimizer's public plan input. It mirrors
+// contextopt.PlanRequest plus the task identity, so the MCP layer has a single
 // struct to decode into.
 type PlanRequest struct {
 	TaskID     string   `json:"task_id,omitempty"`
@@ -278,14 +278,14 @@ type PlanRequest struct {
 // PlanResponse is the compact answer returned to the agent.
 type PlanResponse struct {
 	TaskID string                  `json:"task_id"`
-	Plan   contextgov.Plan         `json:"plan"`
-	Stop   contextgov.StopDecision `json:"stop"`
-	// PolicyVersion lets a client detect that the governing rules changed.
+	Plan   contextopt.Plan         `json:"plan"`
+	Stop   contextopt.StopDecision `json:"stop"`
+	// PolicyVersion lets a client detect that the optimizing rules changed.
 	PolicyVersion string `json:"policy_version"`
 }
 
-// ContextPlan is the primary governor entry point (`dwyt_context_plan`).
-func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
+// ContextPlan is the primary optimizer entry point (`dwyt_context_plan`).
+func (g *Optimizer) ContextPlan(req PlanRequest) PlanResponse {
 	ctx, span := g.Tracer().Start(context.Background(), telemetry.SpanContextPlan, map[string]interface{}{
 		"task_type": req.Phase,
 		"phase":     req.Phase,
@@ -295,10 +295,10 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 
 	cfg := g.Config()
 
-	phase := contextgov.ParsePhase(req.Phase)
-	complexity := contextgov.ParseComplexity(req.Complexity)
+	phase := contextopt.ParsePhase(req.Phase)
+	complexity := contextopt.ParseComplexity(req.Complexity)
 
-	profile := contextgov.BudgetProfile{
+	profile := contextopt.BudgetProfile{
 		Phase:                phase,
 		Complexity:           complexity,
 		DefaultBudget:        cfg.DefaultBudget,
@@ -313,10 +313,10 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 	if taskID == "" {
 		taskID = "default"
 	}
-	sess := g.session(taskID, contextgov.ComputeBudget(profile))
+	sess := g.session(taskID, contextopt.ComputeBudget(profile))
 	sess.SetObjective(req.Task, phase)
 
-	inner := contextgov.PlanRequest{
+	inner := contextopt.PlanRequest{
 		Task:           req.Task,
 		Phase:          phase,
 		Complexity:     complexity,
@@ -326,7 +326,7 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 		BudgetProfile:  profile,
 	}
 	if req.AchievedLevel != "" {
-		level := contextgov.ParseRetrievalLevel(req.AchievedLevel)
+		level := contextopt.ParseRetrievalLevel(req.AchievedLevel)
 		inner.AchievedLevel = &level
 	}
 	if !cfg.ConfidenceGated {
@@ -343,7 +343,7 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 		plan.Reused = nil
 	}
 	if plan.Output.TargetTokens > 0 && cfg.OperationalOutputTarget > 0 &&
-		phase != contextgov.PhaseReview && phase != contextgov.PhasePlan {
+		phase != contextopt.PhaseReview && phase != contextopt.PhasePlan {
 		// Honour a configured operational target over the phase default when
 		// the operator tightened it.
 		if cfg.OperationalOutputTarget < plan.Output.TargetTokens {
@@ -371,8 +371,8 @@ func (g *Governor) ContextPlan(req PlanRequest) PlanResponse {
 // StatusResponse is the answer to `dwyt_context_status`.
 type StatusResponse struct {
 	TaskID string                  `json:"task_id"`
-	State  contextgov.SessionState `json:"state"`
-	Budget contextgov.Budget       `json:"budget"`
+	State  contextopt.SessionState `json:"state"`
+	Budget contextopt.Budget       `json:"budget"`
 	// Registered is how many candidates the session has been told about.
 	Registered int `json:"registered"`
 	// TokensRegistered is their total estimated size.
@@ -380,12 +380,12 @@ type StatusResponse struct {
 	// Reusable lists symbol keys whose content is unchanged since last seen.
 	Reusable      []string                `json:"reusable,omitempty"`
 	Expansions    int                     `json:"expansions"`
-	Stop          contextgov.StopDecision `json:"stop"`
+	Stop          contextopt.StopDecision `json:"stop"`
 	PolicyVersion string                  `json:"policy_version"`
 }
 
 // ContextStatus reports the session state (`dwyt_context_status`).
-func (g *Governor) ContextStatus(taskID string) StatusResponse {
+func (g *Optimizer) ContextStatus(taskID string) StatusResponse {
 	if taskID == "" {
 		taskID = "default"
 	}
@@ -393,7 +393,7 @@ func (g *Governor) ContextStatus(taskID string) StatusResponse {
 	if !ok {
 		return StatusResponse{
 			TaskID:        taskID,
-			Budget:        contextgov.ComputeBudget(contextgov.BudgetProfile{}),
+			Budget:        contextopt.ComputeBudget(contextopt.BudgetProfile{}),
 			Stop:          g.evaluateStop(taskID),
 			PolicyVersion: PolicyVersion,
 		}
@@ -447,7 +447,7 @@ type RegisterRequest struct {
 	Items  []RegisterItem `json:"items"`
 }
 
-// RegisterDecision is the governor's verdict for one registered item.
+// RegisterDecision is the optimizer's verdict for one registered item.
 type RegisterDecision struct {
 	ID       string `json:"id"`
 	Decision string `json:"decision"`
@@ -462,7 +462,7 @@ type RegisterResponse struct {
 	TokensKept    int                `json:"tokens_kept"`
 	TokensDropped int                `json:"tokens_dropped"`
 	TokensReused  int                `json:"tokens_reused"`
-	Budget        contextgov.Budget  `json:"budget"`
+	Budget        contextopt.Budget  `json:"budget"`
 	// Order is the cache-safe assembly order of the kept items.
 	Order         []string `json:"order,omitempty"`
 	PolicyVersion string   `json:"policy_version"`
@@ -472,64 +472,64 @@ type RegisterResponse struct {
 // fits it into the budget and returns keep/drop/reuse decisions
 // (`dwyt_register_context`). This is where "reuse before retrieve" and the
 // context GC actually bite.
-func (g *Governor) RegisterContext(req RegisterRequest) RegisterResponse {
+func (g *Optimizer) RegisterContext(req RegisterRequest) RegisterResponse {
 	taskID := req.TaskID
 	if taskID == "" {
 		taskID = "default"
 	}
 	cfg := g.Config()
-	sess := g.session(taskID, contextgov.ComputeBudget(contextgov.BudgetProfile{
+	sess := g.session(taskID, contextopt.ComputeBudget(contextopt.BudgetProfile{
 		DefaultBudget:  cfg.DefaultBudget,
 		MaxBudget:      cfg.MaxBudget,
 		ReservePercent: cfg.ReservePercent,
 	}))
 
-	candidates := make([]contextgov.ContextCandidate, 0, len(req.Items))
+	candidates := make([]contextopt.ContextCandidate, 0, len(req.Items))
 	deltaReason := map[string]string{}
 
 	for _, item := range req.Items {
-		c := contextgov.ContextCandidate{
+		c := contextopt.ContextCandidate{
 			ID:          item.ID,
-			Kind:        contextgov.ParseKind(item.Kind),
+			Kind:        contextopt.ParseKind(item.Kind),
 			Title:       item.Title,
 			Tokens:      item.Tokens,
 			Relevance:   item.Relevance,
 			Confidence:  item.Confidence,
-			State:       contextgov.ParseState(item.State),
+			State:       contextopt.ParseState(item.State),
 			ContentRef:  firstNonEmpty(item.ContentRef, item.Path),
 			ContentHash: item.ContentHash,
 			Source:      item.Source,
 			Pinned:      item.Pinned,
 		}
 		if item.CacheClass != "" {
-			c.CacheClass = contextgov.ParseCacheClass(item.CacheClass)
+			c.CacheClass = contextopt.ParseCacheClass(item.CacheClass)
 		}
 		if c.ContentHash == "" && item.Content != "" {
-			c.ContentHash = contextgov.HashContent(item.Content)
+			c.ContentHash = contextopt.HashContent(item.Content)
 		}
 		if c.Tokens == 0 && item.Content != "" {
-			c.Tokens = contextgov.EstimateTokens(item.Content)
+			c.Tokens = contextopt.EstimateTokens(item.Content)
 		}
 		c.Normalize()
 
 		// Feed the delta store so the next turn can reuse instead of retrieve.
 		if item.Path != "" {
-			decision, _ := sess.ObserveSymbol(contextgov.SymbolState{
+			decision, _ := sess.ObserveSymbol(contextopt.SymbolState{
 				Path:         item.Path,
 				Symbol:       item.Symbol,
 				ContentHash:  c.ContentHash,
 				Tokens:       c.Tokens,
 				ChangedRange: item.ChangedRange,
 			})
-			if decision == contextgov.DeltaReuse {
+			if decision == contextopt.DeltaReuse {
 				deltaReason[c.ID] = "unchanged since last seen"
 			}
 		}
 		candidates = append(candidates, c)
 	}
 
-	ranked := contextgov.Rank(candidates, sess.RankInput(contextgov.DefaultCostModel()))
-	sel := contextgov.Select(ranked, sess.Budget())
+	ranked := contextopt.Rank(candidates, sess.RankInput(contextopt.DefaultCostModel()))
+	sel := contextopt.Select(ranked, sess.Budget())
 
 	resp := RegisterResponse{
 		TaskID:        taskID,
@@ -564,7 +564,7 @@ func (g *Governor) RegisterContext(req RegisterRequest) RegisterResponse {
 	}
 
 	// Record what was actually delivered so the next turn treats it as seen.
-	delivered := make([]contextgov.ContextCandidate, 0, len(sel.Included))
+	delivered := make([]contextopt.ContextCandidate, 0, len(sel.Included))
 	for _, sc := range sel.Included {
 		delivered = append(delivered, sc.Candidate)
 	}
@@ -586,14 +586,14 @@ func (g *Governor) RegisterContext(req RegisterRequest) RegisterResponse {
 }
 
 // OutputProfile answers `dwyt_output_profile`.
-func (g *Governor) OutputProfile(taskType, phase string) outputgov.Profile {
+func (g *Optimizer) OutputProfile(taskType, phase string) outputopt.Profile {
 	cfg := g.Config()
-	p := outputgov.ProfileForTaskType(taskType, contextgov.Phase(normalizePhase(phase)))
+	p := outputopt.ProfileForTaskType(taskType, contextopt.Phase(normalizePhase(phase)))
 	if !cfg.StructuredOperational {
 		p.Structured = false
 	}
 	if !p.ArtifactException && cfg.OperationalOutputMax > 0 && p.MaxTokens > cfg.OperationalOutputMax &&
-		p.Phase != contextgov.PhaseReview && p.Phase != contextgov.PhasePlan {
+		p.Phase != contextopt.PhaseReview && p.Phase != contextopt.PhasePlan {
 		p.MaxTokens = cfg.OperationalOutputMax
 	}
 	return p
@@ -605,7 +605,7 @@ func normalizePhase(phase string) string {
 	if phase == "" {
 		return ""
 	}
-	return string(contextgov.ParsePhase(phase))
+	return string(contextopt.ParsePhase(phase))
 }
 
 // CompactRequest is the input to `dwyt_compact_tool_output`.
@@ -625,7 +625,7 @@ type CompactRequest struct {
 // It never fails the caller: if the raw store is unavailable the compaction
 // still happens, and the response says so, because "we could not archive the
 // raw bytes" must not turn into "you get no tool output".
-func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, error) {
+func (g *Optimizer) CompactToolOutput(req CompactRequest) (toolopt.Compacted, error) {
 	_, span := g.Tracer().Start(context.Background(), telemetry.SpanToolCompression,
 		map[string]interface{}{"kind": req.Kind})
 	defer span.End()
@@ -635,19 +635,19 @@ func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, err
 
 	if content == "" && req.RawRef != "" {
 		if store == nil {
-			return toolgov.Compacted{}, fmt.Errorf("raw store unavailable: cannot resolve %s", req.RawRef)
+			return toolopt.Compacted{}, fmt.Errorf("raw store unavailable: cannot resolve %s", req.RawRef)
 		}
 		resolved, _, err := store.Get(req.RawRef)
 		if err != nil {
-			return toolgov.Compacted{}, err
+			return toolopt.Compacted{}, err
 		}
 		content = resolved
 	}
 	if content == "" {
-		return toolgov.Compacted{}, fmt.Errorf("content or raw_ref is required")
+		return toolopt.Compacted{}, fmt.Errorf("content or raw_ref is required")
 	}
 
-	compacted := toolgov.Compact(content, toolgov.Options{AlreadyCompact: req.AlreadyCompact})
+	compacted := toolopt.Compact(content, toolopt.Options{AlreadyCompact: req.AlreadyCompact})
 
 	if store != nil {
 		kind := req.Kind
@@ -669,7 +669,7 @@ func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, err
 		}
 	}
 	// Recompute the sent estimate: the raw reference is part of what is sent.
-	compacted.SentTokensEst = contextgov.EstimateTokens(compacted.Render())
+	compacted.SentTokensEst = contextopt.EstimateTokens(compacted.Render())
 	if compacted.RawTokensEst > 0 {
 		saved := compacted.RawTokensEst - compacted.SentTokensEst
 		if saved < 0 {
@@ -687,7 +687,7 @@ func (g *Governor) CompactToolOutput(req CompactRequest) (toolgov.Compacted, err
 }
 
 // GetRaw resolves a raw reference (`dwyt_get_raw`).
-func (g *Governor) GetRaw(ref string) (string, rawstore.Meta, error) {
+func (g *Optimizer) GetRaw(ref string) (string, rawstore.Meta, error) {
 	store := g.RawStore()
 	if store == nil {
 		return "", rawstore.Meta{}, fmt.Errorf("raw store unavailable")
@@ -697,7 +697,7 @@ func (g *Governor) GetRaw(ref string) (string, rawstore.Meta, error) {
 
 // PutRaw archives content and returns its reference. Used by the tool proxy and
 // by the brain when a note needs to shed a large payload.
-func (g *Governor) PutRaw(content, kind, label string) (rawstore.Meta, error) {
+func (g *Optimizer) PutRaw(content, kind, label string) (rawstore.Meta, error) {
 	store := g.RawStore()
 	if store == nil {
 		return rawstore.Meta{}, fmt.Errorf("raw store unavailable")
@@ -752,8 +752,8 @@ type Usage struct {
 // UsageResponse is the answer to `dwyt_report_usage`.
 type UsageResponse struct {
 	Accepted bool                    `json:"accepted"`
-	Stop     contextgov.StopDecision `json:"stop"`
-	// Recorded is false when no telemetry sink is wired; the governor still
+	Stop     contextopt.StopDecision `json:"stop"`
+	// Recorded is false when no telemetry sink is wired; the optimizer still
 	// uses the report to update its own state.
 	Recorded bool   `json:"recorded"`
 	Note     string `json:"note,omitempty"`
@@ -762,7 +762,7 @@ type UsageResponse struct {
 // ReportUsage ingests a usage report (`dwyt_report_usage`). It updates the
 // session's observed cache set and the loop counters, then re-evaluates the
 // stop conditions.
-func (g *Governor) ReportUsage(u Usage) UsageResponse {
+func (g *Optimizer) ReportUsage(u Usage) UsageResponse {
 	_, span := g.Tracer().Start(context.Background(), telemetry.SpanLLMRequest, map[string]interface{}{
 		"provider": u.Provider,
 		"model":    u.Model,
@@ -815,7 +815,7 @@ func (g *Governor) ReportUsage(u Usage) UsageResponse {
 	g.mu.Lock()
 	obs := g.loop[taskID]
 	if obs == nil {
-		obs = &contextgov.LoopObservation{}
+		obs = &contextopt.LoopObservation{}
 		g.loop[taskID] = obs
 	}
 	if u.ToolIterations > 0 {
@@ -847,7 +847,7 @@ func (g *Governor) ReportUsage(u Usage) UsageResponse {
 
 	resp := UsageResponse{Accepted: true, Stop: g.evaluateStop(taskID)}
 	if recorder == nil {
-		resp.Note = "no telemetry sink configured; report used for governance only"
+		resp.Note = "no telemetry sink configured; report used for optimization only"
 		return resp
 	}
 	if err := recorder.RecordUsage(u); err != nil {
@@ -871,10 +871,10 @@ func derefInt(v *int) int {
 }
 
 // evaluateStop applies the configured stop limits to a task's measured loop.
-func (g *Governor) evaluateStop(taskID string) contextgov.StopDecision {
+func (g *Optimizer) evaluateStop(taskID string) contextopt.StopDecision {
 	g.mu.RLock()
 	limits := g.cfg.StopLimits
-	obs := contextgov.LoopObservation{}
+	obs := contextopt.LoopObservation{}
 	if o, ok := g.loop[taskID]; ok {
 		obs = *o
 	}
@@ -886,10 +886,10 @@ func (g *Governor) evaluateStop(taskID string) contextgov.StopDecision {
 			obs.MaxSameError = maxSame
 		}
 	}
-	return contextgov.EvaluateStop(limits, obs)
+	return contextopt.EvaluateStop(limits, obs)
 }
 
-func maxErrorCount(sess *contextgov.Session) int {
+func maxErrorCount(sess *contextopt.Session) int {
 	max := 0
 	for _, e := range sess.State().ActiveErrors {
 		if e.Count > max {
@@ -904,7 +904,7 @@ func maxErrorCount(sess *contextgov.Session) int {
 //
 // It exists so callers outside this package can contribute spans without each of
 // them having to know about the tracer's lifecycle.
-func (g *Governor) TraceSpan(name string, attrs map[string]interface{}, fn func() error) error {
+func (g *Optimizer) TraceSpan(name string, attrs map[string]interface{}, fn func() error) error {
 	_, span := g.Tracer().Start(context.Background(), name, attrs)
 	defer span.End()
 	err := fn()
@@ -913,7 +913,7 @@ func (g *Governor) TraceSpan(name string, attrs map[string]interface{}, fn func(
 }
 
 // HousekeeperStatus answers `dwyt_housekeeper_status`.
-func (g *Governor) HousekeeperStatus() map[string]interface{} {
+func (g *Optimizer) HousekeeperStatus() map[string]interface{} {
 	g.mu.RLock()
 	provider := g.housekeeper
 	g.mu.RUnlock()
@@ -924,7 +924,7 @@ func (g *Governor) HousekeeperStatus() map[string]interface{} {
 }
 
 // MemoryHealth answers `dwyt_memory_health`.
-func (g *Governor) MemoryHealth() map[string]interface{} {
+func (g *Optimizer) MemoryHealth() map[string]interface{} {
 	g.mu.RLock()
 	provider := g.memory
 	g.mu.RUnlock()
@@ -935,7 +935,7 @@ func (g *Governor) MemoryHealth() map[string]interface{} {
 }
 
 // RawUsage reports the raw object store footprint for the dashboard.
-func (g *Governor) RawUsage() map[string]interface{} {
+func (g *Optimizer) RawUsage() map[string]interface{} {
 	store := g.RawStore()
 	if store == nil {
 		return map[string]interface{}{"enabled": false}
@@ -971,7 +971,7 @@ type CacheGuidanceResponse struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 
-	Order          []contextgov.CacheClass `json:"order"`
+	Order          []contextopt.CacheClass `json:"order"`
 	PreservePrefix bool                    `json:"preserve_prefix"`
 	// NeverBeforePrefix lists the content that must never precede the stable
 	// prefix, because doing so destroys cache reuse for the whole request
@@ -1011,7 +1011,7 @@ type CacheGuidanceResponse struct {
 // It never reports `enforced`, because in v5.0.0 DWYT does not control the
 // request for third-party clients. Claiming otherwise is the exact false claim
 // spec §39 forbids.
-func (g *Governor) CacheGuidance(providerName, model string) CacheGuidanceResponse {
+func (g *Optimizer) CacheGuidance(providerName, model string) CacheGuidanceResponse {
 	caps := g.Capabilities().Lookup(providerName, model)
 
 	state := CapabilityUnknown
@@ -1039,7 +1039,7 @@ func (g *Governor) CacheGuidance(providerName, model string) CacheGuidanceRespon
 	resp := CacheGuidanceResponse{
 		Provider:       caps.Provider,
 		Model:          caps.Model,
-		Order:          contextgov.CacheClasses(),
+		Order:          contextopt.CacheClasses(),
 		PreservePrefix: g.Config().PreserveCachePrefix,
 		NeverBeforePrefix: []string{
 			"timestamps", "request_ids", "nonces", "build_ids",

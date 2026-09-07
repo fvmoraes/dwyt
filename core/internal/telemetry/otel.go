@@ -44,7 +44,7 @@ const (
 	SpanLLMRequest         = "dwyt.llm_request"
 	SpanToolCall           = "dwyt.tool_call"
 	SpanToolCompression    = "dwyt.tool_compression"
-	SpanOutputGovernor     = "dwyt.output_governor"
+	SpanOutputOptimizer    = "dwyt.output_optimizer"
 	SpanMemoryCompile      = "dwyt.memory_compile"
 	SpanHousekeeper        = "dwyt.housekeeper"
 )

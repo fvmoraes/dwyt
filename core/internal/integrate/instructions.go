@@ -170,7 +170,7 @@ func windsurfRuleTemplate() string {
 //
 // From v5.0.0 this is deliberately *small and stable* (spec §4). The detailed
 // efficiency policy — budgets, TTLs, retrieval ladders, cache classes, output
-// profiles — lives inside the DWYT MCP Governor and is fetched on demand, not
+// profiles — lives inside the DWYT Optimizer MCP and is fetched on demand, not
 // pasted into every request. Two reasons:
 //
 //   - Duplicating the full policy here would cost thousands of tokens on every
@@ -187,13 +187,13 @@ This project uses DWYT for context and token optimization.
 
 ## Available MCPs
 
-- **DWYT MCP** — context governor and efficiency policy.
-- **Obsidian MCP** — persistent project memory and canonical knowledge.
-- **Codebase MCP** — structural code retrieval.
+- **dwyt_optimizer** — context optimizer and efficiency policy.
+- **dwyt_obsidian** — persistent project memory and canonical knowledge.
+- **dwyt_codebase** — structural code retrieval.
 
 ## Entry Contract
 
-Before broad repository or memory retrieval, call the DWYT MCP
+Before broad repository or memory retrieval, call the DWYT Optimizer
 (` + "`dwyt_context_plan`" + `) to obtain a context plan, then stay inside its
 budget and retrieval boundaries.
 
@@ -205,7 +205,7 @@ Prefer:
 - incremental retrieval over bulk context loading;
 - reusing context already obtained over retrieving it again.
 
-Use Obsidian as the project brain and Codebase as the source of current code
+Use dwyt_obsidian as the project brain and dwyt_codebase as the source of current
 structure. Request raw or full data only when the compact context is
 insufficient; raw output stays retrievable by reference
 (` + "`dwyt_get_raw`" + `).

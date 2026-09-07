@@ -1,13 +1,13 @@
-// Package contextgov implements the DWYT v5 Context Governor: the component
+// Package contextopt implements the DWYT v5 Context Optimizer: the component
 // that decides how much context an agent may load, from which sources, in
 // which order, and what must be dropped first when the budget is exceeded.
 //
-// The governor is deliberately deterministic. Every decision it makes is a
+// The optimizer is deliberately deterministic. Every decision it makes is a
 // pure function of the candidate metadata it is given, so the same inputs
 // always produce the same plan. That property is what lets DWYT govern
 // context without spending an extra LLM call to do it (spec §46: "prefer
 // deterministic classification when sufficient").
-package contextgov
+package contextopt
 
 import (
 	"crypto/sha256"
@@ -117,7 +117,7 @@ const (
 )
 
 // ContextCandidate is a block that *may* enter the context window, described
-// only by metadata. The governor never needs the content itself to make a
+// only by metadata. The optimizer never needs the content itself to make a
 // decision — ContentRef points at where the content can be fetched from, and
 // ContentHash lets a later turn detect "unchanged, do not resend" (spec §11).
 type ContextCandidate struct {
