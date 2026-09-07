@@ -99,6 +99,7 @@ func (ds *DashboardServer) apiTelemetrySummary(c *gin.Context) {
 	if ds.Optimizer != nil {
 		payload["raw_store"] = ds.Optimizer.RawUsage()
 		payload["pricing"] = ds.Optimizer.Pricing().Meta()
+		payload["cache_capability"] = ds.cacheCapability()
 	}
 	if ds.Housekeeper != nil {
 		payload["housekeeper"] = ds.Housekeeper.HousekeeperStatus()
@@ -107,6 +108,41 @@ func (ds *DashboardServer) apiTelemetrySummary(c *gin.Context) {
 		payload["brain"] = pb.Health()
 	}
 	c.JSON(http.StatusOK, payload)
+}
+
+// cacheCapabilityView is the dashboard's view of how much control DWYT actually
+// has over provider caching (spec §39, §67).
+//
+// The dashboard has to show this, not just the hit rate. A 0% hit rate means
+// something completely different depending on whether the provider supports
+// caching at all, and leaving the user to guess which case they are in is how a
+// missing capability gets mistaken for a broken optimizer.
+type cacheCapabilityView struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// State is one of observed, advised, unsupported, unknown. It is never
+	// "enforced": DWYT does not own the request a third-party client sends.
+	State string `json:"state"`
+	Note  string `json:"note,omitempty"`
+}
+
+// cacheCapability resolves the capability record for the provider/model most
+// recently seen in telemetry, falling back to the generic record when nothing has
+// reported yet. Guessing a provider would be worse than saying "unknown".
+func (ds *DashboardServer) cacheCapability() cacheCapabilityView {
+	providerName, model := "", ""
+	if ds.Telemetry != nil {
+		if events, err := ds.Telemetry.RecentRequests(ds.currentProjectID(), 1); err == nil && len(events) > 0 {
+			providerName, model = events[0].Provider, events[0].Model
+		}
+	}
+	g := ds.Optimizer.CacheGuidance(providerName, model)
+	return cacheCapabilityView{
+		Provider: g.Provider,
+		Model:    g.Model,
+		State:    g.CapabilityState,
+		Note:     g.Note,
+	}
 }
 
 // apiTelemetryRequests serves the recent-request debugging view.

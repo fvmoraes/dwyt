@@ -447,6 +447,16 @@ export interface PricingMeta {
   loaded_at?: string
 }
 
+// CacheCapability is how much control DWYT has over provider caching. The
+// dashboard shows it next to the hit rate because a 0% hit rate means something
+// very different when the provider does not support caching at all.
+export interface CacheCapability {
+  provider?: string
+  model?: string
+  state: 'observed' | 'advised' | 'unsupported' | 'unknown' | string
+  note?: string
+}
+
 export interface TelemetryPayload {
   available: boolean
   reason?: string
@@ -455,6 +465,7 @@ export interface TelemetryPayload {
   housekeeper?: HousekeeperStatus
   raw_store?: RawStoreUsage
   pricing?: PricingMeta
+  cache_capability?: CacheCapability
 }
 
 export async function getTelemetrySummary(window = '24h'): Promise<TelemetryPayload> {

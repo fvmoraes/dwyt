@@ -56,6 +56,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
   const brain = payload?.brain
   const keeper = payload?.housekeeper
   const raw = payload?.raw_store
+  const capability = payload?.cache_capability
 
   const state: ToolState = payload?.available ? 'active' : 'inactive'
   const b = badge(state)
@@ -85,6 +86,11 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       <Row label={t.optimizerContextReduction} value={pct(summary?.context_reduction_pct)} />
       <Row label={t.optimizerAvoidedTokens} value={fmtN(summary?.avoided_tokens)} />
       <Row label={t.optimizerCacheHit} value={pct(summary?.cache_hit_pct)} />
+      <Row
+        label={t.optimizerCacheControl}
+        value={capability?.state ?? '\u2014'}
+        title={capability?.note || t.optimizerCacheControlHint}
+      />
       <Row
         label={t.optimizerCostObserved}
         value={usd(summary?.observed_cost_usd, summary?.coverage.cost_reported_requests)}
