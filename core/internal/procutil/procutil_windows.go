@@ -28,9 +28,28 @@ func Alive(pid int) bool {
 
 // Terminate force-kills the process and its child tree. Windows has no
 // reliable graceful signal for console apps, so taskkill /F /T is used.
+//
+// A process that is already gone by the time this runs — it exited on its
+// own, or a concurrent caller already reaped it — is treated as success, not
+// an error: taskkill exits non-zero for "no such process" the same as for a
+// real failure, and callers (e.g. a failed-daemon cleanup racing the daemon's
+// own shutdown) must not surface that as a warning on every ordinary exit.
 func Terminate(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	return exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid)).Run()
+	if !Alive(pid) {
+		return nil
+	}
+	out, err := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid)).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if !Alive(pid) {
+		// taskkill failed on part of the tree (e.g. a child that exited
+		// between the check above and the call) but the target itself is
+		// gone, which is what the caller actually needs.
+		return nil
+	}
+	return fmt.Errorf("taskkill pid %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
 }

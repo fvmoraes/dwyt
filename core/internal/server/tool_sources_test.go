@@ -82,7 +82,7 @@ func TestApplyToolSourceProcessesChangedSourceRestartsRunningProcess(t *testing.
 }
 
 func TestApplyToolSourceProcessesFailedStartRestoresPreviousRunningProcess(t *testing.T) {
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	oldMarker := filepath.Join(t.TempDir(), "old-starts")
 	failingMarker := filepath.Join(t.TempDir(), "failing-starts")
 	oldPath := writeToolSourceTestLauncher(t, "old-headroom", oldMarker, false)
@@ -115,7 +115,7 @@ func TestApplyToolSourceProcessesFailedStartRestoresPreviousRunningProcess(t *te
 
 func TestApplyToolSourceProcessesRollsBackEarlierServiceWhenLaterServiceFails(t *testing.T) {
 	t.Setenv("DWYT_TOOL_SOURCE_PROCESS_HELPER", "1")
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	oldCodebaseMarker := filepath.Join(t.TempDir(), "old-codebase-starts")
 	newCodebaseMarker := filepath.Join(t.TempDir(), "new-codebase-starts")
 	oldHeadroomMarker := filepath.Join(t.TempDir(), "old-headroom-starts")
@@ -196,8 +196,8 @@ func TestApplyToolSourceProcessesRollsBackEarlierServiceWhenLaterServiceFails(t 
 func startToolSourceTestServer(t *testing.T, headroomPath string) (*DashboardServer, map[string]toolsource.Selection) {
 	t.Helper()
 	t.Setenv("DWYT_TOOL_SOURCE_PROCESS_HELPER", "1")
-	if os.Getenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS") == "" {
-		t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "5")
+	if os.Getenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS") == "" {
+		t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "5")
 	}
 	home := t.TempDir()
 	binDir := t.TempDir()

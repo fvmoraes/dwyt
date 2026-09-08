@@ -99,7 +99,7 @@ func TestSetupSaveCanonicalizesLegacyClients(t *testing.T) {
 
 func TestSetupSaveFailedToolSourceHandoffKeepsPreviousConfiguration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	oldMarker := filepath.Join(t.TempDir(), "old-starts")
 	failingMarker := filepath.Join(t.TempDir(), "failing-starts")
 	oldPath := writeToolSourceTestLauncher(t, "old-headroom", oldMarker, false)
@@ -248,7 +248,7 @@ func TestRunInstallMigratesLegacyClientsIntoRuntimeState(t *testing.T) {
 func TestAPIServicesStartStopAllUpdatesRuntimeState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("DWYT_HEADROOM_STATS_HELPER", "1")
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "5")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "5")
 	home := t.TempDir()
 	pm := procman.New(home)
 	codebasePort := reserveTestPort(t)

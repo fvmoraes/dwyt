@@ -20,7 +20,7 @@ import (
 // process group, so it fails if managed services inherit that group: killing
 // only the parent shell leaves the background sleep orphaned.
 func TestProcessManagerHealthcheckFailureKillsServiceDescendants(t *testing.T) {
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	pidFile := filepath.Join(t.TempDir(), "service-child.pid")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

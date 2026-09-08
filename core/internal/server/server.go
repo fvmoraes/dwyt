@@ -194,20 +194,18 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// before failing — exactly the red codebase entry users see in their
 	// client MCP panels. Probe, and restart the managed service when it
 	// does not answer its health endpoint.
-	if !health.ProbeURL("http://127.0.0.1:9749/health") {
-		if status := procmanInstance.Status("codebase"); status != nil && status.Running {
-			log.Warn("codebase service is running but unhealthy; restarting",
-				log.Fields{"pid": status.PID})
-			if _, err := procmanInstance.Restart("codebase"); err != nil {
-				log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
-			}
-		} else if _, err := procmanInstance.Start("codebase"); err != nil {
-			log.Info("codebase service was not started at startup",
-				log.Fields{"reason": err.Error()})
-		} else {
-			log.Info("codebase service started")
-		}
-	}
+	//
+	// This runs in the background rather than blocking New(): Start/Restart
+	// wait up to managedHealthcheckTimeout (60-120s) for the health probe to
+	// return 200, and that budget used to be spent here, synchronously,
+	// before the daemon ever reached srv.Start() and bound its own dashboard
+	// port. The CLI polls that dashboard port with its own similarly-sized
+	// budget (daemonHealthcheckTimeout) starting at nearly the same instant
+	// it spawns the daemon — so a Codebase build that never answers /health
+	// (e.g. an incompatible version) made the daemon lose that race and get
+	// killed just as it would have finished starting. Codebase readiness is
+	// not required for the dashboard itself, so it must not gate it.
+	warmCodebase(procmanInstance, "http://127.0.0.1:9749/health")
 
 	// Reconcile the AI clients' MCP configs at startup. A full sync removes
 	// DWYT's historical server keys — a pre-v5 "codebase" entry kept showing
@@ -373,6 +371,34 @@ func (ds *DashboardServer) setHeadroomPort(port int) {
 	// values. Override a stale requested port when ProcessManager had to use a
 	// free fallback.
 	_ = os.Setenv("DWYT_HEADROOM_PORT", strconv.Itoa(port))
+}
+
+// warmCodebase brings the "codebase" managed service up in the background.
+// It must never block its caller: procman.Start/Restart wait out the full
+// managed healthcheck budget (60-120s) on a service that never answers its
+// health endpoint, and daemon startup has its own similarly-sized budget
+// racing in parallel — running this synchronously is what let an
+// incompatible Codebase build take the whole daemon down with it.
+func warmCodebase(pm *procman.ProcessManager, healthURL string) {
+	go func() {
+		if health.ProbeURL(healthURL) {
+			return
+		}
+		if status := pm.Status("codebase"); status != nil && status.Running {
+			log.Warn("codebase service is running but unhealthy; restarting",
+				log.Fields{"pid": status.PID})
+			if _, err := pm.Restart("codebase"); err != nil {
+				log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
+			}
+			return
+		}
+		if _, err := pm.Start("codebase"); err != nil {
+			log.Info("codebase service was not started at startup",
+				log.Fields{"reason": err.Error()})
+			return
+		}
+		log.Info("codebase service started")
+	}()
 }
 
 // runVaultMigration adopts the canonical "<hash>_<name>" vault layout for
