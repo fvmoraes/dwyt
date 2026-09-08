@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -48,7 +49,6 @@ func freeTCPPort(t *testing.T) int {
 // must return immediately regardless of how long the service takes to (fail
 // to) become healthy.
 func TestWarmCodebaseDoesNotBlockCaller(t *testing.T) {
-	const budget = time.Second
 	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 
 	home := t.TempDir()
@@ -60,8 +60,14 @@ func TestWarmCodebaseDoesNotBlockCaller(t *testing.T) {
 	// giving up.
 	pm.Register("codebase", bin, "/health", freeTCPPort(t), args...)
 
+	// A closed local port (not a privileged/reserved one like :1, whose
+	// connect() behavior on a client varies by platform and can itself take
+	// close to the OS's connect timeout) so the fast-path probe fails fast
+	// and consistently everywhere.
+	unreachable := fmt.Sprintf("http://127.0.0.1:%d/health", freeTCPPort(t))
+
 	started := time.Now()
-	warmCodebase(pm, "http://127.0.0.1:1/health")
+	warmCodebase(pm, unreachable)
 	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
 		t.Fatalf("warmCodebase must return without waiting for the service healthcheck, took %s", elapsed)
 	}
@@ -69,12 +75,20 @@ func TestWarmCodebaseDoesNotBlockCaller(t *testing.T) {
 	// procman.Start holds the service's mutex for its whole run, including
 	// the healthcheck wait, so polling pm.Status while it is in flight would
 	// just block on that same mutex rather than observing progress. Instead,
-	// wait past the configured budget and check the log file Start() creates
-	// right after acquiring the lock — proof the background attempt actually
-	// ran procman.Start rather than silently doing nothing.
-	time.Sleep(budget + 500*time.Millisecond)
-	if _, err := os.Stat(filepath.Join(home, "logs", "codebase-stdout.log")); err != nil {
-		t.Fatalf("warmCodebase's background attempt never ran procman.Start: %v", err)
+	// poll for the log file Start() creates right after acquiring the lock —
+	// proof the background attempt actually ran procman.Start rather than
+	// silently doing nothing. A generous deadline absorbs slower CI runners
+	// (observed flaky on macOS with a single fixed sleep).
+	stdoutLog := filepath.Join(home, "logs", "codebase-stdout.log")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(stdoutLog); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("warmCodebase's background attempt never ran procman.Start")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
