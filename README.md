@@ -513,11 +513,13 @@ After the proxy is healthy, DWYT runs Headroom's non-interactive durable setup f
 
 The dashboard daemon and managed HTTP services make a probe immediately, then retry every 500 ms until their total startup budget expires. Each HTTP attempt is limited to 2 seconds and cannot extend that total budget. An HTTP 200 is enough to mark the configured endpoint ready; for Headroom, an optional degraded component such as `kompress` does not block readiness.
 
-`DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` sets the total budget for both daemon and managed-service startup. The default is 60 seconds on Linux/macOS and 120 seconds on Windows. Set a positive integer in seconds to override it for the process, for example:
+`DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` sets the budget for the CLI's wait on the dashboard itself, and `DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS` sets the daemon's own budget per managed service (Headroom, Codebase) — two independent knobs so raising one for a slow machine doesn't also widen the other. Both default to 60 seconds on Linux/macOS and 120 seconds on Windows. Set a positive integer in seconds to override either for the process, for example:
 
 ```bash
-DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS=180 dwyt .
+DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS=180 DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS=180 dwyt .
 ```
+
+The Codebase service is warmed in the background and never blocks the dashboard from opening, even if it never becomes healthy.
 
 On a daemon startup timeout, DWYT logs the tested URL, child PID, last HTTP/connection error, and elapsed wait. It then terminates the daemon tree: a dedicated process group on Linux/macOS and `taskkill /F /T` on Windows. This prevents Headroom launcher and Python descendants from being orphaned.
 

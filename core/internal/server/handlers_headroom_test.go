@@ -139,7 +139,7 @@ func TestAPIHeadroomStopPMKeepsRuntimeStateOnStopError(t *testing.T) {
 // port is published to the dashboard response.
 func TestAPIHeadroomStatsURLUsesRegisteredProcessManager(t *testing.T) {
 	t.Setenv("DWYT_HEADROOM_STATS_HELPER", "1")
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "5")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "5")
 	blocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "occupied", http.StatusServiceUnavailable)
 	}))

@@ -265,23 +265,40 @@ Restart(name)→ Stop + wait 500ms + Start
 
 ### Healthcheck
 
-The dashboard daemon (`GET /api/health`) and managed HTTP services use one
-deadline-based healthcheck strategy:
+The dashboard daemon (`GET /api/health`) and managed HTTP services use the
+same deadline-based healthcheck *strategy*, but on two independent budgets:
 
 - The first request is made immediately; subsequent requests run every 500 ms.
 - Each HTTP request has a 2-second limit and is capped by the remaining total
   budget.
 - The default total budget is 60 seconds on Linux/macOS and 120 seconds on
-  Windows. A positive `DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` value
-  overrides either default for the current `dwyt` process.
+  Windows, for both budgets below.
 - HTTP 200 is sufficient for the configured endpoint. Headroom may report
   optional components such as `kompress` as degraded without blocking a ready
   proxy.
 
+The CLI's wait for the dashboard itself (`:2737`) and the daemon's internal
+wait for a single managed service are deliberately separate knobs:
+
+- `DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` overrides the CLI's budget for
+  the dashboard to come up.
+- `DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS` overrides the daemon's budget
+  for `procman.Start`/`Restart` on one managed service.
+
+They used to be the same variable, which meant the daemon's own wait for a
+managed service (started synchronously during `New()`, before the dashboard
+port was bound) competed for the same seconds as the CLI's wait for that
+dashboard port — a service that never became healthy could make the daemon
+lose that race and get killed just as it was about to finish starting. The
+Codebase warm-up now always runs in the background instead of blocking
+`New()`, so it no longer gates the dashboard regardless of this budget.
+
 When the daemon startup deadline expires, the log records the URL, child PID,
 last HTTP/connection error, and elapsed wait. DWYT then terminates the failed
-daemon tree. On Windows this is `taskkill /F /T`; on Linux/macOS the daemon's
-dedicated process group is terminated, which also reaps its managed descendants.
+daemon tree. On Windows this is `taskkill /F /T` (a target that already
+exited is treated as already stopped, not an error); on Linux/macOS the
+daemon's dedicated process group is terminated, which also reaps its managed
+descendants.
 
 ### Port conflicts
 

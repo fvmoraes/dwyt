@@ -395,14 +395,20 @@ func probeHealthURL(url string, timeout time.Duration) (bool, error) {
 	return true, nil
 }
 
-// managedHealthcheckTimeout shares the startup budget with the daemon. The
+// managedHealthcheckTimeout is this package's own startup budget for a single
+// managed service (e.g. Codebase, Headroom). It is intentionally a separate
+// knob from the CLI's daemonHealthcheckTimeout (cmd/dwyt/cli/root): the two
+// used to share DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS and start counting at
+// nearly the same instant, so raising one to give a slow machine more room
+// silently widened both — including the CLI's outer wait for the daemon's own
+// dashboard port, which is unrelated to any one service's readiness. The
 // Windows default accounts for slower launcher and Python environment startup.
 func managedHealthcheckTimeout() time.Duration {
 	defaultSeconds := 60
 	if runtime.GOOS == "windows" {
 		defaultSeconds = 120
 	}
-	if raw := strings.TrimSpace(os.Getenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS")); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
 			return time.Duration(seconds) * time.Second
 		}

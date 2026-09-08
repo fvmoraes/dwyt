@@ -248,7 +248,7 @@ func TestProcessManager_HealthcheckFailure(t *testing.T) {
 	// Production intentionally waits up to 60s (120s on Windows) for a slow
 	// service. Keep this negative-path test fast by exercising the supported
 	// timeout override instead of changing the production startup budget.
-	t.Setenv("DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS", "1")
+	t.Setenv("DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS", "1")
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
 	bin, args := failingCmd()

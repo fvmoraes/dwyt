@@ -40,14 +40,25 @@ dwyt .
 
 DWYT probes the dashboard immediately and then every 500 ms. On Windows the
 total startup budget is **120 seconds** (60 seconds on Linux/macOS); an HTTP
-request is limited to 2 seconds and cannot extend that overall deadline. The
-same budget is used while managed services such as Headroom start.
+request is limited to 2 seconds and cannot extend that overall deadline.
+
+Managed services such as Headroom share that same *shape* of budget, but as
+of the daemon startup no longer waiting on them, it is a separate knob so
+raising one no longer silently raises the other:
+
+- `DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS` — how long the CLI waits for the
+  dashboard itself (`:2737`) to answer after spawning the daemon.
+- `DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS` — how long the daemon waits for
+  a single managed service (Headroom, Codebase) to answer its own `/health`.
+  Codebase is warmed in the background and never blocks the dashboard from
+  opening, even if it never becomes healthy.
 
 If this machine needs a longer one-time budget, set a positive value in seconds
 before running DWYT:
 
 ```powershell
 $env:DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS = '180'
+$env:DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS = '180'
 dwyt .
 ```
 
@@ -56,12 +67,15 @@ restart Windows Terminal:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('DWYT_DAEMON_HEALTHCHECK_TIMEOUT_SECONDS', '180', 'User')
+[Environment]::SetEnvironmentVariable('DWYT_SERVICE_HEALTHCHECK_TIMEOUT_SECONDS', '180', 'User')
 ```
 
 On expiry, `%APPDATA%\dwyt\dwyt.log` records the tested URL, child PID, last
 HTTP/connection error, and elapsed wait. DWYT then uses `taskkill /F /T` to
 terminate the daemon/service tree, including Headroom's `.bat` launcher and
-Python descendants, so a failed startup should not leave orphan processes.
+Python descendants, so a failed startup should not leave orphan processes; a
+process that already exited by the time DWYT tries to kill it is treated as
+already stopped rather than an error.
 
 For Headroom, a `GET /health` response with HTTP 200 is ready. An optional
 degraded field such as `kompress` does not make the proxy unready.
