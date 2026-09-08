@@ -379,8 +379,16 @@ func (ds *DashboardServer) setHeadroomPort(port int) {
 // health endpoint, and daemon startup has its own similarly-sized budget
 // racing in parallel — running this synchronously is what let an
 // incompatible Codebase build take the whole daemon down with it.
-func warmCodebase(pm *procman.ProcessManager, healthURL string) {
+//
+// The returned channel closes once the background attempt finishes,
+// regardless of outcome; production callers can safely ignore it (calling
+// warmCodebase as a bare statement is valid Go), it exists so tests can
+// synchronize on completion instead of racing real process/filesystem
+// timing.
+func warmCodebase(pm *procman.ProcessManager, healthURL string) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		if health.ProbeURL(healthURL) {
 			return
 		}
@@ -399,6 +407,7 @@ func warmCodebase(pm *procman.ProcessManager, healthURL string) {
 		}
 		log.Info("codebase service started")
 	}()
+	return done
 }
 
 // runVaultMigration adopts the canonical "<hash>_<name>" vault layout for

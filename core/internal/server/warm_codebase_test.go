@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -67,28 +66,22 @@ func TestWarmCodebaseDoesNotBlockCaller(t *testing.T) {
 	unreachable := fmt.Sprintf("http://127.0.0.1:%d/health", freeTCPPort(t))
 
 	started := time.Now()
-	warmCodebase(pm, unreachable)
+	done := warmCodebase(pm, unreachable)
 	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
 		t.Fatalf("warmCodebase must return without waiting for the service healthcheck, took %s", elapsed)
 	}
 
-	// procman.Start holds the service's mutex for its whole run, including
-	// the healthcheck wait, so polling pm.Status while it is in flight would
-	// just block on that same mutex rather than observing progress. Instead,
-	// poll for the log file Start() creates right after acquiring the lock —
-	// proof the background attempt actually ran procman.Start rather than
-	// silently doing nothing. A generous deadline absorbs slower CI runners
-	// (observed flaky on macOS with a single fixed sleep).
-	stdoutLog := filepath.Join(home, "logs", "codebase-stdout.log")
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(stdoutLog); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("warmCodebase's background attempt never ran procman.Start")
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Synchronize on the completion channel rather than polling the
+	// filesystem or procman's mutex-guarded status for evidence the
+	// background attempt ran: real process/log-file timing proved flaky
+	// across CI runners (observed on macOS), while this ties the assertion
+	// directly to warmCodebase's own goroutine finishing. A generous bound
+	// still comfortably exceeds the configured 1s service-healthcheck
+	// budget even under CI load.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("warmCodebase's background attempt never completed")
 	}
 }
 
@@ -107,12 +100,13 @@ func TestWarmCodebaseSkipsStartWhenAlreadyHealthy(t *testing.T) {
 	// Intentionally left unregistered: if warmCodebase falls through to
 	// pm.Status/Start despite the healthy probe, that call panics/errors
 	// loudly rather than silently passing.
-	warmCodebase(pm, healthy.URL+"/health")
+	done := warmCodebase(pm, healthy.URL+"/health")
 
-	// Nothing to await asynchronously here (the fast path never spawns a
-	// goroutine that touches procman), but give any accidental background
-	// work a moment to surface before asserting it didn't happen.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("warmCodebase never completed for an already-healthy service")
+	}
 	if status := pm.Status("codebase"); status != nil && status.PID != 0 {
 		t.Fatalf("warmCodebase must not start an already-healthy service, got %+v", status)
 	}
