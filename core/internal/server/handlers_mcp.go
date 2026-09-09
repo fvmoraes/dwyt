@@ -46,7 +46,11 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 		if st != nil {
 			pid = st.PID
 		}
-		result[name] = map[string]interface{}{
+		// The dashboard cards look up entries by the short logical name
+		// (codebase/obsidian/optimizer), not the canonical namespaced key
+		// the registry stores (dwyt_codebase/...), so results must be
+		// re-keyed or every card sees a permanent miss and shows "Offline".
+		result[mcpregistry.LogicalName(name)] = map[string]interface{}{
 			"command":   entry.Command,
 			"port":      entry.Port,
 			"healthURL": entry.HealthURL,
