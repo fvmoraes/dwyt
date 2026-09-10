@@ -23,6 +23,7 @@ Everything there is to know about DWYT, organized by what you are trying to do.
 
 | Document | What it covers |
 |---|---|
+| [optimizer-law.md](optimizer-law.md) | Context budget, Token ROI, reuse, compression and output invariants — the rules the Optimizer enforces |
 | [codebase-law.md](codebase-law.md) | Use the code graph before structural work; keep answers structural |
 | [obsidian-law.md](obsidian-law.md) | Consult, update and close out the project vault for every task |
 
