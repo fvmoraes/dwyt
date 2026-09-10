@@ -197,7 +197,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// (e.g. an incompatible version) made the daemon lose that race and get
 	// killed just as it would have finished starting. Codebase readiness is
 	// not required for the dashboard itself, so it must not gate it.
-	warmCodebase(procmanInstance, "http://127.0.0.1:9749/health")
+	codebaseWarmDone := warmCodebase(procmanInstance, "http://127.0.0.1:9749/health")
 
 	// MCP config sync, vault migration and the Headroom probe moved to
 	// ordered background tasks (startup.go) — see the dashboard-first note
@@ -207,10 +207,16 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	headroomBin := toolPathFor(dwytBin, toolsource.ToolHeadroom, sources)
 	procmanInstance.Register("headroom", headroomBin, "/health", headroomPort, "proxy", "--port", "{port}")
 
-	headroomHealthURL := fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort)
-	if health.ProbeURL(headroomHealthURL) {
-		rs.RegisterProcess("headroom", 0, headroomPort)
-	}
+	// The service reconciler takes over after the warmup attempt: it adopts
+	// healthy instances, publishes lifecycle states and performs bounded
+	// recovery for dead auto-start services (svcctl.go). The warmup gate
+	// keeps the two owners from racing the same process.
+	svcCtl := newServiceReconciler(procmanInstance, rs, reconcilerOptions{
+		waitWarmDone: codebaseWarmDone,
+		healthURLs: map[string]string{
+			"headroom": fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort),
+		},
+	})
 
 	ds := &DashboardServer{
 		Port:            port,
@@ -228,6 +234,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		HeadroomPort:    headroomPort,
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
+		SvcCtl:          svcCtl,
 	}
 	ds.setHeadroomPort(headroomPort)
 	// The Optimizer reports Brain health and housekeeping state, but must not
@@ -489,12 +496,16 @@ func (ds *DashboardServer) Start() error {
 	fmt.Printf("   Dashboard → http://localhost:%d\n", ds.Port)
 
 	ds.startHeadroomIfNeeded()
-	ds.startMCPsIfNeeded()
 	// Dashboard-first: ordered background reconciliation (vault migrations,
 	// MCP config sync, stats, probes) runs now that the server is about to
 	// bind — its housekeeper_start task must stay last so the deep pass
 	// never races the migrations.
 	ds.startBackgroundReconciliation()
+	// The reconciler's first pass is gated on the startup warmCodebase
+	// attempt; from then on it observes, adopts and recovers with backoff.
+	if ds.SvcCtl != nil {
+		ds.SvcCtl.Run()
+	}
 
 	return r.Run(addr)
 }
@@ -616,21 +627,6 @@ func (ds *DashboardServer) startHeadroomIfNeeded() {
 			ds.configureHeadroomClients(ds.DefaultProject)
 		} else {
 			log.Warn("headroom started but not healthy", log.Fields{"port": status.Port})
-		}
-	}()
-}
-
-func (ds *DashboardServer) startMCPsIfNeeded() {
-	go func() {
-		time.Sleep(2 * time.Second)
-
-		if _, err := os.Stat(ds.codebasePath()); err == nil {
-			if st, err := ds.ProcMan.Start("codebase"); err == nil && st.Running {
-				log.Info("mcp codebase auto-started", log.Fields{"port": st.Port})
-				ds.RuntimeState.RegisterProcess("codebase", st.PID, st.Port)
-			} else {
-				log.Warn("mcp codebase start failed", log.Fields{"error": err})
-			}
 		}
 	}()
 }

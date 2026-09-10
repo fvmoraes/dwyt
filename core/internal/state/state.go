@@ -18,6 +18,9 @@ type ProcessInfo struct {
 	Port      int       `json:"port,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	Healthy   bool      `json:"healthy"`
+	// State is the reconciler's lifecycle state (starting/healthy/degraded/
+	// failed/stopped). Additive field: pre-v5 state.json files simply lack it.
+	State     string    `json:"state,omitempty"`
 	LastError string    `json:"last_error,omitempty"`
 	Uptime    int64     `json:"uptime_secs,omitempty"`
 }
@@ -119,17 +122,45 @@ func (s *RuntimeState) SetToolError(tool, msg string) {
 
 // ── Process tracking ──────────────────────────────────────────────────────
 
-// RegisterProcess adds or updates a managed process in the state.
+// RegisterProcess adds or updates a managed process in the state. The
+// reconciler's lifecycle State is preserved across (re)registrations so a
+// health refresh never erases a just-published transition.
 func (s *RuntimeState) RegisterProcess(name string, pid, port int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prevState := ""
+	if prev, ok := s.Processes[name]; ok {
+		prevState = prev.State
+	}
 	s.Processes[name] = ProcessInfo{
 		Name:      name,
 		PID:       pid,
 		Port:      port,
 		StartedAt: time.Now(),
 		Healthy:   true,
+		State:     prevState,
 	}
+	s.maybeSave()
+}
+
+// SetProcessState records the reconciler's lifecycle state for a managed
+// process (starting/healthy/degraded/failed/stopped). Unlike
+// SetProcessHealthy it also applies when no process is registered (e.g. a
+// service that failed to spawn).
+func (s *RuntimeState) SetProcessState(name, state, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.Processes[name]
+	if !ok {
+		p = ProcessInfo{Name: name}
+	}
+	p.State = state
+	if errMsg != "" {
+		p.LastError = errMsg
+	} else if state == "healthy" {
+		p.LastError = ""
+	}
+	s.Processes[name] = p
 	s.maybeSave()
 }
 

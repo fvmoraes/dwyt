@@ -74,6 +74,10 @@ type DashboardServer struct {
 	// Housekeeper enforces Brain retention: the 100-session limit, TTLs, stale
 	// detection and raw pruning, always promoting reusable knowledge first.
 	Housekeeper *housekeeper.Housekeeper
+	// SvcCtl is the service reconciler: the single watchdog that adopts
+	// healthy instances, publishes lifecycle states and recovers dead
+	// auto-start services with bounded backoff.
+	SvcCtl *ServiceReconciler `json:"-"`
 	// Telemetry is the request and task ledger behind cost-per-completed-task.
 	Telemetry *telemetry.Store
 	// V5Config is the consolidated DWYT v5 configuration (spec §57).
