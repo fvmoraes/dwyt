@@ -1,0 +1,23 @@
+version: "2"
+
+# Minimal, additive configuration: the three default linters plus the ones
+# that catch the specific bug classes this project cares about (goroutine
+# lifecycle, swallowed errors, nil handling). Escalate gradually — do not
+# dump the full linter catalog on a codebase that is being fine-tuned.
+linters:
+  enable:
+    # already default: errcheck, govet, staticcheck
+    - thelper     # test helpers must call t.Helper()
+    - nilerr      # returning nil when err != nil hides failures
+    - unconvert   # redundant conversions hide real type intent
+    - copyloopvar # Go 1.22+ loop-var copies are unnecessary
+  exclusions:
+    rules:
+      # Test files legitimately sleep and discard some returns.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
