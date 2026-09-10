@@ -53,19 +53,17 @@ func TestEntryContractPreservesUserContent(t *testing.T) {
 
 func TestEntryContractDoesNotDuplicateExistingBlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
-	writeOrUpdateInstructionFile(path, "")
-	once, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeOrUpdateInstructionFile(path, string(once))
+	// Production always calls with a FRESH template (integrate.go), even
+	// when the file already carries a managed block from a previous setup.
+	writeOrUpdateInstructionFile(path, dwytInstructions())
+	writeOrUpdateInstructionFile(path, dwytInstructions())
+
 	twice, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if string(once) != string(twice) {
-		t.Fatal("re-running setup duplicated or altered the managed block")
+	if got := strings.Count(string(twice), instructionMarkerStart); got != 1 {
+		t.Fatalf("re-running setup duplicated the managed block: %d blocks", got)
 	}
 }
 
@@ -105,7 +103,7 @@ func TestLawsAreNotPastedIntoClientInstructions(t *testing.T) {
 // exactly one canonical Optimizer Law, linked from the docs index, and the
 // three laws present (Fine-Tuning §13.6 consistency checks).
 func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
-	law, err := os.ReadFile(filepath.Join("..", "..", "docs", "optimizer-law.md"))
+	law, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "optimizer-law.md"))
 	if err != nil {
 		t.Fatalf("canonical optimizer law missing: %v", err)
 	}
@@ -115,7 +113,7 @@ func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
 		}
 	}
 
-	index, err := os.ReadFile(filepath.Join("..", "..", "docs", "readme.md"))
+	index, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "readme.md"))
 	if err != nil {
 		t.Fatalf("docs index missing: %v", err)
 	}
@@ -124,7 +122,7 @@ func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
 	}
 
 	for _, lawFile := range []string{"optimizer-law.md", "codebase-law.md", "obsidian-law.md"} {
-		if _, err := os.Stat(filepath.Join("..", "..", "docs", lawFile)); err != nil {
+		if _, err := os.Stat(filepath.Join("..", "..", "..", "docs", lawFile)); err != nil {
 			t.Errorf("law file %s missing", lawFile)
 		}
 	}
