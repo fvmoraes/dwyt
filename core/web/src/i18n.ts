@@ -22,8 +22,9 @@ export const T = {
     tokensSavedLabel: 'Tokens saved', uptime: 'Active', repos: 'Repos',
     scope: 'Scope', port: 'Port', requests: 'Requests', compression: 'Compression',
     commands: 'Commands', savingsPct: '% savings', activeSince: 'Active',
-    // Card status — 3 states
+    // Card status — lifecycle states (unknown is never rendered as offline)
     notInstalled: 'Not Installed', inactive: 'Inactive', active: 'Active',
+    cardStarting: 'Starting', degraded: 'Degraded', failed: 'Failed', unknownState: 'Unknown',
     // Card actions
     start: '▶ Start', stop: '■ Stop',
     index: 'Index', indexing: '...',
@@ -176,6 +177,7 @@ export const T = {
     commands: 'Comandos', savingsPct: '% economia', activeSince: 'Ativo',
     // 3 estados
     notInstalled: 'Não instalado', inactive: 'Inativo', active: 'Ativo',
+    cardStarting: 'Iniciando', degraded: 'Degradado', failed: 'Falhou', unknownState: 'Desconhecido',
     start: '▶ Iniciar', stop: '■ Parar',
     index: 'Indexar', indexing: '...',
     openGraph: 'Abrir Grafo →', openStats: 'Abrir Stats →',

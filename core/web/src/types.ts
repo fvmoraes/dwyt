@@ -6,6 +6,10 @@ export interface ToolInfo {
   healthy: boolean
   details: string
   error?: string
+  /** Reconciler lifecycle state (starting/healthy/degraded/failed/stopped). */
+  runtime_state?: string
+  /** Observed MCP session activity; absent/unknown means not observable. */
+  mcp_activity?: string
 }
 
 export interface ToolDetail {
@@ -33,7 +37,7 @@ export interface ToolDetail {
 
 export type Details = Record<string, ToolDetail>
 
-export type ToolState = 'not_installed' | 'inactive' | 'active'
+export type ToolState = 'not_installed' | 'inactive' | 'active' | 'starting' | 'degraded' | 'failed' | 'unknown'
 
 export interface BadgeText {
   icon: string

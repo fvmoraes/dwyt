@@ -45,7 +45,8 @@ export function RepoRow({ projectName, projectPath, label }: {
 }
 
 function getDotClass(state: ToolState) {
-  if (state === 'not_installed') return 'error'
-  if (state === 'inactive') return 'warn'
+  if (state === 'not_installed' || state === 'failed') return 'error'
+  if (state === 'inactive' || state === 'starting' || state === 'degraded') return 'warn'
+  if (state === 'unknown') return 'offline'
   return 'online'
 }

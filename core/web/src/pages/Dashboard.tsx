@@ -44,7 +44,17 @@ function fmtUptimeFromDet(det: ToolDetail | undefined): string {
   return fmtUptime(det.uptime_secs) || '\u2014'
 }
 
+// toolState derives the display state from BOTH the probe result and the
+// reconciler's lifecycle state. The runtime_state (starting/healthy/
+// degraded/failed) is authoritative when present: a service that is warming
+// up must show "Starting", never a red "Offline" (Cross-Platform §2/§17).
 function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): ToolState {
+  const runtime = tool?.runtime_state
+  if (runtime === 'starting') return 'starting'
+  if (runtime === 'degraded') return 'degraded'
+  if (runtime === 'failed') return 'failed'
+  if (runtime === 'healthy') return 'active'
+  if (runtime === 'stopped') return 'unknown'
   const raw = tool?.status || tool?.state
   if (raw === 'not_installed' || raw === 'error') return 'not_installed'
   if (raw === 'online' || raw === 'installed') return 'active'
@@ -55,6 +65,10 @@ function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): Too
 
 function badge(s: ToolState, t: Record<string, string>): BadgeText {
   if (s === 'not_installed') return { icon: '\uD83D\uDD34', text: t.notInstalled, color: 'var(--red)' }
+  if (s === 'failed') return { icon: '\uD83D\uDD34', text: t.failed, color: 'var(--red)' }
+  if (s === 'starting') return { icon: '\uD83D\uDFE1', text: t.cardStarting, color: 'var(--peach)' }
+  if (s === 'degraded') return { icon: '\uD83D\uDFE1', text: t.degraded, color: 'var(--peach)' }
+  if (s === 'unknown') return { icon: '\u26AA', text: t.unknownState, color: 'var(--muted)' }
   if (s === 'inactive') return { icon: '\uD83D\uDFE1', text: t.inactive, color: 'var(--peach)' }
   return { icon: '\uD83D\uDFE2', text: t.active, color: 'var(--green)' }
 }

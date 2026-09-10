@@ -28,7 +28,79 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
-	c.JSON(200, status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil))
+	c.JSON(200, ds.enrichSystemStatus(status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil)))
+}
+
+// procToolName maps a RuntimeState/procman process name to the status tool
+// name it surfaces as on the dashboard.
+func procToolName(proc string) string {
+	switch proc {
+	case "codebase":
+		return "codebase-memory-mcp"
+	case "headroom":
+		return "headroom"
+	case "obsidian":
+		return "obsidian"
+	default:
+		return proc
+	}
+}
+
+// enrichSystemStatus overlays the reconciler's lifecycle states and MCP
+// activity on the probe-derived status. The probes answer "is the HTTP
+// health endpoint answering right now"; the reconciler answers "what phase
+// of its lifecycle is the managed service in" — both facts travel together
+// so the UI never has to collapse unknown into offline.
+func (ds *DashboardServer) enrichSystemStatus(all *status.SystemStatus) *status.SystemStatus {
+	if all == nil || ds.RuntimeState == nil {
+		return all
+	}
+	for i := range all.Tools {
+		t := &all.Tools[i]
+		proc := rsNameForTool(t.Name)
+		if proc == "" {
+			continue
+		}
+		if info, ok := ds.RuntimeState.GetProcess(proc); ok {
+			if info.State != "" {
+				t.RuntimeState = info.State
+			}
+			if t.Port == 0 && info.Port > 0 {
+				t.Port = info.Port
+			}
+			if t.Error == "" && info.LastError != "" && info.State != "" && info.State != "healthy" {
+				t.Error = info.LastError
+			}
+		}
+		// MCP session activity is only observable where DWYT sits in the
+		// traffic path; DWYT never fabricates it. Filled by later telemetry
+		// hooks — honest empty means unknown.
+		t.MCPActivity = mcpActivityFor(proc)
+	}
+	return all
+}
+
+// rsNameForTool maps a status tool name to the runtime-state process key.
+func rsNameForTool(tool string) string {
+	switch tool {
+	case "codebase-memory-mcp":
+		return "codebase"
+	case "headroom":
+		return "headroom"
+	case "obsidian":
+		return "obsidian"
+	default:
+		return ""
+	}
+}
+
+// mcpActivityFor reports observed MCP session activity for a process key.
+// DWYT currently observes codebase traffic indirectly (stdio sessions are
+// client-owned), so the honest value is "unknown" until activity telemetry
+// lands; a constant placeholder would be a lie on the dashboard.
+func mcpActivityFor(proc string) string {
+	_ = proc
+	return "unknown"
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {

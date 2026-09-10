@@ -43,6 +43,14 @@ type ToolStatus struct {
 	Port    int          `json:"port,omitempty"`
 	Details string       `json:"details,omitempty"`
 	Error   string       `json:"error,omitempty"`
+	// RuntimeState is the reconciler's lifecycle state (starting/healthy/
+	// degraded/failed/stopped/unknown) for DWYT-managed services. Additive:
+	// the probe-derived Status above stays untouched for older consumers.
+	RuntimeState string `json:"runtime_state,omitempty"`
+	// MCPActivity is the last observed client-side MCP session activity.
+	// Only filled where DWYT actually observes traffic; otherwise it stays
+	// empty/unknown — never fabricated into offline (honest telemetry).
+	MCPActivity string `json:"mcp_activity,omitempty"`
 }
 
 type SystemStatus struct {
