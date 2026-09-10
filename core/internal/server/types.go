@@ -96,4 +96,14 @@ type DashboardServer struct {
 	codebaseIndexCancel context.CancelFunc
 	headroomStartMu     sync.Mutex
 	savingsMu           sync.Mutex
+	// Dashboard-first startup: non-critical boot work runs as ordered
+	// background tasks after the bind. startupTasksOverride replaces the
+	// real task list in tests; startupDone closes when the loop finishes.
+	startupTasksOverride []startupTask
+	startupDone          <-chan struct{}
+	startupCancel        context.CancelFunc
+	// hasSetupConfig/setupConfig mirror the persisted setup so background
+	// tasks (MCP config sync) can act on it after New() returned.
+	hasSetupConfig bool
+	setupConfig    Config
 }

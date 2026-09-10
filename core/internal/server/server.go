@@ -20,10 +20,8 @@ import (
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
-	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
-	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/platform"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -107,7 +105,11 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// values rather than being reconfigured after the fact.
 	v5cfg := loadedV5Config(dwytHome)
 
-	brain.MigrateOldMemoryDirs(dwytHome)
+	// NOTE (dashboard-first startup): the heavy non-critical work that used to
+	// run synchronously here — brain.MigrateOldMemoryDirs, vault stats,
+	// MCP config sync, runVaultMigration, EnsureCanonicalLayout/MigrateToV5,
+	// the Headroom probe — moved to ordered background tasks executed after
+	// the bind. See startup.go; the relative ordering is preserved there.
 
 	rs := state.Init(dwytHome)
 	rs.SetVersion(releaseVersion)
@@ -152,20 +154,18 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// ghost vaults were born: every start directory got a scaffold folder and
 	// none of it was ever claimed. Unregistered start directories get their
 	// vault the moment the project is added via the dashboard or setup.
+	//
+	// The vault attach stays in the critical boot path because every vault
+	// handler reads ds.ProjectObsidian directly; the stats scan over it is a
+	// background task (taskVaultStats).
 	if brainErr = vaultAttachError(store, project); brainErr == nil {
 		pb, brainErr = brain.NewProjectObsidian(dwytHome, project)
 	}
 	if brainErr != nil {
 		log.Error("failed to init Obsidian vault", log.Fields{"error": brainErr.Error()})
 		rs.ToolErrors["obsidian"] = brainErr.Error()
-	} else {
-		if hasSetupCfg {
-			pb.SetConfig(setupCfg.Ias, setupCfg.Tools)
-		}
-		stats := pb.Stats()
-		if c, ok := stats["total_files"].(int); ok {
-			rs.UpdateProjectObsidian(project, c)
-		}
+	} else if hasSetupCfg {
+		pb.SetConfig(setupCfg.Ias, setupCfg.Tools)
 	}
 
 	procmanInstance := procman.New(dwytHome)
@@ -173,16 +173,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	codebaseBin := toolPathFor(dwytBin, toolsource.ToolCodebase, sources)
 	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, codebaseProcessArgs()...)
 
-	// The Obsidian MCP runs over stdio and is spawned on demand by each AI
-	// client from the command written into its config. It is intentionally
-	// not registered with ProcessManager: there is no HTTP port to healthcheck,
-	// no persistent process to supervise, and no benefit to a daemon launch —
-	// the AI client is the lifecycle owner. The validator here only ensures
-	// the main `dwyt` binary is present; it never copies a renamed copy.
-	if err := install.ObsidianMCP(dwytBin); err != nil {
-		log.Warn("obsidian MCP validation failed", log.Fields{"error": err.Error()})
-	}
-
+	// Obsidian MCP stdio validation moved to a background task
+	// (taskObsidianMCPValidation in startup.go).
 	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
 
 	security.Load(dwytHome)
@@ -207,29 +199,9 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// not required for the dashboard itself, so it must not gate it.
 	warmCodebase(procmanInstance, "http://127.0.0.1:9749/health")
 
-	// Reconcile the AI clients' MCP configs at startup. A full sync removes
-	// DWYT's historical server keys — a pre-v5 "codebase" entry kept showing
-	// up next to dwyt_codebase in client MCP panels because scoped per-card
-	// syncs deliberately never touch another card's leftovers — and rewrites
-	// the canonical wiring, so users do not depend on re-running setup after
-	// an upgrade. Scoped to the clients the user actually selected.
-	if hasSetupCfg && project != "" && len(setupCfg.Ias) > 0 {
-		if reg, err := mcpregistry.Load(); err == nil {
-			if err := reg.ConfigureMCP(project, setupCfg.Ias); err != nil {
-				log.Warn("mcp config sync had failures", log.Fields{"error": err.Error()})
-			} else {
-				log.Info("mcp configs synced", log.Fields{"clients": strings.Join(setupCfg.Ias, ",")})
-			}
-		} else {
-			log.Warn("mcp registry unavailable for config sync", log.Fields{"error": err.Error()})
-		}
-	}
-
-	// Adopt the canonical "<hash>_<name>" layout for any pre-existing
-	// "<hash>" vault directories. This runs once at startup and is fully
-	// idempotent — already-canonical directories are no-ops, and
-	// unidentifiable directories are left alone for the user to resolve.
-	runVaultMigration(dwytHome, store)
+	// MCP config sync, vault migration and the Headroom probe moved to
+	// ordered background tasks (startup.go) — see the dashboard-first note
+	// at the top of New().
 
 	headroomPort := configuredHeadroomPort()
 	headroomBin := toolPathFor(dwytBin, toolsource.ToolHeadroom, sources)
@@ -270,28 +242,9 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		rs.ToolErrors["config"] = v5cfg.err.Error()
 	}
 
-	// Bring the Brain to the v5 layout. Both calls are additive and idempotent,
-	// so this is safe on every startup; a failure leaves the pre-v5 vault
-	// working and is retried next time.
-	if pb != nil {
-		if err := pb.EnsureCanonicalLayout(); err != nil {
-			log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
-		}
-		report := pb.MigrateToV5(brain.V5MigrationOptions{
-			KeepLatestSessions: v5cfg.cfg.Housekeeper.Sessions.KeepLatest,
-		})
-		if report.CanonicalSeeded > 0 || report.SessionsConverted > 0 || report.SessionsCompiled > 0 {
-			log.Info("brain: migrated to the v5 layout", log.Fields{
-				"canonical_seeded":   report.CanonicalSeeded,
-				"sessions_converted": report.SessionsConverted,
-				"sessions_compiled":  report.SessionsCompiled,
-				"knowledge_promoted": len(report.KnowledgePromoted),
-			})
-		}
-		for _, e := range report.Errors {
-			log.Warn("brain: v5 migration issue", log.Fields{"error": e})
-		}
-	}
+	// Brain v5 layout migration moved to a background task
+	// (taskBrainV5Migration in startup.go); the Housekeeper construction
+	// stays here because Start() and the API handlers depend on it.
 	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Optimizer.RawStore())
 	ds.Optimizer.SetHousekeeperStatusProvider(ds.Housekeeper)
 
@@ -327,6 +280,11 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 			}
 		}()
 	}
+
+	// The setup snapshot feeds background tasks (MCP config sync) that run
+	// after New() has returned.
+	ds.hasSetupConfig = hasSetupCfg
+	ds.setupConfig = setupCfg
 
 	return ds
 }
@@ -532,11 +490,11 @@ func (ds *DashboardServer) Start() error {
 
 	ds.startHeadroomIfNeeded()
 	ds.startMCPsIfNeeded()
-	if ds.Housekeeper != nil {
-		// Runs a deep pass now and then on the configured interval. Both are
-		// goroutines, so a large vault never delays the daemon coming up.
-		ds.Housekeeper.Start()
-	}
+	// Dashboard-first: ordered background reconciliation (vault migrations,
+	// MCP config sync, stats, probes) runs now that the server is about to
+	// bind — its housekeeper_start task must stay last so the deep pass
+	// never races the migrations.
+	ds.startBackgroundReconciliation()
 
 	return r.Run(addr)
 }
