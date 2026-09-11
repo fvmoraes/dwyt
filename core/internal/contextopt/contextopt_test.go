@@ -195,7 +195,7 @@ func TestTrimCutsNoiseBeforeKnowledge(t *testing.T) {
 	}
 }
 
-func TestTrimCollapsesDuplicatesFirst(t *testing.T) {
+func TestTrimCollapsesDuplicatesWhenNeeded(t *testing.T) {
 	items := []ContextCandidate{
 		{ID: "a", Kind: KindFileSummary, Tokens: 400, ContentHash: "same"},
 		{ID: "b", Kind: KindFileSummary, Tokens: 400, ContentHash: "same"},
@@ -209,18 +209,89 @@ func TestTrimCollapsesDuplicatesFirst(t *testing.T) {
 	}
 }
 
-func TestTrimCompactsResolvedInsteadOfDeleting(t *testing.T) {
+func TestTrimUsesNormativeCutOrder(t *testing.T) {
 	items := []ContextCandidate{
-		{ID: "fixed", Kind: KindError, Tokens: 2000, State: StateResolved, ContentHash: "h1"},
+		{ID: "raw", Kind: KindRawLog, Tokens: 100, ContentHash: "raw"},
+		{ID: "first-copy", Kind: KindFileSummary, Tokens: 100, ContentHash: "same"},
+		{ID: "second-copy", Kind: KindFileSummary, Tokens: 100, ContentHash: "same"},
+	}
+	res := Trim(items, 100, RankInput{Cost: DefaultCostModel()})
+	if len(res.Removed) != 2 {
+		t.Fatalf("expected raw and duplicate removals, got %+v", res.Removed)
+	}
+	if res.Removed[0].Reason != ReasonResolvedRaw || res.Removed[1].Reason != ReasonDuplicate {
+		t.Fatalf("got cut order %q then %q, want %q then %q", res.Removed[0].Reason, res.Removed[1].Reason, ReasonResolvedRaw, ReasonDuplicate)
+	}
+}
+
+func TestTrimCompactsResolvedNonCriticalContent(t *testing.T) {
+	items := []ContextCandidate{
+		{ID: "fixed", Kind: KindToolOutput, Tokens: 2000, State: StateResolved, ContentHash: "h1"},
 		{ID: "live", Kind: KindError, Tokens: 200, ContentHash: "h2"},
 	}
 	res := Trim(items, 400, RankInput{Cost: DefaultCostModel()})
 	if len(res.Compacted) != 1 {
-		t.Fatalf("a resolved error should be compacted to a line, got %+v", res)
+		t.Fatalf("resolved non-critical content should be compacted to a line, got %+v", res)
 	}
 	for _, c := range res.Kept {
 		if c.ID == "fixed" && c.Tokens >= 2000 {
-			t.Fatal("resolved error kept its full size")
+			t.Fatal("resolved non-critical content kept its full size")
+		}
+	}
+}
+
+func TestTrimNeverDeduplicatesCriticalEvidence(t *testing.T) {
+	items := []ContextCandidate{
+		{ID: "first-error", Kind: KindError, Tokens: 100, ContentHash: "same-error"},
+		{ID: "second-error", Kind: KindError, Tokens: 100, ContentHash: "same-error"},
+	}
+	res := Trim(items, 10, RankInput{Cost: DefaultCostModel()})
+	if len(res.Kept) != len(items) {
+		t.Fatalf("critical evidence must survive duplicate handling, got %+v", res)
+	}
+	if res.TargetMet {
+		t.Fatal("TargetMet must be false when critical evidence overshoots the target")
+	}
+	for _, removed := range res.Removed {
+		if removed.Reason == ReasonDuplicate {
+			t.Fatalf("critical evidence was deduplicated: %+v", removed)
+		}
+	}
+}
+
+func TestTrimPreservesCriticalEvidenceWhenTargetIsImpossible(t *testing.T) {
+	items := []ContextCandidate{
+		{ID: "active-error", Kind: KindError, Tokens: 100, ContentHash: "active-error", ContentRef: "dwyt://objects/active-error"},
+		{ID: "resolved-error", Kind: KindError, Tokens: 100, State: StateResolved, ContentHash: "resolved-error", ContentRef: "dwyt://objects/resolved-error"},
+		{ID: "constraint", Kind: KindConstraint, Tokens: 100, ContentHash: "constraint"},
+		{ID: "pinned", Kind: KindRawLog, Tokens: 100, State: StateDiscardable, Pinned: true, ContentHash: "pinned"},
+		{ID: "noise", Kind: KindToolOutput, Tokens: 100, State: StateDiscardable, ContentHash: "noise"},
+	}
+	res := Trim(items, 50, RankInput{Cost: DefaultCostModel()})
+	if res.TargetMet {
+		t.Fatal("TargetMet must be false when only critical evidence remains over budget")
+	}
+
+	kept := make(map[string]ContextCandidate, len(res.Kept))
+	for _, candidate := range res.Kept {
+		kept[candidate.ID] = candidate
+	}
+	for _, id := range []string{"active-error", "resolved-error", "constraint", "pinned"} {
+		if _, ok := kept[id]; !ok {
+			t.Fatalf("critical evidence %q was cut: %+v", id, res)
+		}
+	}
+	if kept["resolved-error"].Tokens != 100 || kept["resolved-error"].ContentRef != "dwyt://objects/resolved-error" {
+		t.Fatalf("resolved error must retain its raw reference and full metadata: %+v", kept["resolved-error"])
+	}
+	for _, candidate := range res.Compacted {
+		if candidate.ID == "active-error" || candidate.ID == "resolved-error" || candidate.ID == "constraint" || candidate.ID == "pinned" {
+			t.Fatalf("critical evidence was compacted: %+v", candidate)
+		}
+	}
+	for _, removed := range res.Removed {
+		if removed.Candidate.ID == "active-error" || removed.Candidate.ID == "resolved-error" || removed.Candidate.ID == "constraint" || removed.Candidate.ID == "pinned" {
+			t.Fatalf("critical evidence was removed: %+v", removed)
 		}
 	}
 }

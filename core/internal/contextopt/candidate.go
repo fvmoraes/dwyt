@@ -45,9 +45,9 @@ const (
 )
 
 // State is the lifecycle state of a candidate (spec §6.1, §13). The garbage
-// collector drops candidates in a fixed order derived from this field, so a
-// resolved error is always discarded before a still-relevant architecture
-// note, no matter how the scores compare.
+// collector drops candidates in a fixed order derived from this field. A
+// resolved non-critical candidate may be compacted before a still-relevant
+// architecture note, while critical evidence remains intact.
 type State string
 
 const (
@@ -55,8 +55,9 @@ const (
 	StateActive State = "active"
 	// StateReference is durable knowledge consulted by summary.
 	StateReference State = "reference"
-	// StateResolved is context whose problem no longer exists; it can be
-	// compacted to a single line.
+	// StateResolved is context whose problem no longer exists. Non-critical
+	// candidates may be compacted to a single line; critical evidence remains
+	// intact even after resolution.
 	StateResolved State = "resolved"
 	// StateStale is context superseded by a newer observation.
 	StateStale State = "stale"

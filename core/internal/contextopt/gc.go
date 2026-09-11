@@ -35,8 +35,8 @@ type Trimmed struct {
 type GCResult struct {
 	Kept    []ContextCandidate `json:"kept"`
 	Removed []Trimmed          `json:"removed"`
-	// Compacted are candidates that were not dropped but replaced by a
-	// one-line reference (spec §13: a resolved error becomes a useful line).
+	// Compacted are non-critical candidates that were not dropped but replaced
+	// by a one-line reference (spec §13: resolved context remains useful).
 	Compacted     []ContextCandidate `json:"compacted,omitempty"`
 	TokensBefore  int                `json:"tokens_before"`
 	TokensAfter   int                `json:"tokens_after"`
@@ -51,7 +51,9 @@ type trimTier struct {
 	match  func(ContextCandidate) bool
 }
 
-// trimOrder is the normative cut order from spec §43.
+// trimOrder is the normative cut order from Fase 6. Exact duplicates are
+// removed only after resolved/raw content, so GCResult exposes the reason and
+// sequence required to explain a budget decision.
 func trimOrder() []trimTier {
 	return []trimTier{
 		{ReasonDiscardable, func(c ContextCandidate) bool {
@@ -65,6 +67,7 @@ func trimOrder() []trimTier {
 			// recoverable by reference and must not occupy the window.
 			return c.State == StateResolved || c.Kind == KindRawLog
 		}},
+		{ReasonDuplicate, nil},
 		{ReasonVolatileExcess, func(c ContextCandidate) bool {
 			return c.CacheClass == CacheVolatile
 		}},
@@ -83,9 +86,8 @@ func trimOrder() []trimTier {
 }
 
 // Trim reduces a candidate set until its token total fits target, following
-// the normative cut order. Pinned candidates are never removed. Duplicate
-// content hashes are collapsed first, before any tier runs, because removing a
-// duplicate loses no information at all.
+// the normative cut order. Critical evidence (errors, constraints, and pinned
+// context) is never removed or compacted, even if that leaves TargetMet false.
 func Trim(candidates []ContextCandidate, target int, in RankInput) GCResult {
 	res := GCResult{}
 	working := make([]ContextCandidate, 0, len(candidates))
@@ -94,23 +96,6 @@ func Trim(candidates []ContextCandidate, target int, in RankInput) GCResult {
 		working = append(working, c)
 		res.TokensBefore += c.Tokens
 	}
-
-	// Pass 0: exact-duplicate collapse. Keeps the first occurrence, which
-	// after Rank is the highest-ROI one.
-	seenHash := make(map[string]bool, len(working))
-	deduped := make([]ContextCandidate, 0, len(working))
-	for _, c := range working {
-		if c.ContentHash != "" && !c.Pinned {
-			if seenHash[c.ContentHash] {
-				res.Removed = append(res.Removed, Trimmed{Candidate: c, Reason: ReasonDuplicate, Tokens: c.Tokens})
-				res.TokensRemoved += c.Tokens
-				continue
-			}
-			seenHash[c.ContentHash] = true
-		}
-		deduped = append(deduped, c)
-	}
-	working = deduped
 
 	total := tokenSum(working)
 	if total <= target {
@@ -125,7 +110,12 @@ func Trim(candidates []ContextCandidate, target int, in RankInput) GCResult {
 			break
 		}
 		// Within a tier, drop the worst ROI first so the cut is defensible.
-		idx := eligibleIndexes(working, tier.match)
+		var idx []int
+		if tier.reason == ReasonDuplicate {
+			idx = duplicateIndexes(working)
+		} else {
+			idx = eligibleIndexes(working, tier.match)
+		}
 		sort.SliceStable(idx, func(a, b int) bool {
 			sa := Score(working[idx[a]], in)
 			sb := Score(working[idx[b]], in)
@@ -182,10 +172,29 @@ func Trim(candidates []ContextCandidate, target int, in RankInput) GCResult {
 // for "resolved: TS2345 in ResourceTable" and no more.
 const compactedLineTokens = 12
 
+// duplicateIndexes finds redundant non-critical candidates at the duplicate
+// tier. Critical evidence is intentionally not entered into seenHash: a
+// matching non-critical candidate may carry a different useful representation.
+func duplicateIndexes(candidates []ContextCandidate) []int {
+	seenHash := make(map[string]bool, len(candidates))
+	var out []int
+	for i, c := range candidates {
+		if c.ContentHash == "" || isCriticalEvidence(c) {
+			continue
+		}
+		if seenHash[c.ContentHash] {
+			out = append(out, i)
+			continue
+		}
+		seenHash[c.ContentHash] = true
+	}
+	return out
+}
+
 func eligibleIndexes(candidates []ContextCandidate, match func(ContextCandidate) bool) []int {
 	var out []int
 	for i, c := range candidates {
-		if c.Pinned {
+		if isCriticalEvidence(c) {
 			continue
 		}
 		if match(c) {
@@ -193,6 +202,13 @@ func eligibleIndexes(candidates []ContextCandidate, match func(ContextCandidate)
 		}
 	}
 	return out
+}
+
+// isCriticalEvidence implements Optimizer Law 7 with the current candidate
+// taxonomy. There is no KindFailure yet; failures must arrive as KindError or
+// be pinned until a more precise kind is introduced.
+func isCriticalEvidence(c ContextCandidate) bool {
+	return c.Pinned || c.Kind == KindError || c.Kind == KindConstraint
 }
 
 func tokenSum(candidates []ContextCandidate) int {
