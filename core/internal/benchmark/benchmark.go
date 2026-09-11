@@ -42,6 +42,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/contextopt"
 	"github.com/fvmoraes/dwyt/internal/outputopt"
+	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/fvmoraes/dwyt/internal/toolopt"
 )
 
@@ -93,6 +94,10 @@ type Scenario struct {
 	// Turns is how many agent turns the scenario runs, which is what makes the
 	// long agentic case differ from a single fix.
 	Turns int `json:"turns"`
+
+	// CompressionExpectation makes the negative and no-op fixture behavior
+	// inspectable in the normal dwyt bench report.
+	CompressionExpectation CompressionExpectation `json:"compression_expectation"`
 }
 
 // candidates returns the candidate view of the block pool.
@@ -160,6 +165,25 @@ type Measurement struct {
 	CacheWriteTokens int `json:"cache_write_tokens"`
 	// OutputBudget is the visible-token target for the final answer.
 	OutputBudget int `json:"output_budget"`
+	// OutputTokens stays nil because this harness does not issue a provider
+	// request. A target budget is not evidence of generated output.
+	OutputTokens *int `json:"output_tokens"`
+
+	// RetrievalTokens, compression metadata, raw recovery and full-file reads
+	// are deterministic counterfactuals from the fixture path. MCP calls,
+	// latency and task completion require a live agent/provider and stay nil.
+	RetrievalTokens           int      `json:"retrieval_tokens"`
+	CompressionMetadataTokens int      `json:"compression_metadata_tokens"`
+	RawRecoveryCount          int      `json:"raw_recovery_count"`
+	FullFileReads             int      `json:"full_file_reads"`
+	MCPCalls                  *int     `json:"mcp_calls"`
+	LatencyMS                 *int     `json:"latency_ms"`
+	TaskPassed                *bool    `json:"task_passed"`
+	TokensPerCompletedTask    *float64 `json:"tokens_per_completed_task"`
+
+	// Provenance labels each required metric. Benchmark values are explicitly
+	// counterfactual rather than masquerading as provider observations.
+	Provenance telemetry.MetricProvenance `json:"provenance"`
 
 	// CostUnits is the cost-model-weighted token cost. It is a relative number
 	// derived from the ranker's cost ratios, not currency: real money needs
@@ -187,6 +211,7 @@ type Result struct {
 	Description string                `json:"description"`
 	Complexity  contextopt.Complexity `json:"complexity"`
 	Turns       int                   `json:"turns"`
+	Compression CompressionOutcome    `json:"compression"`
 	Arms        []Measurement         `json:"arms"`
 }
 
@@ -208,12 +233,14 @@ type Unmeasured struct {
 
 // Totals aggregates one arm over every scenario.
 type Totals struct {
-	Arm              Arm     `json:"arm"`
-	InputTokens      int     `json:"input_tokens"`
-	MemoryTokens     int     `json:"memory_tokens"`
-	ToolOutputTokens int     `json:"tool_output_tokens"`
-	OutputBudget     int     `json:"output_budget"`
-	CostUnits        float64 `json:"cost_units"`
+	Arm                       Arm     `json:"arm"`
+	InputTokens               int     `json:"input_tokens"`
+	MemoryTokens              int     `json:"memory_tokens"`
+	ToolOutputTokens          int     `json:"tool_output_tokens"`
+	RetrievalTokens           int     `json:"retrieval_tokens"`
+	CompressionMetadataTokens int     `json:"compression_metadata_tokens"`
+	OutputBudget              int     `json:"output_budget"`
+	CostUnits                 float64 `json:"cost_units"`
 
 	InputReductionPct      float64 `json:"input_reduction_pct"`
 	ToolOutputReductionPct float64 `json:"tool_output_reduction_pct"`
@@ -261,14 +288,9 @@ func unmeasuredKPIs() []Unmeasured {
 	}
 }
 
-// Scenarios returns the five spec §69 cases.
-//
-// The fixtures are synthetic but deterministic, so a run is reproducible and a
-// regression in the optimizer shows up as a changed number rather than as noise.
-// They are shaped after real DWYT usage: a repository has far more context
-// available than any single task needs, most vault notes are session history
-// rather than knowledge, and build/test output is dominated by lines that carry
-// no information.
+// Scenarios returns the eleven deterministic Phase 9 cases. Their structural
+// metadata lives in code while their representative tool payloads are embedded
+// from testdata, keeping dwyt bench reproducible without a network or LLM.
 func Scenarios() []Scenario {
 	return []Scenario{
 		trivialScenario(),
@@ -276,6 +298,12 @@ func Scenarios() []Scenario {
 		mediumGoScenario(),
 		complexRefactorScenario(),
 		longAgenticScenario(),
+		passingTestOutputScenario(),
+		largeJSONScenario(),
+		largeLogScenario(),
+		historicalRecallScenario(),
+		compressionNegativeScenario(),
+		noCompressionScenario(),
 	}
 }
 
@@ -295,6 +323,8 @@ func Run() Report {
 			t.InputTokens += m.InputTokens
 			t.MemoryTokens += m.MemoryTokens
 			t.ToolOutputTokens += m.ToolOutputTokens
+			t.RetrievalTokens += m.RetrievalTokens
+			t.CompressionMetadataTokens += m.CompressionMetadataTokens
 			t.OutputBudget += m.OutputBudget
 			t.CostUnits += m.CostUnits
 		}
@@ -331,17 +361,19 @@ func RunScenario(s Scenario) Result {
 	if turns < 1 {
 		turns = 1
 	}
+	compression := compactScenarioOutput(s)
 	r := Result{
 		Scenario:    s.ID,
 		Name:        s.Name,
 		Description: s.Description,
 		Complexity:  s.Complexity,
 		Turns:       turns,
+		Compression: compressionOutcome(s, compression),
 	}
 
 	base := measureBaseline(s, turns)
 	current := measureCurrent(s, turns)
-	optimized, cached := measureOptimizedArms(s, turns)
+	optimized, cached := measureOptimizedArms(s, turns, compression)
 
 	r.Arms = []Measurement{base, current, optimized, cached}
 	for i := range r.Arms {
@@ -351,8 +383,41 @@ func RunScenario(s Scenario) Result {
 		m.OutputReductionPct = reduction(base.OutputBudget, m.OutputBudget)
 		m.CostReductionPct = reductionF(base.CostUnits, m.CostUnits)
 		m.MemoryReductionVsCurrentPct = memoryReduction(current.MemoryTokens, m.MemoryTokens)
+		setBenchmarkMetricProvenance(m)
 	}
 	return r
+}
+
+func compactScenarioOutput(s Scenario) toolopt.Compacted {
+	if strings.TrimSpace(s.ToolOutput) == "" {
+		return toolopt.Compacted{}
+	}
+	compacted := toolopt.Compact(s.ToolOutput, toolopt.Options{})
+	compacted.RawRef = "dwyt://benchmark/" + s.ID
+	compacted.SentTokensEst = contextopt.EstimateTokens(compacted.Render())
+	return toolopt.ApplyCompressionGate(compacted, toolopt.DefaultMinGainTokens)
+}
+
+func compressionOutcome(s Scenario, compacted toolopt.Compacted) CompressionOutcome {
+	expected := s.CompressionExpectation
+	if expected == "" {
+		expected = CompressionMayApply
+	}
+	if strings.TrimSpace(s.ToolOutput) == "" {
+		return CompressionOutcome{
+			Expected:   expected,
+			Provenance: telemetry.ProvenanceBenchmarkCounterfactual,
+		}
+	}
+	return CompressionOutcome{
+		Attempted:      true,
+		Expected:       expected,
+		PassedThrough:  compacted.PassedThrough,
+		RawTokens:      compacted.RawTokensEst,
+		SentTokens:     compacted.SentTokensEst,
+		MetadataTokens: compacted.CompressionMetadataTokens,
+		Provenance:     telemetry.ProvenanceBenchmarkCounterfactual,
+	}
 }
 
 // memoryReduction compares an arm's vault retrieval against the dwyt_v4 broad
@@ -373,13 +438,23 @@ func memoryReduction(current, arm int) *float64 {
 // This is not a straw man. It is what an agent does by default when nothing
 // constrains it and no retrieval tool is available.
 func measureBaseline(s Scenario, turns int) Measurement {
-	m := Measurement{Arm: ArmBaseline}
+	m := Measurement{Arm: ArmBaseline, FullFileReads: fullFileReadCount(s)}
 	for _, b := range s.Blocks {
 		m.CodeTokens += b.baselineTokens()
 	}
 	m.ToolOutputTokens = contextopt.EstimateTokens(s.ToolOutput)
 	m.OutputBudget = ungovernedOutputTokens
 	return finishResent(m, turns)
+}
+
+func fullFileReadCount(s Scenario) int {
+	count := 0
+	for _, b := range s.Blocks {
+		if b.FullFileTokens > b.Candidate.Tokens {
+			count++
+		}
+	}
+	return count
 }
 
 // measureCurrent models DWYT before v5: the Codebase MCP answers with symbols
@@ -414,6 +489,7 @@ func finishResent(m Measurement, turns int) Measurement {
 	m.CodeTokens *= turns
 	m.MemoryTokens *= turns
 	m.ToolOutputTokens *= turns
+	m.FullFileReads *= turns
 	m.InputTokens = perTurn * turns
 	// No cache awareness: every token is billed at the uncached rate.
 	m.CostUnits = float64(m.InputTokens) * contextopt.DefaultCostModel().Uncached
@@ -433,7 +509,7 @@ func finishResent(m Measurement, turns int) Measurement {
 // Reporting both is the honest answer to "which is cheaper": the plain arm sends
 // fewer tokens, the cache arm can cost less per token. Which one wins depends on
 // the provider's cache ratio, so the harness measures instead of asserting.
-func measureOptimizedArms(s Scenario, turns int) (Measurement, Measurement) {
+func measureOptimizedArms(s Scenario, turns int, compression toolopt.Compacted) (Measurement, Measurement) {
 	cost := contextopt.DefaultCostModel()
 	budget := contextopt.ComputeBudget(contextopt.BudgetProfile{
 		Phase:      s.Phase,
@@ -442,11 +518,8 @@ func measureOptimizedArms(s Scenario, turns int) (Measurement, Measurement) {
 	outputBudget := outputopt.ProfileFor(s.Phase).TargetTokens
 
 	memoryTokens := optimizedMemoryTokens(s.VaultNotes)
-
-	toolTokens := 0
-	if strings.TrimSpace(s.ToolOutput) != "" {
-		toolTokens = contextopt.EstimateTokens(toolopt.Compact(s.ToolOutput, toolopt.Options{}).Render())
-	}
+	toolTokens := compression.SentTokensEst
+	compressionMetadata := compression.CompressionMetadataTokens
 
 	// Code: rank by Token ROI and fit into what the budget leaves after memory
 	// and tool output.
@@ -480,43 +553,47 @@ func measureOptimizedArms(s Scenario, turns int) (Measurement, Measurement) {
 	firstTurnTotal := firstTurnCode + memoryTokens + toolTokens
 
 	plain := Measurement{
-		Arm:              ArmOptimized,
-		CodeTokens:       firstTurnCode,
-		MemoryTokens:     memoryTokens,
-		ToolOutputTokens: toolTokens,
-		InputTokens:      firstTurnTotal,
-		OutputBudget:     outputBudget,
+		Arm:                       ArmOptimized,
+		CodeTokens:                firstTurnCode,
+		MemoryTokens:              memoryTokens,
+		ToolOutputTokens:          toolTokens,
+		CompressionMetadataTokens: compressionMetadata,
+		InputTokens:               firstTurnTotal,
+		OutputBudget:              outputBudget,
 	}
 	cached := Measurement{
-		Arm:              ArmOptimizedCached,
-		CodeTokens:       firstTurnCode,
-		MemoryTokens:     memoryTokens,
-		ToolOutputTokens: toolTokens,
-		InputTokens:      firstTurnTotal,
-		OutputBudget:     outputBudget,
+		Arm:                       ArmOptimizedCached,
+		CodeTokens:                firstTurnCode,
+		MemoryTokens:              memoryTokens,
+		ToolOutputTokens:          toolTokens,
+		CompressionMetadataTokens: compressionMetadata,
+		InputTokens:               firstTurnTotal,
+		OutputBudget:              outputBudget,
 		// Turn one populates the cache entry, which costs a one-off premium.
 		CacheWriteTokens: stableTokens,
 	}
 
 	for turn := 2; turn <= turns; turn++ {
-		delta, deltaTool := changedTokensForTurn(s, turn)
+		delta, deltaTool, deltaMetadata := changedTokensForTurn(s, turn)
 
 		// Plain arm: only what changed, plus the compact state that stands in
 		// for the prefix it chose not to resend.
 		plain.InputTokens += delta + deltaTool + stateTokens
 		plain.CodeTokens += delta
 		plain.ToolOutputTokens += deltaTool
+		plain.CompressionMetadataTokens += deltaMetadata
 		plain.ReusedTokens += stableTokens
 
 		// Cache arm: the prefix goes back on the wire, billed as a cache read.
 		cached.InputTokens += stableTokens + delta + deltaTool
 		cached.CodeTokens += delta
 		cached.ToolOutputTokens += deltaTool
+		cached.CompressionMetadataTokens += deltaMetadata
 		cached.CacheReadTokens += stableTokens
 	}
 
-	plain.CostUnits = float64(plain.InputTokens) * cost.Uncached
-	cached.CostUnits = float64(cached.InputTokens-cached.CacheReadTokens-cached.CacheWriteTokens)*cost.Uncached +
+	plain.CostUnits = float64(plain.InputTokens+plain.CompressionMetadataTokens) * cost.Uncached
+	cached.CostUnits = float64(cached.InputTokens-cached.CacheReadTokens-cached.CacheWriteTokens+cached.CompressionMetadataTokens)*cost.Uncached +
 		float64(cached.CacheReadTokens)*cost.CacheRead +
 		float64(cached.CacheWriteTokens)*cost.CacheWrite
 	if cached.CostUnits < 0 {
@@ -561,21 +638,25 @@ func optimizedMemoryTokens(notes []VaultNote) int {
 }
 
 // changedTokensForTurn is how much genuinely new context a later turn needs,
-// split into code delta and tool output delta.
+// split into code delta, tool payload and compression metadata.
 //
 // Modelled as a small delta: a turn in a real session adds an error, a diff or a
 // symbol, not the whole repository. The numbers are deliberately conservative
 // stand-ins — assuming a tiny delta would flatter the optimizer.
-func changedTokensForTurn(s Scenario, turn int) (code int, tool int) {
+func changedTokensForTurn(s Scenario, turn int) (code int, tool int, metadata int) {
 	code = 350
 	if s.Complexity == contextopt.ComplexityComplex || s.Complexity == contextopt.ComplexityCritical {
 		code = 600
 	}
-	// Every third turn hits a fresh tool run, which costs a compacted output.
+	// Every third turn hits a fresh tool run. The same deterministic fixture
+	// models its payload and metadata; a real run reports these values through
+	// dwyt_report_usage instead of reusing this counterfactual.
 	if turn%3 == 0 && strings.TrimSpace(s.ToolOutput) != "" {
-		tool = contextopt.EstimateTokens(toolopt.Compact(s.ToolOutput, toolopt.Options{}).Render())
+		compacted := compactScenarioOutput(s)
+		tool = compacted.SentTokensEst
+		metadata = compacted.CompressionMetadataTokens
 	}
-	return code, tool
+	return code, tool, metadata
 }
 
 func reduction(baseline, arm int) float64 {
@@ -612,6 +693,13 @@ func (r Report) Render() string {
 				m.Arm, m.InputTokens, m.MemoryTokens, m.ToolOutputTokens, m.OutputBudget,
 				m.InputReductionPct, pct(m.MemoryReductionVsCurrentPct), m.CostReductionPct)
 		}
+		if res.Compression.Attempted {
+			fmt.Fprintf(&b, "  compression: expected=%s passed_through=%t raw=%d sent=%d metadata=%d (%s)\n",
+				res.Compression.Expected, res.Compression.PassedThrough, res.Compression.RawTokens,
+				res.Compression.SentTokens, res.Compression.MetadataTokens, res.Compression.Provenance)
+		} else {
+			fmt.Fprintf(&b, "  compression: expected=%s not attempted (%s)\n", res.Compression.Expected, res.Compression.Provenance)
+		}
 		b.WriteString("\n")
 	}
 
@@ -626,7 +714,8 @@ func (r Report) Render() string {
 	b.WriteString("\nAll -% columns are percent reductions. INPUT, TOOL, OUT and COST are\n")
 	b.WriteString("relative to the baseline arm. MEM-% is relative to dwyt_v4, because the\n")
 	b.WriteString("baseline consults no project memory at all: it reports n/a rather than a\n")
-	b.WriteString("flattering 100%. COST-% uses the ranker's cost-model ratios, not currency.\n")
+	b.WriteString("flattering 100%. COST-% uses the ranker's cost-model ratios, including expected\n")
+	b.WriteString("recovery overhead, not currency.\n")
 
 	b.WriteString("\nNOT MEASURED by this harness:\n")
 	for _, u := range r.Unmeasured {

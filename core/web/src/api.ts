@@ -15,6 +15,12 @@ function statusQuery(projectPath?: string): string {
   return projectPath ? `?path=${encodeURIComponent(projectPath)}` : ''
 }
 
+function telemetryQuery(window: string, projectPath?: string): string {
+  const params = new URLSearchParams({ window })
+  if (projectPath) params.set('path', projectPath)
+  return `?${params.toString()}`
+}
+
 export async function getStatus(projectPath?: string): Promise<StatusPayload> {
   const r = await fetch(`${API}/status${statusQuery(projectPath)}`)
   return jsonOrThrow(r) as Promise<StatusPayload>
@@ -385,6 +391,8 @@ export async function refreshKiroPower(): Promise<KiroPowerStatus> {
 // than "0%": a fabricated zero would understate cache effectiveness and
 // overstate cost, which is exactly the misleading metric v5 set out to remove.
 
+export type MetricProvenance = Record<string, 'observed' | 'estimated' | 'benchmark_counterfactual' | 'unsupported'>
+
 export interface TelemetrySummary {
   window: string
   requests: number
@@ -395,6 +403,9 @@ export interface TelemetrySummary {
   cache_write_tokens: number
   output_tokens: number
   reasoning_tokens: number
+  tool_tokens: number
+  latency_ms: number
+  compression_metadata_tokens: number
   cache_hit_pct: number | null
   context_reduction_pct: number | null
   context_before: number
@@ -408,9 +419,15 @@ export interface TelemetrySummary {
   cost_per_completed_task: number | null
   tokens_per_completed_task: number | null
   avg_attempts: number | null
+  provenance: MetricProvenance
   coverage: {
+    input_reported_requests: number
+    output_reported_requests: number
+    tool_reported_requests: number
+    latency_reported_requests: number
     cache_reported_requests: number
     context_reported_requests: number
+    compression_metadata_reported_requests: number
     cost_reported_requests: number
   }
 }
@@ -481,9 +498,39 @@ export interface TelemetryPayload {
   cache_capability?: CacheCapability
 }
 
-export async function getTelemetrySummary(window = '6h'): Promise<TelemetryPayload> {
-  const r = await fetch(`${API}/telemetry/summary?window=${encodeURIComponent(window)}`)
+export async function getTelemetrySummary(window = '6h', projectPath?: string): Promise<TelemetryPayload> {
+  const r = await fetch(`${API}/telemetry/summary${telemetryQuery(window, projectPath)}`)
   return parseJSON(r) as Promise<TelemetryPayload>
+}
+
+// Net savings is diagnostics-only. It is nullable whenever any input is
+// incomplete, including an external MCP schema catalog that DWYT cannot measure.
+export interface StartupTaxCoverage {
+  total_mcps: number
+  measured_mcps: number
+  unknown_mcps: number
+}
+
+export interface NetSavingsReport {
+  window: string
+  gross_avoided_tokens: number | null
+  startup_schema_tax_tokens: number
+  managed_instruction_tax_tokens: number
+  compression_metadata_tokens: number | null
+  net_estimated_tokens: number | null
+  coverage_observed_requests: number
+  coverage_requests: number
+  coverage_context_requests: number
+  coverage_compression_metadata_requests: number
+  startup_tax_coverage: StartupTaxCoverage
+  metric_provenance: MetricProvenance
+  provenance: 'observed' | 'estimated' | 'benchmark_counterfactual' | 'unsupported'
+  reason?: string
+}
+
+export async function getNetSavings(window = '6h', projectPath?: string): Promise<NetSavingsReport> {
+  const r = await fetch(`${API}/diagnostics/net-savings${telemetryQuery(window, projectPath)}`)
+  return parseJSON(r) as Promise<NetSavingsReport>
 }
 
 // ── Session summary ──────────────────────────────────────────────────────────

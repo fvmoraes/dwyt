@@ -1,0 +1,25 @@
+{
+  "request_id": "fixture-20260911",
+  "operation": "index_repository",
+  "project": "example-service",
+  "files": [
+    {"path": "cmd/api/main.go", "language": "go", "symbols": 18, "tokens": 1640},
+    {"path": "internal/auth/handler.go", "language": "go", "symbols": 31, "tokens": 2980},
+    {"path": "internal/auth/service.go", "language": "go", "symbols": 27, "tokens": 2440},
+    {"path": "internal/auth/store.go", "language": "go", "symbols": 22, "tokens": 2160},
+    {"path": "internal/billing/invoice.go", "language": "go", "symbols": 36, "tokens": 3190},
+    {"path": "internal/billing/ledger.go", "language": "go", "symbols": 29, "tokens": 2680},
+    {"path": "internal/catalog/query.go", "language": "go", "symbols": 24, "tokens": 2210},
+    {"path": "internal/catalog/search.go", "language": "go", "symbols": 33, "tokens": 3070},
+    {"path": "internal/notify/email.go", "language": "go", "symbols": 20, "tokens": 1880},
+    {"path": "internal/notify/webhook.go", "language": "go", "symbols": 26, "tokens": 2390},
+    {"path": "web/src/pages/Orders.tsx", "language": "typescript", "symbols": 42, "tokens": 3610},
+    {"path": "web/src/pages/Settings.tsx", "language": "typescript", "symbols": 38, "tokens": 3380}
+  ],
+  "diagnostics": [
+    {"severity": "info", "message": "index shard 1 of 12 complete"},
+    {"severity": "info", "message": "index shard 2 of 12 complete"},
+    {"severity": "info", "message": "index shard 3 of 12 complete"},
+    {"severity": "warning", "message": "generated files excluded by policy"}
+  ]
+}

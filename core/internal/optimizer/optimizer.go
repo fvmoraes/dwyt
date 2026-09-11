@@ -777,6 +777,9 @@ type Usage struct {
 
 	ContextBeforeDWYT *int `json:"context_before_dwyt,omitempty"`
 	ContextAfterDWYT  *int `json:"context_after_dwyt,omitempty"`
+	// CompressionMetadataTokens is expected recovery overhead not included in
+	// ContextAfterDWYT. Nil is unmeasured; explicit zero means no such cost.
+	CompressionMetadataTokens *int `json:"compression_metadata_tokens,omitempty"`
 
 	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
 	ActualCostUSD    *float64 `json:"actual_cost_usd,omitempty"`
@@ -788,7 +791,9 @@ type Usage struct {
 
 	// Observed is true when the numbers came from the provider rather than
 	// from a DWYT estimate (spec §39, §52). Never set it for an estimate.
-	Observed bool `json:"observed"`
+	// Provenance refines that legacy request-wide flag for every metric.
+	Observed   bool                       `json:"observed"`
+	Provenance telemetry.MetricProvenance `json:"provenance,omitempty"`
 
 	// CachedHashes are the prefix hashes the provider confirmed as cache
 	// reads; they feed the ranker's cost model.

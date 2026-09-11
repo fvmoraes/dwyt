@@ -144,8 +144,8 @@ func TestStartupTaxRegressionGate(t *testing.T) {
 
 func TestStartupTaxBaseline(t *testing.T) {
 	baseline := loadStartupTaxBaseline(t)
-	if baseline.Version != 1 {
-		t.Fatalf("baseline version = %d, want 1", baseline.Version)
+	if baseline.Version != 2 {
+		t.Fatalf("baseline version = %d, want 2", baseline.Version)
 	}
 
 	report := MeasureStartupTax([]byte(integrate.InstructionBlock()))

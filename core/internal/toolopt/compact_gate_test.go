@@ -104,3 +104,19 @@ func TestDoubleCompactNeverLosesStatus(t *testing.T) {
 		t.Fatalf("compact output re-expanded: %d → %d tokens", first.RawTokensEst, second.RawTokensEst)
 	}
 }
+func TestGateCountsRawRefInsideSentPayload(t *testing.T) {
+	c := Compacted{
+		Status:        "pass",
+		RawRef:        "dwyt://objects/abcdef12",
+		SentTokensEst: 50,
+	}
+	c.RawTokensEst = c.SentTokensEst + RecoveryOverheadTokens + DefaultMinGainTokens
+
+	out := ApplyCompressionGate(c, DefaultMinGainTokens)
+	if out.PassedThrough {
+		t.Fatalf("gain at the recovery-adjusted threshold must compress: raw=%d sent=%d recovery=%d min=%d", c.RawTokensEst, c.SentTokensEst, RecoveryOverheadTokens, DefaultMinGainTokens)
+	}
+	if out.CompressionMetadataTokens != RecoveryOverheadTokens {
+		t.Fatalf("metadata = %d, want recovery overhead %d", out.CompressionMetadataTokens, RecoveryOverheadTokens)
+	}
+}

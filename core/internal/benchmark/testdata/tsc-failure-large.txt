@@ -1,0 +1,36 @@
+> dwyt-web@0.0.0 build
+> tsc -b && vite build
+transforming (1) node_modules/react/index.js
+transforming (2) node_modules/react/index.js
+transforming (3) node_modules/react/index.js
+transforming (4) node_modules/react/index.js
+transforming (5) node_modules/react/index.js
+transforming (6) node_modules/react/index.js
+transforming (7) node_modules/react/index.js
+transforming (8) node_modules/react/index.js
+transforming (9) node_modules/react/index.js
+transforming (10) node_modules/react/index.js
+transforming (11) node_modules/react/index.js
+transforming (12) node_modules/react/index.js
+transforming (13) node_modules/react/index.js
+transforming (14) node_modules/react/index.js
+transforming (15) node_modules/react/index.js
+src/components/CardOptimizer.tsx(40,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/components/CardOptimizer.tsx(41,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/components/CardOptimizer.tsx(42,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/components/CardOptimizer.tsx(43,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/components/CardOptimizer.tsx(44,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/components/CardOptimizer.tsx(45,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.
+src/api.ts(88,3): error TS2739: Type 'Partial<OptimizerState>' is missing properties.
+src/hooks/useOptimizer.ts(21,9): warning TS6133: 'prev' is declared but its value is never read.
+[=========>          ] building 3%
+[=========>          ] building 6%
+[=========>          ] building 9%
+[=========>          ] building 12%
+[=========>          ] building 15%
+[=========>          ] building 18%
+[=========>          ] building 21%
+[=========>          ] building 24%
+[=========>          ] building 27%
+[=========>          ] building 30%
+Found 7 errors.

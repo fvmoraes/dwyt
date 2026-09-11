@@ -6,6 +6,7 @@ import {
   runHousekeeper,
   type HousekeeperReport,
   type TelemetryPayload,
+  type TelemetrySummary,
 } from '../api'
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
   badge: (s: ToolState) => BadgeText
   fmtN: (n: number | undefined) => string
   window: string
+  projectPath?: string
 }
 
 // Dashboard v5 card (spec §55, §56).
@@ -25,7 +27,7 @@ interface Props {
 //     DWYT's own favour (it makes "before DWYT" look worse).
 //   - Observed and estimated cost are separate rows. Merging them would produce
 //     a number the user cannot act on.
-export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Props) {
+export default function CardOptimizer({ t, badge, fmtN, window: windowName, projectPath }: Props) {
   const [payload, setPayload] = useState<TelemetryPayload | null>(null)
   const [report, setReport] = useState<HousekeeperReport | null>(null)
   const [busy, setBusy] = useState(false)
@@ -35,7 +37,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
     let cancelled = false
     const load = async () => {
       try {
-        const data = await getTelemetrySummary(windowName)
+        const data = await getTelemetrySummary(windowName, projectPath)
         if (!cancelled) {
           setPayload(data)
           setError('')
@@ -50,7 +52,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       cancelled = true
       clearInterval(timer)
     }
-  }, [windowName])
+  }, [windowName, projectPath])
 
   const summary = payload?.summary
   const brain = payload?.brain
@@ -76,7 +78,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
   const sessionsLabel =
     keeper?.sessions_retained !== undefined && keeper?.sessions_limit !== undefined
       ? `${keeper.sessions_retained} / ${keeper.sessions_limit}`
-      : '\u2014'
+      : '—'
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -84,11 +86,11 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       <Hr />
 
       <Row label={t.optimizerContextReduction} value={pct(summary?.context_reduction_pct)} />
-      <Row label={t.optimizerAvoidedTokens} value={fmtN(summary?.avoided_tokens)} />
+      <Row label={t.optimizerAvoidedTokens} value={avoidedTokens(summary)} />
       <Row label={t.optimizerCacheHit} value={pct(summary?.cache_hit_pct)} />
       <Row
         label={t.optimizerCacheControl}
-        value={capability?.state ?? '\u2014'}
+        value={capability?.state ?? '—'}
         title={capability?.note || t.optimizerCacheControlHint}
       />
       <Row
@@ -98,7 +100,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       />
       <Row
         label={t.optimizerCostEstimated}
-        value={summary && summary.estimated_cost_usd > 0 ? `~$${summary.estimated_cost_usd.toFixed(4)}` : '\u2014'}
+        value={estimatedCost(summary)}
         title={t.optimizerEstimatedHint}
       />
       <Row label={t.optimizerCostPerTask} value={usdOrDash(summary?.cost_per_completed_task)} />
@@ -111,7 +113,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
       <Row label={t.optimizerExpiringSoon} value={fmtN(brain?.expiring_within_24h)} />
       <Row
         label={t.optimizerRawObjects}
-        value={raw?.enabled ? `${fmtN(raw.objects)} (${fmtBytes(raw.bytes)})` : '\u2014'}
+        value={raw?.enabled ? `${fmtN(raw.objects)} (${fmtBytes(raw.bytes)})` : '—'}
       />
       <Row label={t.optimizerLastHousekeeping} value={keeper?.last_run ? fmtWhen(keeper.last_run) : t.optimizerNever} />
 
@@ -162,22 +164,41 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName }: Pr
   )
 }
 
+// avoidedTokens checks aggregate provenance before rendering a numeric total.
+// A partial context window is not a partial savings claim; it is unsupported.
+function avoidedTokens(summary: TelemetrySummary | undefined): string {
+  const provenance = summary?.provenance?.avoided_tokens
+  if (!summary || provenance === undefined || provenance === 'unsupported') return '—'
+  return fmtKnownTokens(summary.avoided_tokens)
+}
+
+function estimatedCost(summary: TelemetrySummary | undefined): string {
+  if (summary?.provenance?.estimated_cost_usd !== 'estimated') return '—'
+  return `~$${summary.estimated_cost_usd.toFixed(4)}`
+}
+
+function fmtKnownTokens(value: number): string {
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M'
+  if (value >= 1_000) return (value / 1_000).toFixed(0) + 'K'
+  return String(value)
+}
+
 // pct renders a nullable percentage. A null value means "not measured", which
 // must never be shown as 0%.
 function pct(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '\u2014'
+  if (value === null || value === undefined) return '—'
   return `${value.toFixed(1)}%`
 }
 
 // usd renders an observed cost. It requires at least one request to have
 // reported a real cost, otherwise the figure is not an observation.
 function usd(value: number | undefined, reportedRequests: number | undefined): string {
-  if (!reportedRequests || value === undefined) return '\u2014'
+  if (!reportedRequests || value === undefined) return '—'
   return `$${value.toFixed(4)}`
 }
 
 function usdOrDash(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '\u2014'
+  if (value === null || value === undefined) return '—'
   return `$${value.toFixed(4)}`
 }
 
@@ -195,7 +216,7 @@ function fmtBytes(bytes: number | undefined): string {
 
 function fmtWhen(iso: string): string {
   const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '\u2014'
+  if (Number.isNaN(then)) return '—'
   const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000))
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`

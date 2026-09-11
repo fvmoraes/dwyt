@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,22 +42,24 @@ func TestNetSavingsUnknownWhenNoTelemetry(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Provenance != "unknown" {
-		t.Fatalf("provenance = %q, want unknown", payload.Provenance)
+	if payload.Provenance != telemetry.ProvenanceUnsupported {
+		t.Fatalf("provenance = %q, want unsupported", payload.Provenance)
 	}
-	if payload.GrossAvoidedTokens != nil {
-		t.Fatal("gross must stay nil (unknown), not 0")
+	if payload.GrossAvoidedTokens != nil || payload.NetEstimatedTokens != nil {
+		t.Fatalf("unknown window must not fabricate gross/net values: %+v", payload)
+	}
+	if payload.Reason == "" {
+		t.Fatal("unsupported net savings needs an explicit reason")
 	}
 }
 
-func TestNetSavingsDerivationSubtractsTaxes(t *testing.T) {
+func TestNetSavingsEndpointPropagatesPartialStartupTaxCoverage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := diagTestStore(t)
-	before := 100000
-	after := 50000
+	before, after, metadata := 100000, 50000, 0
 	if err := store.RecordRequest(telemetry.RequestEvent{
 		ID: "evt-1", ProjectID: db.HashPath("/tmp/proj"), Model: "m", Timestamp: time.Now(),
-		ContextBefore: &before, ContextAfter: &after, Observed: false,
+		ContextBefore: &before, ContextAfter: &after, CompressionMetadataTokens: &metadata,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,31 +68,87 @@ func TestNetSavingsDerivationSubtractsTaxes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/diagnostics/net-savings?window=7d", nil)
-
 	ds.apiNetSavings(ctx)
 
 	var payload NetSavingsReport
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Provenance != "estimated" || payload.GrossAvoidedTokens == nil {
-		t.Fatalf("expected estimated report with gross, got %+v", payload)
+	if payload.GrossAvoidedTokens == nil || *payload.GrossAvoidedTokens != 50000 {
+		t.Fatalf("gross avoided = %+v, want 50000", payload.GrossAvoidedTokens)
 	}
-	if *payload.GrossAvoidedTokens != 50000 {
-		t.Fatalf("gross avoided = %d, want 50000", *payload.GrossAvoidedTokens)
+	if payload.CompressionMetadataTokens == nil || *payload.CompressionMetadataTokens != 0 {
+		t.Fatalf("explicit zero compression metadata did not round-trip: %+v", payload.CompressionMetadataTokens)
 	}
-	tax := mcp.MeasureStartupTax([]byte(integrate.InstructionBlock()))
-	wantNet := 50000 - tax.TotalEstimatedTokens
-	if *payload.NetEstimatedTokens != wantNet {
-		t.Fatalf("net = %d, want gross minus one complete startup tax (%d)", *payload.NetEstimatedTokens, wantNet)
+	if payload.NetEstimatedTokens != nil || payload.Provenance != telemetry.ProvenanceUnsupported {
+		t.Fatalf("partial startup coverage must keep net unsupported: %+v", payload)
 	}
-	if payload.StartupSchemaTaxTokens <= 0 {
-		t.Fatal("startup tax must be included in the derivation")
-	}
-	if payload.StartupSchemaTaxTokens+payload.ManagedInstructionTaxTokens != tax.TotalEstimatedTokens {
-		t.Fatalf("reported tax components double-count or omit instruction tax: schema=%d instruction=%d total=%d", payload.StartupSchemaTaxTokens, payload.ManagedInstructionTaxTokens, tax.TotalEstimatedTokens)
+	if payload.StartupTaxCoverage.UnknownMCPs == 0 || !strings.Contains(payload.Reason, "startup schema tax excludes") {
+		t.Fatalf("startup coverage was not propagated: %+v", payload)
 	}
 }
+
+func TestNetSavingsUnknownForPartialContextCoverage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := diagTestStore(t)
+	before, after, metadata := 100, 20, 0
+	projectID := db.HashPath("/tmp/proj")
+	if err := store.RecordRequest(telemetry.RequestEvent{ProjectID: projectID, ContextBefore: &before, ContextAfter: &after, CompressionMetadataTokens: &metadata}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordRequest(telemetry.RequestEvent{ProjectID: projectID, InputTokens: &before}); err != nil {
+		t.Fatal(err)
+	}
+
+	ds := &DashboardServer{Telemetry: store, DefaultProject: "/tmp/proj"}
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/diagnostics/net-savings?window=7d", nil)
+	ds.apiNetSavings(ctx)
+
+	var payload NetSavingsReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.GrossAvoidedTokens != nil || payload.NetEstimatedTokens != nil {
+		t.Fatalf("partial context must be unknown, not zero/partial: %+v", payload)
+	}
+	if !strings.Contains(payload.Reason, "context before/after reported for 1 of 2") {
+		t.Fatalf("unexpected reason: %q", payload.Reason)
+	}
+}
+
+func TestNetSavingsDerivationSubtractsTaxes(t *testing.T) {
+	sum := telemetry.Summary{
+		Requests:                  1,
+		AvoidedTokens:             50000,
+		CompressionMetadataTokens: 125,
+		Coverage: telemetry.Coverage{
+			ContextReported:             1,
+			CompressionMetadataReported: 1,
+		},
+		Provenance: telemetry.MetricProvenance{
+			telemetry.MetricAvoidedTokens:             telemetry.ProvenanceObserved,
+			telemetry.MetricCompressionMetadataTokens: telemetry.ProvenanceEstimated,
+		},
+	}
+	tax := mcp.StartupTaxReport{
+		Coverage:                 mcp.StartupTaxCoverage{TotalMCPs: 1, MeasuredMCPs: 1},
+		TotalEstimatedTokens:     1000,
+		ManagedInstructionTokens: 100,
+	}
+	payload := deriveNetSavings("7d", sum, tax)
+	if payload.Provenance != telemetry.ProvenanceEstimated || payload.NetEstimatedTokens == nil {
+		t.Fatalf("expected estimated complete report, got %+v", payload)
+	}
+	if want := 50000 - 900 - 100 - 125; *payload.NetEstimatedTokens != want {
+		t.Fatalf("net = %d, want %d", *payload.NetEstimatedTokens, want)
+	}
+	if payload.StartupSchemaTaxTokens != 900 || payload.ManagedInstructionTaxTokens != 100 {
+		t.Fatalf("tax components = schema=%d instruction=%d", payload.StartupSchemaTaxTokens, payload.ManagedInstructionTaxTokens)
+	}
+}
+
 func TestStartupTaxDiagnosticsCountsRealInstructionBlock(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -117,5 +176,69 @@ func TestStartupTaxDiagnosticsCountsRealInstructionBlock(t *testing.T) {
 	}
 	if payload.Provenance != "estimated" {
 		t.Fatalf("provenance = %q, want estimated", payload.Provenance)
+	}
+}
+func TestNetSavingsRejectsBenchmarkCounterfactualInput(t *testing.T) {
+	sum := telemetry.Summary{
+		Requests:                  1,
+		AvoidedTokens:             42,
+		CompressionMetadataTokens: 0,
+		Coverage: telemetry.Coverage{
+			ContextReported:             1,
+			CompressionMetadataReported: 1,
+		},
+		Provenance: telemetry.MetricProvenance{
+			telemetry.MetricAvoidedTokens:             telemetry.ProvenanceBenchmarkCounterfactual,
+			telemetry.MetricCompressionMetadataTokens: telemetry.ProvenanceEstimated,
+		},
+	}
+	tax := mcp.StartupTaxReport{Coverage: mcp.StartupTaxCoverage{TotalMCPs: 1, MeasuredMCPs: 1}}
+	payload := deriveNetSavings("all", sum, tax)
+	if payload.GrossAvoidedTokens == nil || *payload.GrossAvoidedTokens != 42 {
+		t.Fatalf("counterfactual gross should remain inspectable: %+v", payload)
+	}
+	if payload.NetEstimatedTokens != nil || payload.Provenance != telemetry.ProvenanceUnsupported {
+		t.Fatalf("counterfactual input must not become estimated net savings: %+v", payload)
+	}
+	if !strings.Contains(payload.Reason, "benchmark_counterfactual") {
+		t.Fatalf("missing counterfactual explanation: %q", payload.Reason)
+	}
+}
+func TestNetSavingsRejectsMixedCounterfactualWindow(t *testing.T) {
+	store := diagTestStore(t)
+	before, after, metadata := 100, 20, 0
+	for _, event := range []telemetry.RequestEvent{
+		{
+			ID: "counterfactual", ProjectID: "p1", ContextBefore: &before, ContextAfter: &after, CompressionMetadataTokens: &metadata,
+			Provenance: telemetry.MetricProvenance{
+				telemetry.MetricContextBeforeDWYT:         telemetry.ProvenanceBenchmarkCounterfactual,
+				telemetry.MetricContextAfterDWYT:          telemetry.ProvenanceBenchmarkCounterfactual,
+				telemetry.MetricCompressionMetadataTokens: telemetry.ProvenanceBenchmarkCounterfactual,
+			},
+		},
+		{
+			ID: "estimated", ProjectID: "p1", ContextBefore: &before, ContextAfter: &after, CompressionMetadataTokens: &metadata,
+			Provenance: telemetry.MetricProvenance{
+				telemetry.MetricContextBeforeDWYT:         telemetry.ProvenanceEstimated,
+				telemetry.MetricContextAfterDWYT:          telemetry.ProvenanceEstimated,
+				telemetry.MetricCompressionMetadataTokens: telemetry.ProvenanceEstimated,
+			},
+		},
+	} {
+		if err := store.RecordRequest(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sum, err := store.Summarize("p1", time.Unix(0, 0), "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tax := mcp.StartupTaxReport{Coverage: mcp.StartupTaxCoverage{TotalMCPs: 1, MeasuredMCPs: 1}}
+	payload := deriveNetSavings("all", sum, tax)
+	if payload.NetEstimatedTokens != nil || payload.Provenance != telemetry.ProvenanceUnsupported {
+		t.Fatalf("mixed counterfactual window must not produce net savings: %+v", payload)
+	}
+	if !strings.Contains(payload.Reason, "benchmark_counterfactual") {
+		t.Fatalf("missing mixed-window provenance explanation: %q", payload.Reason)
 	}
 }

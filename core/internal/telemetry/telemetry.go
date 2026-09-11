@@ -47,6 +47,10 @@ type RequestEvent struct {
 	// ContextBefore/After measure what DWYT avoided sending.
 	ContextBefore *int `json:"context_before_dwyt,omitempty"`
 	ContextAfter  *int `json:"context_after_dwyt,omitempty"`
+	// CompressionMetadataTokens is expected recovery overhead not included in
+	// ContextAfter. Nil means it was not measured, while an explicit zero means
+	// the request incurred no separate recovery cost.
+	CompressionMetadataTokens *int `json:"compression_metadata_tokens,omitempty"`
 
 	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
 	ActualCostUSD    *float64 `json:"actual_cost_usd,omitempty"`
@@ -56,9 +60,11 @@ type RequestEvent struct {
 
 	LatencyMS *int `json:"latency_ms,omitempty"`
 
-	// Observed is true only when the provider reported the numbers.
-	Observed  bool      `json:"observed"`
-	Timestamp time.Time `json:"ts"`
+	// Observed is retained for backward compatibility. Provenance is the
+	// authoritative per-metric source label and is normalized on persistence.
+	Observed   bool             `json:"observed"`
+	Provenance MetricProvenance `json:"provenance,omitempty"`
+	Timestamp  time.Time        `json:"ts"`
 }
 
 // TaskOutcome is the per-task ledger (spec §53 task_outcomes).
@@ -93,30 +99,47 @@ func New(db *sql.DB) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Keep an explicit migration ledger. CREATE TABLE IF NOT EXISTS alone does
+	// not evolve databases created by a prior DWYT version, so version 2 below
+	// adds its columns without dropping or rewriting historical events.
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS telemetry_schema_migrations (
+			version    INTEGER PRIMARY KEY,
+			name       TEXT NOT NULL,
+			applied_at INTEGER NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS llm_request_events (
-			id                    TEXT PRIMARY KEY,
-			project_id            TEXT NOT NULL,
-			task_id               TEXT,
-			provider              TEXT,
-			model                 TEXT,
-			phase                 TEXT,
-			input_tokens          INTEGER,
-			uncached_input_tokens INTEGER,
-			cached_input_tokens   INTEGER,
-			cache_write_tokens    INTEGER,
-			output_tokens         INTEGER,
-			reasoning_tokens      INTEGER,
-			tool_tokens           INTEGER,
-			context_before        INTEGER,
-			context_after         INTEGER,
-			estimated_cost_usd    REAL,
-			actual_cost_usd       REAL,
-			cache_key_hash        TEXT,
-			prefix_hash           TEXT,
-			latency_ms            INTEGER,
-			observed              INTEGER NOT NULL DEFAULT 0,
-			ts                    INTEGER NOT NULL
+			id                          TEXT PRIMARY KEY,
+			project_id                  TEXT NOT NULL,
+			task_id                     TEXT,
+			provider                    TEXT,
+			model                       TEXT,
+			phase                       TEXT,
+			input_tokens                INTEGER,
+			uncached_input_tokens       INTEGER,
+			cached_input_tokens         INTEGER,
+			cache_write_tokens          INTEGER,
+			output_tokens               INTEGER,
+			reasoning_tokens            INTEGER,
+			tool_tokens                 INTEGER,
+			context_before              INTEGER,
+			context_after               INTEGER,
+			compression_metadata_tokens INTEGER,
+			estimated_cost_usd          REAL,
+			actual_cost_usd             REAL,
+			cache_key_hash              TEXT,
+			prefix_hash                 TEXT,
+			latency_ms                  INTEGER,
+			observed                    INTEGER NOT NULL DEFAULT 0,
+			metric_provenance           TEXT NOT NULL DEFAULT '{}',
+			ts                          INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_llm_events_project_ts
 			ON llm_request_events(project_id, ts);
@@ -124,15 +147,15 @@ func (s *Store) migrate() error {
 			ON llm_request_events(task_id);
 
 		CREATE TABLE IF NOT EXISTS task_outcomes (
-			task_id      TEXT PRIMARY KEY,
-			project_id   TEXT NOT NULL,
-			success      INTEGER NOT NULL DEFAULT 0,
-			tests_pass   INTEGER NOT NULL DEFAULT 0,
-			attempts     INTEGER NOT NULL DEFAULT 0,
+			task_id        TEXT PRIMARY KEY,
+			project_id     TEXT NOT NULL,
+			success        INTEGER NOT NULL DEFAULT 0,
+			tests_pass     INTEGER NOT NULL DEFAULT 0,
+			attempts       INTEGER NOT NULL DEFAULT 0,
 			total_cost_usd REAL NOT NULL DEFAULT 0,
-			total_tokens INTEGER NOT NULL DEFAULT 0,
-			started_at   INTEGER NOT NULL,
-			completed_at INTEGER
+			total_tokens   INTEGER NOT NULL DEFAULT 0,
+			started_at     INTEGER NOT NULL,
+			completed_at   INTEGER
 		);
 		CREATE INDEX IF NOT EXISTS idx_task_outcomes_project
 			ON task_outcomes(project_id, started_at);
@@ -146,7 +169,51 @@ func (s *Store) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_housekeeper_runs
 			ON housekeeper_runs(project_id, ts);
-	`)
+	`); err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO telemetry_schema_migrations(version, name, applied_at) VALUES (1, 'initial request ledger', ?)`, now); err != nil {
+		return err
+	}
+	if err := ensureRequestEventColumn(tx, "compression_metadata_tokens", "INTEGER"); err != nil {
+		return err
+	}
+	if err := ensureRequestEventColumn(tx, "metric_provenance", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO telemetry_schema_migrations(version, name, applied_at) VALUES (2, 'metric provenance and compression metadata', ?)`, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ensureRequestEventColumn performs the additive half of a versioned migration
+// for databases created before the column existed. Identifiers are constants
+// controlled by this package, never caller input.
+func ensureRequestEventColumn(tx *sql.Tx, column, definition string) error {
+	rows, err := tx.Query(`PRAGMA table_info(llm_request_events)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`ALTER TABLE llm_request_events ADD COLUMN ` + column + ` ` + definition)
 	return err
 }
 
@@ -167,6 +234,12 @@ func (s *Store) RecordRequest(e RequestEvent) error {
 		e.ID = eventID(e)
 	}
 
+	e.Provenance = normalizeRequestProvenance(e.Provenance, e.Observed, requestMetricPresence(e))
+	provenanceJSON, err := json.Marshal(e.Provenance)
+	if err != nil {
+		return fmt.Errorf("telemetry: encode metric provenance: %w", err)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -178,18 +251,19 @@ func (s *Store) RecordRequest(e RequestEvent) error {
 			id, project_id, task_id, provider, model, phase,
 			input_tokens, uncached_input_tokens, cached_input_tokens,
 			cache_write_tokens, output_tokens, reasoning_tokens, tool_tokens,
-			context_before, context_after,
+			context_before, context_after, compression_metadata_tokens,
 			estimated_cost_usd, actual_cost_usd,
-			cache_key_hash, prefix_hash, latency_ms, observed, ts
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			cache_key_hash, prefix_hash, latency_ms, observed, metric_provenance, ts
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.ID, e.ProjectID, nullString(e.TaskID), nullString(e.Provider),
 		nullString(e.Model), nullString(e.Phase),
 		nullInt(e.InputTokens), nullInt(e.UncachedInputTokens), nullInt(e.CachedInputTokens),
 		nullInt(e.CacheWriteTokens), nullInt(e.OutputTokens), nullInt(e.ReasoningTokens),
 		nullInt(e.ToolTokens), nullInt(e.ContextBefore), nullInt(e.ContextAfter),
+		nullInt(e.CompressionMetadataTokens),
 		nullFloat(e.EstimatedCostUSD), nullFloat(e.ActualCostUSD),
 		nullString(e.CacheKeyHash), nullString(e.PrefixHash), nullInt(e.LatencyMS),
-		boolToInt(e.Observed), e.Timestamp.Unix(),
+		boolToInt(e.Observed), string(provenanceJSON), e.Timestamp.Unix(),
 	)
 	if err != nil {
 		return err
@@ -264,12 +338,15 @@ type Summary struct {
 	Requests         int `json:"requests"`
 	ObservedRequests int `json:"observed_requests"`
 
-	InputTokens         int `json:"input_tokens"`
-	CachedInputTokens   int `json:"cached_input_tokens"`
-	UncachedInputTokens int `json:"uncached_input_tokens"`
-	CacheWriteTokens    int `json:"cache_write_tokens"`
-	OutputTokens        int `json:"output_tokens"`
-	ReasoningTokens     int `json:"reasoning_tokens"`
+	InputTokens               int `json:"input_tokens"`
+	CachedInputTokens         int `json:"cached_input_tokens"`
+	UncachedInputTokens       int `json:"uncached_input_tokens"`
+	CacheWriteTokens          int `json:"cache_write_tokens"`
+	OutputTokens              int `json:"output_tokens"`
+	ReasoningTokens           int `json:"reasoning_tokens"`
+	ToolTokens                int `json:"tool_tokens"`
+	LatencyMS                 int `json:"latency_ms"`
+	CompressionMetadataTokens int `json:"compression_metadata_tokens"`
 
 	// CacheHitPct is nil when no request reported cache numbers.
 	CacheHitPct *float64 `json:"cache_hit_pct"`
@@ -291,25 +368,35 @@ type Summary struct {
 	TokensPerCompletedTask *float64 `json:"tokens_per_completed_task"`
 	AvgAttempts            *float64 `json:"avg_attempts"`
 
+	// Provenance labels every aggregate independently. A partial aggregate is
+	// unsupported rather than a seemingly precise sum of only some requests.
+	Provenance MetricProvenance `json:"provenance"`
+
 	// Coverage tells the reader how much of this is measured rather than guessed.
 	Coverage Coverage `json:"coverage"`
 }
 
 // Coverage describes how complete the data behind a Summary is.
 type Coverage struct {
-	CacheReported   int `json:"cache_reported_requests"`
-	ContextReported int `json:"context_reported_requests"`
-	CostReported    int `json:"cost_reported_requests"`
+	InputReported               int `json:"input_reported_requests"`
+	OutputReported              int `json:"output_reported_requests"`
+	ToolReported                int `json:"tool_reported_requests"`
+	LatencyReported             int `json:"latency_reported_requests"`
+	CacheReported               int `json:"cache_reported_requests"`
+	ContextReported             int `json:"context_reported_requests"`
+	CompressionMetadataReported int `json:"compression_metadata_reported_requests"`
+	CostReported                int `json:"cost_reported_requests"`
 }
 
 // Summarize aggregates a time window for a project.
 func (s *Store) Summarize(projectID string, since time.Time, window string) (Summary, error) {
-	sum := Summary{Window: window}
+	sum := Summary{Window: window, Provenance: make(MetricProvenance)}
+	rollups := newMetricRollups()
 	rows, err := s.db.Query(`
 		SELECT input_tokens, uncached_input_tokens, cached_input_tokens,
-		       cache_write_tokens, output_tokens, reasoning_tokens,
-		       context_before, context_after,
-		       estimated_cost_usd, actual_cost_usd, observed
+		       cache_write_tokens, output_tokens, reasoning_tokens, tool_tokens,
+		       context_before, context_after, compression_metadata_tokens,
+		       estimated_cost_usd, actual_cost_usd, latency_ms, observed, metric_provenance
 		FROM llm_request_events
 		WHERE project_id = ? AND ts >= ?`, projectID, since.Unix())
 	if err != nil {
@@ -318,23 +405,73 @@ func (s *Store) Summarize(projectID string, since time.Time, window string) (Sum
 	defer rows.Close()
 
 	for rows.Next() {
-		var input, uncached, cached, cacheWrite, output, reasoning sql.NullInt64
-		var before, after sql.NullInt64
+		var input, uncached, cached, cacheWrite, output, reasoning, tool sql.NullInt64
+		var before, after, compressionMetadata, latency sql.NullInt64
 		var estimated, actual sql.NullFloat64
 		var observed int
+		var provenance sql.NullString
 		if err := rows.Scan(&input, &uncached, &cached, &cacheWrite, &output,
-			&reasoning, &before, &after, &estimated, &actual, &observed); err != nil {
+			&reasoning, &tool, &before, &after, &compressionMetadata,
+			&estimated, &actual, &latency, &observed, &provenance); err != nil {
 			return sum, err
 		}
 		sum.Requests++
 		if observed == 1 {
 			sum.ObservedRequests++
 		}
+		rawProvenance := ""
+		if provenance.Valid {
+			rawProvenance = provenance.String
+		}
+		eventProvenance := decodeRequestProvenance(rawProvenance, observed == 1, map[string]bool{
+			MetricInputTokens:               input.Valid,
+			MetricUncachedInputTokens:       uncached.Valid,
+			MetricCachedInputTokens:         cached.Valid,
+			MetricCacheWriteTokens:          cacheWrite.Valid,
+			MetricOutputTokens:              output.Valid,
+			MetricReasoningTokens:           reasoning.Valid,
+			MetricToolTokens:                tool.Valid,
+			MetricContextBeforeDWYT:         before.Valid,
+			MetricContextAfterDWYT:          after.Valid,
+			MetricCompressionMetadataTokens: compressionMetadata.Valid,
+			MetricEstimatedCostUSD:          estimated.Valid,
+			MetricActualCostUSD:             actual.Valid,
+			MetricLatencyMS:                 latency.Valid,
+		})
+		rollups.add(MetricInputTokens, input.Valid, eventProvenance.For(MetricInputTokens))
+		rollups.add(MetricUncachedInputTokens, uncached.Valid, eventProvenance.For(MetricUncachedInputTokens))
+		rollups.add(MetricCachedInputTokens, cached.Valid, eventProvenance.For(MetricCachedInputTokens))
+		rollups.add(MetricCacheWriteTokens, cacheWrite.Valid, eventProvenance.For(MetricCacheWriteTokens))
+		rollups.add(MetricOutputTokens, output.Valid, eventProvenance.For(MetricOutputTokens))
+		rollups.add(MetricReasoningTokens, reasoning.Valid, eventProvenance.For(MetricReasoningTokens))
+		rollups.add(MetricToolTokens, tool.Valid, eventProvenance.For(MetricToolTokens))
+		rollups.add(MetricContextBeforeDWYT, before.Valid, eventProvenance.For(MetricContextBeforeDWYT))
+		rollups.add(MetricContextAfterDWYT, after.Valid, eventProvenance.For(MetricContextAfterDWYT))
+		rollups.add(MetricCompressionMetadataTokens, compressionMetadata.Valid, eventProvenance.For(MetricCompressionMetadataTokens))
+		rollups.add(MetricEstimatedCostUSD, estimated.Valid, eventProvenance.For(MetricEstimatedCostUSD))
+		rollups.add(MetricActualCostUSD, actual.Valid, eventProvenance.For(MetricActualCostUSD))
+		rollups.add(MetricLatencyMS, latency.Valid, eventProvenance.For(MetricLatencyMS))
+
 		addNullInt(&sum.InputTokens, input)
 		addNullInt(&sum.UncachedInputTokens, uncached)
 		addNullInt(&sum.CacheWriteTokens, cacheWrite)
 		addNullInt(&sum.OutputTokens, output)
 		addNullInt(&sum.ReasoningTokens, reasoning)
+		addNullInt(&sum.ToolTokens, tool)
+		addNullInt(&sum.LatencyMS, latency)
+		addNullInt(&sum.CompressionMetadataTokens, compressionMetadata)
+		if input.Valid {
+			sum.Coverage.InputReported++
+		}
+		if output.Valid {
+			sum.Coverage.OutputReported++
+		}
+		if tool.Valid {
+			sum.Coverage.ToolReported++
+		}
+		if latency.Valid {
+			sum.Coverage.LatencyReported++
+		}
 		if cached.Valid {
 			sum.CachedInputTokens += int(cached.Int64)
 			sum.Coverage.CacheReported++
@@ -343,6 +480,9 @@ func (s *Store) Summarize(projectID string, since time.Time, window string) (Sum
 			sum.ContextBefore += int(before.Int64)
 			sum.ContextAfter += int(after.Int64)
 			sum.Coverage.ContextReported++
+		}
+		if compressionMetadata.Valid {
+			sum.Coverage.CompressionMetadataReported++
 		}
 		if actual.Valid {
 			sum.ObservedCostUSD += actual.Float64
@@ -355,18 +495,45 @@ func (s *Store) Summarize(projectID string, since time.Time, window string) (Sum
 		return sum, err
 	}
 
-	// Ratios are only reported when there is data behind them.
-	if sum.Coverage.CacheReported > 0 && sum.InputTokens > 0 {
+	sum.Provenance[MetricRequests] = ProvenanceObserved
+	sum.Provenance[MetricObservedRequests] = ProvenanceObserved
+	for _, metric := range requestMetricNames {
+		sum.Provenance[metric] = rollups.value(metric, sum.Requests)
+	}
+	sum.Provenance[MetricContextBefore] = sum.Provenance[MetricContextBeforeDWYT]
+	sum.Provenance[MetricContextAfter] = sum.Provenance[MetricContextAfterDWYT]
+	sum.Provenance[MetricObservedCostUSD] = rollups.value(MetricActualCostUSD, sum.Requests)
+
+	cacheKnown := rollups.allReported(sum.Requests, MetricInputTokens, MetricCachedInputTokens)
+	if cacheKnown && sum.InputTokens > 0 {
 		pct := float64(sum.CachedInputTokens) / float64(sum.InputTokens) * 100
 		sum.CacheHitPct = &pct
+		sum.Provenance[MetricCacheHitPct] = aggregateProvenance(
+			sum.Provenance[MetricInputTokens], sum.Provenance[MetricCachedInputTokens],
+		)
+	} else {
+		sum.Provenance[MetricCacheHitPct] = ProvenanceUnsupported
 	}
-	if sum.Coverage.ContextReported > 0 && sum.ContextBefore > 0 {
+
+	contextKnown := rollups.allReported(sum.Requests, MetricContextBeforeDWYT, MetricContextAfterDWYT)
+	if contextKnown {
 		sum.AvoidedTokens = sum.ContextBefore - sum.ContextAfter
 		if sum.AvoidedTokens < 0 {
 			sum.AvoidedTokens = 0
 		}
-		pct := float64(sum.AvoidedTokens) / float64(sum.ContextBefore) * 100
-		sum.ContextReductionPct = &pct
+		sum.Provenance[MetricAvoidedTokens] = aggregateProvenance(
+			sum.Provenance[MetricContextBeforeDWYT], sum.Provenance[MetricContextAfterDWYT],
+		)
+		if sum.ContextBefore > 0 {
+			pct := float64(sum.AvoidedTokens) / float64(sum.ContextBefore) * 100
+			sum.ContextReductionPct = &pct
+			sum.Provenance[MetricContextReductionPct] = sum.Provenance[MetricAvoidedTokens]
+		} else {
+			sum.Provenance[MetricContextReductionPct] = ProvenanceUnsupported
+		}
+	} else {
+		sum.Provenance[MetricAvoidedTokens] = ProvenanceUnsupported
+		sum.Provenance[MetricContextReductionPct] = ProvenanceUnsupported
 	}
 
 	if err := s.summarizeTasks(&sum, projectID, since); err != nil {
@@ -421,6 +588,34 @@ func (s *Store) summarizeTasks(sum *Summary, projectID string, since time.Time) 
 		tokens := float64(succeededTokens) / float64(sum.TasksSucceeded)
 		sum.TokensPerCompletedTask = &tokens
 	}
+	if sum.Provenance == nil {
+		sum.Provenance = make(MetricProvenance)
+	}
+	// Task outcomes are locally recorded facts. Derived cost/token rates retain
+	// the conservative estimated label because their constituent request costs
+	// can mix provider observations and DWYT estimates.
+	sum.Provenance[MetricTasks] = ProvenanceObserved
+	sum.Provenance[MetricTasksSucceeded] = ProvenanceObserved
+	if sum.CompletionPct != nil {
+		sum.Provenance[MetricCompletionPct] = ProvenanceObserved
+	} else {
+		sum.Provenance[MetricCompletionPct] = ProvenanceUnsupported
+	}
+	if sum.AvgAttempts != nil {
+		sum.Provenance[MetricAvgAttempts] = ProvenanceObserved
+	} else {
+		sum.Provenance[MetricAvgAttempts] = ProvenanceUnsupported
+	}
+	if sum.CostPerCompletedTask != nil {
+		sum.Provenance[MetricCostPerCompletedTask] = ProvenanceEstimated
+	} else {
+		sum.Provenance[MetricCostPerCompletedTask] = ProvenanceUnsupported
+	}
+	if sum.TokensPerCompletedTask != nil {
+		sum.Provenance[MetricTokensPerCompletedTask] = ProvenanceEstimated
+	} else {
+		sum.Provenance[MetricTokensPerCompletedTask] = ProvenanceUnsupported
+	}
 	return nil
 }
 
@@ -442,8 +637,11 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 	}
 	rows, err := s.db.Query(`
 		SELECT id, task_id, provider, model, phase,
-		       input_tokens, cached_input_tokens, output_tokens,
-		       estimated_cost_usd, actual_cost_usd, prefix_hash, observed, ts
+		       input_tokens, uncached_input_tokens, cached_input_tokens,
+		       cache_write_tokens, output_tokens, reasoning_tokens, tool_tokens,
+		       context_before, context_after, compression_metadata_tokens,
+		       estimated_cost_usd, actual_cost_usd,
+		       cache_key_hash, prefix_hash, latency_ms, observed, metric_provenance, ts
 		FROM llm_request_events
 		WHERE project_id = ?
 		ORDER BY ts DESC LIMIT ?`, projectID, limit)
@@ -455,13 +653,16 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 	var out []RequestEvent
 	for rows.Next() {
 		var e RequestEvent
-		var taskID, provider, model, phase, prefixHash sql.NullString
-		var input, cached, output sql.NullInt64
+		var taskID, provider, model, phase, cacheKeyHash, prefixHash, provenance sql.NullString
+		var input, uncached, cached, cacheWrite, output, reasoning, tool sql.NullInt64
+		var before, after, compressionMetadata, latency sql.NullInt64
 		var estimated, actual sql.NullFloat64
 		var observed int
 		var ts int64
 		if err := rows.Scan(&e.ID, &taskID, &provider, &model, &phase,
-			&input, &cached, &output, &estimated, &actual, &prefixHash, &observed, &ts); err != nil {
+			&input, &uncached, &cached, &cacheWrite, &output, &reasoning, &tool,
+			&before, &after, &compressionMetadata, &estimated, &actual,
+			&cacheKeyHash, &prefixHash, &latency, &observed, &provenance, &ts); err != nil {
 			return nil, err
 		}
 		e.ProjectID = projectID
@@ -469,13 +670,23 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 		e.Provider = provider.String
 		e.Model = model.String
 		e.Phase = phase.String
+		e.CacheKeyHash = cacheKeyHash.String
 		e.PrefixHash = prefixHash.String
 		e.InputTokens = intPtrFromNull(input)
+		e.UncachedInputTokens = intPtrFromNull(uncached)
 		e.CachedInputTokens = intPtrFromNull(cached)
+		e.CacheWriteTokens = intPtrFromNull(cacheWrite)
 		e.OutputTokens = intPtrFromNull(output)
+		e.ReasoningTokens = intPtrFromNull(reasoning)
+		e.ToolTokens = intPtrFromNull(tool)
+		e.ContextBefore = intPtrFromNull(before)
+		e.ContextAfter = intPtrFromNull(after)
+		e.CompressionMetadataTokens = intPtrFromNull(compressionMetadata)
 		e.EstimatedCostUSD = floatPtrFromNull(estimated)
 		e.ActualCostUSD = floatPtrFromNull(actual)
+		e.LatencyMS = intPtrFromNull(latency)
 		e.Observed = observed == 1
+		e.Provenance = decodeRequestProvenance(provenance.String, e.Observed, requestMetricPresence(e))
 		e.Timestamp = time.Unix(ts, 0)
 		out = append(out, e)
 	}

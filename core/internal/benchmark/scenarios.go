@@ -1,20 +1,31 @@
 package benchmark
 
 import (
+	_ "embed"
 	"fmt"
-	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/contextopt"
 )
 
-// The five spec §69 scenarios, as deterministic fixtures.
-//
-// The fixtures are hand-shaped rather than sampled from a live repository on
-// purpose: a benchmark whose input changes between runs cannot detect an
-// optimizer regression. The shapes, though, are taken from what DWYT actually
-// sees — a repository offers far more context than a task needs, most vault
-// notes are session history rather than knowledge, and build output is mostly
-// lines that carry no information.
+// Fixtures are embedded from testdata so the CLI keeps working from any
+// directory while its corpus remains reviewable as deterministic files rather
+// than hidden in generated Go strings.
+var (
+	//go:embed testdata/tsc-failure-large.txt
+	tscFailureOutput string
+	//go:embed testdata/go-test-failure-large.txt
+	goTestFailureOutput string
+	//go:embed testdata/build-failure-large.txt
+	buildFailureOutput string
+	//go:embed testdata/go-test-pass-large.txt
+	goTestPassOutput string
+	//go:embed testdata/payload-large.json
+	largeJSONOutput string
+	//go:embed testdata/server-large.log
+	largeLogOutput string
+	//go:embed testdata/compression-negative.txt
+	compressionNegativeOutput string
+)
 
 // block builds a Block with a stable content hash so delta reuse and cache
 // classification work exactly as they do in production.
@@ -94,7 +105,7 @@ func canonicalNotes(entries ...VaultNote) []VaultNote {
 	return out
 }
 
-// --- Scenario A: trivial ------------------------------------------------------
+// A — trivial question --------------------------------------------------------
 
 func trivialScenario() Scenario {
 	blocks := []Block{
@@ -111,18 +122,19 @@ func trivialScenario() Scenario {
 	notes = append(notes, sessionNotes(18, 210)...)
 
 	return Scenario{
-		ID:          "A",
-		Name:        "typo in README/config",
-		Complexity:  contextopt.ComplexityTrivial,
-		Phase:       contextopt.PhaseFix,
-		Description: "One-line documentation fix. Needs almost no context, and the whole point is not to load any.",
-		Blocks:      blocks,
-		VaultNotes:  notes,
-		Turns:       1,
+		ID:                     "A",
+		Name:                   "trivial question",
+		Complexity:             contextopt.ComplexityTrivial,
+		Phase:                  contextopt.PhaseFix,
+		Description:            "One-line documentation question. The honest benchmark must show that it does not load a repository for it.",
+		Blocks:                 blocks,
+		VaultNotes:             notes,
+		Turns:                  1,
+		CompressionExpectation: CompressionNotNeeded,
 	}
 }
 
-// --- Scenario B: small frontend bug ------------------------------------------
+// B — symbol lookup -----------------------------------------------------------
 
 func smallFrontendScenario() Scenario {
 	blocks := []Block{
@@ -142,18 +154,18 @@ func smallFrontendScenario() Scenario {
 
 	return Scenario{
 		ID:          "B",
-		Name:        "frontend bug in 1-2 symbols",
+		Name:        "symbol lookup in a frontend bug",
 		Complexity:  contextopt.ComplexitySimple,
 		Phase:       contextopt.PhaseFix,
 		Description: "A component renders a stale value. Two symbols matter; the rest of the component tree does not.",
 		Blocks:      blocks,
 		VaultNotes:  notes,
-		ToolOutput:  tscOutput(),
+		ToolOutput:  tscFailureOutput,
 		Turns:       2,
 	}
 }
 
-// --- Scenario C: medium Go bug + tests ---------------------------------------
+// C — debug a large failing test output --------------------------------------
 
 func mediumGoScenario() Scenario {
 	blocks := []Block{
@@ -177,18 +189,18 @@ func mediumGoScenario() Scenario {
 
 	return Scenario{
 		ID:          "C",
-		Name:        "Go bug + tests, 2-4 files",
+		Name:        "debug large failed test output",
 		Complexity:  contextopt.ComplexityMedium,
 		Phase:       contextopt.PhaseFix,
-		Description: "A search returns stale notes. The fix touches three files and has to keep two test files green.",
+		Description: "A search returns stale notes. The fix touches three files and must keep tests green despite a noisy failing test log.",
 		Blocks:      blocks,
 		VaultNotes:  notes,
-		ToolOutput:  goTestOutput(),
+		ToolOutput:  goTestFailureOutput,
 		Turns:       4,
 	}
 }
 
-// --- Scenario D: complex cross-module refactor -------------------------------
+// D — cross-file impact analysis ---------------------------------------------
 
 func complexRefactorScenario() Scenario {
 	blocks := []Block{
@@ -219,18 +231,18 @@ func complexRefactorScenario() Scenario {
 
 	return Scenario{
 		ID:          "D",
-		Name:        "cross-module Go + TS refactor",
+		Name:        "cross-file impact analysis",
 		Complexity:  contextopt.ComplexityComplex,
 		Phase:       contextopt.PhaseFix,
-		Description: "A rename that crosses the Go backend, the MCP registry and the React dashboard, with tests on both sides.",
+		Description: "A rename crosses the Go backend, MCP registry and React dashboard. Impacted symbols and tests matter more than whole files.",
 		Blocks:      blocks,
 		VaultNotes:  notes,
-		ToolOutput:  buildOutput(),
+		ToolOutput:  buildFailureOutput,
 		Turns:       6,
 	}
 }
 
-// --- Scenario E: long agentic session ----------------------------------------
+// E — long session with repeated retrieval -----------------------------------
 
 func longAgenticScenario() Scenario {
 	blocks := []Block{
@@ -259,74 +271,104 @@ func longAgenticScenario() Scenario {
 
 	return Scenario{
 		ID:          "E",
-		Name:        "long agentic session",
+		Name:        "long session with repeated retrieval",
 		Complexity:  contextopt.ComplexityMedium,
 		Phase:       contextopt.PhaseToolLoop,
 		Description: "Fourteen turns of edit, build, fail, fix. This is where resending history dominates the bill.",
 		Blocks:      blocks,
 		VaultNotes:  notes,
-		ToolOutput:  goTestOutput(),
+		ToolOutput:  goTestFailureOutput,
 		Turns:       14,
 	}
 }
 
-// --- Tool output fixtures -----------------------------------------------------
-//
-// Real build and test output, in shape: a handful of lines that matter buried in
-// progress meters, dependency chatter and the same diagnostic repeated once per
-// call site.
+// F — large successful test output -------------------------------------------
 
-func tscOutput() string {
-	var b strings.Builder
-	b.WriteString("> dwyt-web@0.0.0 build\n> tsc -b && vite build\n")
-	for i := 0; i < 40; i++ {
-		fmt.Fprintf(&b, "transforming (%d) node_modules/react/index.js\n", i)
-	}
-	for i := 0; i < 12; i++ {
-		fmt.Fprintf(&b, "src/components/CardOptimizer.tsx(%d,17): error TS2339: Property 'ratio' does not exist on type 'OptimizerState'.\n", 40+i)
-	}
-	b.WriteString("src/api.ts(88,3): error TS2739: Type 'Partial<OptimizerState>' is missing properties.\n")
-	b.WriteString("src/hooks/useOptimizer.ts(21,9): warning TS6133: 'prev' is declared but its value is never read.\n")
-	for i := 0; i < 30; i++ {
-		fmt.Fprintf(&b, "[=========>          ] building %d%%\n", i*3)
-	}
-	b.WriteString("Found 13 errors.\n")
-	return b.String()
+func passingTestOutputScenario() Scenario {
+	s := mediumGoScenario()
+	s.ID = "F"
+	s.Name = "large passing test output"
+	s.Description = "A successful test run still produces dependency chatter and result lines. It must preserve the pass verdict without pretending there was an error."
+	s.ToolOutput = goTestPassOutput
+	s.Turns = 3
+	return s
 }
 
-func goTestOutput() string {
-	var b strings.Builder
-	for i := 0; i < 25; i++ {
-		fmt.Fprintf(&b, "go: downloading github.com/example/mod%d v1.2.%d\n", i, i)
-	}
-	for i := 0; i < 18; i++ {
-		fmt.Fprintf(&b, "ok  \tgithub.com/fvmoraes/dwyt/internal/pkg%02d\t0.0%ds\n", i, i%9)
-	}
-	b.WriteString("--- FAIL: TestSearchV2ExcludesStaleNotes (0.00s)\n")
-	b.WriteString("    search_test.go:51: expected the default top-k of 5, got 9\n")
-	for i := 0; i < 20; i++ {
-		fmt.Fprintf(&b, "    search_test.go:%d: note %d was not excluded\n", 60+i, i)
-	}
-	b.WriteString("--- FAIL: TestTemperatureClassifiesResolvedAsCold (0.00s)\n")
-	b.WriteString("    temperature_test.go:33: got warm, want cold\n")
-	b.WriteString("FAIL\tgithub.com/fvmoraes/dwyt/internal/brain\t0.014s\n")
-	b.WriteString("FAIL\n")
-	return b.String()
+// G — large JSON payload ------------------------------------------------------
+
+func largeJSONScenario() Scenario {
+	s := complexRefactorScenario()
+	s.ID = "G"
+	s.Name = "large JSON tool payload"
+	s.Description = "A deterministic indexing response has many records but only a small operational summary is useful in the next turn."
+	s.ToolOutput = largeJSONOutput
+	s.Turns = 3
+	return s
 }
 
-func buildOutput() string {
-	var b strings.Builder
-	for i := 0; i < 35; i++ {
-		fmt.Fprintf(&b, "go: downloading github.com/example/dep%d v0.%d.0\n", i, i)
+// H — large log ---------------------------------------------------------------
+
+func largeLogScenario() Scenario {
+	s := mediumGoScenario()
+	s.ID = "H"
+	s.Name = "large service log"
+	s.Description = "Repeated server log lines must retain the fatal root cause and raw reference while suppressing redundant progress chatter."
+	s.ToolOutput = largeLogOutput
+	s.Turns = 3
+	return s
+}
+
+// I — historical Obsidian recall ---------------------------------------------
+
+func historicalRecallScenario() Scenario {
+	blocks := []Block{
+		block(contextopt.KindDecision, "decisions/migration-ownership", 360, 0, 0.95),
+		block(contextopt.KindArchitecture, "architecture/data-lifecycle", 520, 0, 0.9),
+		block(contextopt.KindSymbol, "internal/brain/canonical.go#Upsert", 620, 4200, 0.85),
+		block(contextopt.KindSymbol, "internal/brain/search.go#Search", 580, 3900, 0.8),
+		block(contextopt.KindTest, "internal/brain/canonical_test.go", 520, 1700, 0.7),
 	}
-	for i := 0; i < 15; i++ {
-		fmt.Fprintf(&b, "internal/optimizer/optimizer.go:%d:9: undefined: contextgov.Rank\n", 120+i)
+	blocks = append(blocks, noiseBlocks("internal/legacy", 35, 460, 3000)...)
+	notes := canonicalNotes(
+		VaultNote{Key: "decisions/vault-migration", Tokens: 480},
+		VaultNote{Key: "architecture/lifecycle", Tokens: 430},
+		VaultNote{Key: "project/constraints", Tokens: 300},
+		VaultNote{Key: "lessons/atomic-writes", Tokens: 260},
+	)
+	notes = append(notes, sessionNotes(90, 320)...)
+	return Scenario{
+		ID:                     "I",
+		Name:                   "historical Obsidian recall",
+		Complexity:             contextopt.ComplexityMedium,
+		Phase:                  contextopt.PhaseRetrieve,
+		Description:            "A decision depends on durable historical memory amid many session snapshots, raw logs and stale notes.",
+		Blocks:                 blocks,
+		VaultNotes:             notes,
+		Turns:                  3,
+		CompressionExpectation: CompressionNotNeeded,
 	}
-	b.WriteString("internal/mcpregistry/registry.go:44:2: declared and not used: legacyName\n")
-	b.WriteString("web/src/api.ts(12,10): error TS2305: Module './types' has no exported member 'GovernorState'.\n")
-	for i := 0; i < 25; i++ {
-		fmt.Fprintf(&b, "[####################] linking %d%%\n", i*4)
-	}
-	b.WriteString("build failed\n")
-	return b.String()
+}
+
+// J — mandatory negative compression case -----------------------------------
+
+func compressionNegativeScenario() Scenario {
+	s := trivialScenario()
+	s.ID = "J"
+	s.Name = "compression worsens payload"
+	s.Description = "An already-minimal test result must pass through unchanged because a compact envelope and recovery handle would cost more."
+	s.ToolOutput = compressionNegativeOutput
+	s.CompressionExpectation = CompressionExpectedPassthrough
+	return s
+}
+
+// K — explicit no-compression case -------------------------------------------
+
+func noCompressionScenario() Scenario {
+	s := trivialScenario()
+	s.ID = "K"
+	s.Name = "no compression needed"
+	s.Description = "The task does not produce a tool payload. The benchmark records a known zero compression overhead rather than inventing one."
+	s.ToolOutput = ""
+	s.CompressionExpectation = CompressionNotNeeded
+	return s
 }

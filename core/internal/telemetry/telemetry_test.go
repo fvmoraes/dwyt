@@ -294,3 +294,38 @@ func TestRecentRequestsRespectsLimit(t *testing.T) {
 		t.Fatal("events should come back newest first")
 	}
 }
+func TestSummarizeLatencyPreservesZeroAndCoverage(t *testing.T) {
+	s := testStore(t)
+	zero, positive := 0, 17
+	if err := s.RecordRequest(RequestEvent{ProjectID: "p1", LatencyMS: &zero, Observed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordRequest(RequestEvent{ProjectID: "p1", LatencyMS: &positive, Observed: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := s.Summarize("p1", time.Unix(0, 0), "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.LatencyMS != positive || sum.Coverage.LatencyReported != 2 {
+		t.Fatalf("latency total/coverage = %d/%d, want %d/2", sum.LatencyMS, sum.Coverage.LatencyReported, positive)
+	}
+	if got := sum.Provenance.For(MetricLatencyMS); got != ProvenanceObserved {
+		t.Fatalf("latency provenance = %q, want observed", got)
+	}
+
+	if err := s.RecordRequest(RequestEvent{ProjectID: "p1", InputTokens: ptrInt(1)}); err != nil {
+		t.Fatal(err)
+	}
+	sum, err = s.Summarize("p1", time.Unix(0, 0), "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.LatencyMS != positive || sum.Coverage.LatencyReported != 2 {
+		t.Fatalf("partial latency total/coverage = %d/%d, want %d/2", sum.LatencyMS, sum.Coverage.LatencyReported, positive)
+	}
+	if got := sum.Provenance.For(MetricLatencyMS); got != ProvenanceUnsupported {
+		t.Fatalf("partial latency provenance = %q, want unsupported", got)
+	}
+}

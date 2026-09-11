@@ -26,7 +26,8 @@ var benchCmd = &cobra.Command{
 	Short: "Run the deterministic context/token benchmark (spec §69)",
 	Long: "Measures input context, vault retrieval, tool output and relative cost across\n" +
 		"four arms — baseline, DWYT v4, the v5 Optimizer, and the v5 Optimizer with\n" +
-		"provider cache intelligence — over the five scenarios named in spec §69.\n\n" +
+		"provider cache intelligence — over eleven deterministic scenarios, including\n" +
+		"the mandatory compression-passthrough case.\n\n" +
 		"Completion rate, real cost, cache hit rate and latency are NOT measured here.\n" +
 		"They need a live agent loop and a real provider, so the report declares them\n" +
 		"unmeasured instead of estimating them.",

@@ -167,10 +167,13 @@ func (gt *OptimizerTools) ReportUsage(args map[string]interface{}) (string, erro
 	copyNumber(payload, args,
 		"input_tokens", "uncached_input_tokens", "cached_input_tokens",
 		"cache_write_tokens", "output_tokens", "reasoning_tokens", "tool_tokens",
-		"context_before_dwyt", "context_after_dwyt",
+		"context_before_dwyt", "context_after_dwyt", "compression_metadata_tokens",
 		"estimated_cost_usd", "actual_cost_usd", "latency_ms", "tool_iterations")
 	copyBool(payload, args, "observed", "build_failed")
 	copyStringSlice(payload, args, "cached_hashes")
+	if provenance, ok := args["provenance"].(map[string]interface{}); ok {
+		payload["provenance"] = provenance
+	}
 	if len(payload) == 0 {
 		return "", fmt.Errorf("at least one usage field is required")
 	}
@@ -324,28 +327,30 @@ func RegisterOptimizerTools(s *Server) {
 			"conditions. Set observed=true only for numbers the provider actually returned; omit "+
 			"fields you do not know rather than sending zero.",
 		map[string]Property{
-			"task_id":               {Type: "string", Description: "Task id used with dwyt_context_plan"},
-			"provider":              {Type: "string", Description: "Provider name"},
-			"model":                 {Type: "string", Description: "Model identifier"},
-			"phase":                 {Type: "string", Description: "Phase this request belonged to"},
-			"input_tokens":          {Type: "number", Description: "Total input tokens"},
-			"uncached_input_tokens": {Type: "number", Description: "Input tokens billed as uncached"},
-			"cached_input_tokens":   {Type: "number", Description: "Input tokens served from cache"},
-			"cache_write_tokens":    {Type: "number", Description: "Tokens written to cache"},
-			"output_tokens":         {Type: "number", Description: "Output tokens"},
-			"reasoning_tokens":      {Type: "number", Description: "Reasoning/thinking tokens, when billed"},
-			"tool_tokens":           {Type: "number", Description: "Tokens spent on tool payloads"},
-			"context_before_dwyt":   {Type: "number", Description: "Context size before DWYT optimization"},
-			"context_after_dwyt":    {Type: "number", Description: "Context size actually sent"},
-			"estimated_cost_usd":    {Type: "number", Description: "DWYT cost estimate"},
-			"actual_cost_usd":       {Type: "number", Description: "Provider-reported cost, when available"},
-			"latency_ms":            {Type: "number", Description: "Request latency in milliseconds"},
-			"tool_iterations":       {Type: "number", Description: "Tool iterations consumed by this request"},
-			"observed":              {Type: "boolean", Description: "True only when the provider reported these numbers"},
-			"build_failed":          {Type: "boolean", Description: "True when this turn produced a failed build"},
-			"cache_key_hash":        {Type: "string", Description: "Cache key hash used for the request"},
-			"prefix_hash":           {Type: "string", Description: "Stable prefix hash, for cache miss diagnostics"},
-			"cached_hashes":         {Type: "array", Description: "Prefix hashes the provider confirmed as cache reads"},
+			"task_id":                     {Type: "string", Description: "Task id used with dwyt_context_plan"},
+			"provider":                    {Type: "string", Description: "Provider name"},
+			"model":                       {Type: "string", Description: "Model identifier"},
+			"phase":                       {Type: "string", Description: "Phase this request belonged to"},
+			"input_tokens":                {Type: "number", Description: "Total input tokens"},
+			"uncached_input_tokens":       {Type: "number", Description: "Input tokens billed as uncached"},
+			"cached_input_tokens":         {Type: "number", Description: "Input tokens served from cache"},
+			"cache_write_tokens":          {Type: "number", Description: "Tokens written to cache"},
+			"output_tokens":               {Type: "number", Description: "Output tokens"},
+			"reasoning_tokens":            {Type: "number", Description: "Reasoning/thinking tokens, when billed"},
+			"tool_tokens":                 {Type: "number", Description: "Tokens spent on tool payloads"},
+			"context_before_dwyt":         {Type: "number", Description: "Context size before DWYT optimization"},
+			"context_after_dwyt":          {Type: "number", Description: "Context size actually sent"},
+			"compression_metadata_tokens": {Type: "number", Description: "Expected recovery overhead outside context_after; report explicit 0 only when measured"},
+			"provenance":                  {Type: "object", Description: "Per-metric source labels: observed, estimated, benchmark_counterfactual, or unsupported"},
+			"estimated_cost_usd":          {Type: "number", Description: "DWYT cost estimate"},
+			"actual_cost_usd":             {Type: "number", Description: "Provider-reported cost, when available"},
+			"latency_ms":                  {Type: "number", Description: "Request latency in milliseconds"},
+			"tool_iterations":             {Type: "number", Description: "Tool iterations consumed by this request"},
+			"observed":                    {Type: "boolean", Description: "True only when the provider reported these numbers"},
+			"build_failed":                {Type: "boolean", Description: "True when this turn produced a failed build"},
+			"cache_key_hash":              {Type: "string", Description: "Cache key hash used for the request"},
+			"prefix_hash":                 {Type: "string", Description: "Stable prefix hash, for cache miss diagnostics"},
+			"cached_hashes":               {Type: "array", Description: "Prefix hashes the provider confirmed as cache reads"},
 		},
 		nil,
 		gt.ReportUsage,

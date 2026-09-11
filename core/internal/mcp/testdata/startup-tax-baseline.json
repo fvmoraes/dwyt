@@ -1,13 +1,13 @@
 {
-  "version": 1,
-  "schema_gate_estimated_tokens": 3757,
+  "version": 2,
+  "schema_gate_estimated_tokens": 3831,
   "mcps": [
     {
       "name": "dwyt_optimizer",
       "availability": "measured",
       "tools": 12,
-      "tools_list_result_bytes": 9522,
-      "estimated_tokens": 2381
+      "tools_list_result_bytes": 9808,
+      "estimated_tokens": 2452
     },
     {
       "name": "dwyt_codebase",

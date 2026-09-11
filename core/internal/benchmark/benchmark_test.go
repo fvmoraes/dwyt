@@ -40,12 +40,15 @@ func TestRunIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestScenariosCoverTheSpecCases(t *testing.T) {
+func TestScenariosCoverThePhase9Matrix(t *testing.T) {
 	scenarios := Scenarios()
-	if len(scenarios) != 5 {
-		t.Fatalf("spec §69 names five scenarios, got %d", len(scenarios))
+	if len(scenarios) != 11 {
+		t.Fatalf("Phase 9 requires eleven scenarios, got %d", len(scenarios))
 	}
-	wantIDs := map[string]bool{"A": true, "B": true, "C": true, "D": true, "E": true}
+	wantIDs := map[string]bool{
+		"A": true, "B": true, "C": true, "D": true, "E": true, "F": true,
+		"G": true, "H": true, "I": true, "J": true, "K": true,
+	}
 	for _, s := range scenarios {
 		if !wantIDs[s.ID] {
 			t.Fatalf("unexpected scenario %q", s.ID)
@@ -62,13 +65,22 @@ func TestScenariosCoverTheSpecCases(t *testing.T) {
 		t.Fatalf("missing scenarios: %v", wantIDs)
 	}
 
-	// The long agentic case is the one the spec sizes explicitly: 10-20 turns.
+	// The long agentic case is explicitly sized at 10-20 turns.
 	long, ok := scenarioByID("E")
 	if !ok {
 		t.Fatal("scenario E is missing")
 	}
 	if long.Turns < 10 || long.Turns > 20 {
 		t.Fatalf("scenario E must run 10-20 turns, got %d", long.Turns)
+	}
+
+	negative, ok := scenarioByID("J")
+	if !ok || negative.CompressionExpectation != CompressionExpectedPassthrough {
+		t.Fatal("scenario J must be the mandatory compression-passthrough fixture")
+	}
+	noCompression, ok := scenarioByID("K")
+	if !ok || noCompression.CompressionExpectation != CompressionNotNeeded {
+		t.Fatal("scenario K must explicitly cover no compression being needed")
 	}
 }
 
@@ -142,10 +154,18 @@ func TestToolOutputIsCompactedWhereThereIsOutput(t *testing.T) {
 	for _, res := range Run().Results {
 		base := mustArm(t, res, ArmBaseline)
 		opt := mustArm(t, res, ArmOptimized)
-		if base.ToolOutputTokens == 0 {
-			// Scenario A runs no tool, which is itself the point.
-			if opt.ToolOutputTokens != 0 {
-				t.Errorf("%s: no raw output but %d compacted tokens", res.Scenario, opt.ToolOutputTokens)
+		if !res.Compression.Attempted {
+			if base.ToolOutputTokens != 0 || opt.ToolOutputTokens != 0 {
+				t.Errorf("%s: no tool payload but baseline=%d optimized=%d", res.Scenario, base.ToolOutputTokens, opt.ToolOutputTokens)
+			}
+			continue
+		}
+		if res.Compression.Expected == CompressionExpectedPassthrough {
+			if !res.Compression.PassedThrough {
+				t.Errorf("%s: mandatory negative case did not pass through", res.Scenario)
+			}
+			if opt.ToolOutputTokens != base.ToolOutputTokens {
+				t.Errorf("%s: a passthrough must preserve raw payload cost (%d vs %d)", res.Scenario, opt.ToolOutputTokens, base.ToolOutputTokens)
 			}
 			continue
 		}
@@ -338,4 +358,23 @@ func mustArm(t *testing.T, res Result, arm Arm) Measurement {
 		t.Fatalf("%s: missing arm %s", res.Scenario, arm)
 	}
 	return m
+}
+func TestCostUnitsIncludeCompressionRecoveryOverhead(t *testing.T) {
+	cost := contextopt.DefaultCostModel()
+	for _, res := range Run().Results {
+		plain := mustArm(t, res, ArmOptimized)
+		cached := mustArm(t, res, ArmOptimizedCached)
+
+		plainWant := float64(plain.InputTokens+plain.CompressionMetadataTokens) * cost.Uncached
+		if diff := plain.CostUnits - plainWant; diff < -0.000001 || diff > 0.000001 {
+			t.Errorf("%s: optimized cost = %.6f, want payload plus recovery overhead %.6f", res.Scenario, plain.CostUnits, plainWant)
+		}
+
+		cachedWant := float64(cached.InputTokens-cached.CacheReadTokens-cached.CacheWriteTokens+cached.CompressionMetadataTokens)*cost.Uncached +
+			float64(cached.CacheReadTokens)*cost.CacheRead +
+			float64(cached.CacheWriteTokens)*cost.CacheWrite
+		if diff := cached.CostUnits - cachedWant; diff < -0.000001 || diff > 0.000001 {
+			t.Errorf("%s: cached cost = %.6f, want payload plus recovery overhead %.6f", res.Scenario, cached.CostUnits, cachedWant)
+		}
+	}
 }

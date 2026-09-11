@@ -37,6 +37,15 @@ function fmtN(n: number | undefined) {
   return String(n)
 }
 
+// Diagnostics use null for unknown and may legitimately produce zero. Keep
+// that distinction visible instead of reusing the legacy savings formatter.
+function fmtKnownN(n: number | null | undefined) {
+  if (n === null || n === undefined) return '\u2014'
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
+  return String(n)
+}
+
 function fmtUptimeFromDet(det: ToolDetail | undefined): string {
   if (!det || det.uptime_secs < 0) return '\u2014'
   if (det.uptime_secs === 0 && det.uptime_label) return det.uptime_label
@@ -54,7 +63,10 @@ function badge(s: ToolState, t: Record<string, string>): BadgeText {
   return { icon: '\uD83D\uDFE2', text: t.active, color: 'var(--green)' }
 }
 
-function calculateGlobalTokenSavings(details: Details) {
+// Component counters are legacy gross savings indicators. They remain useful
+// for the existing dashboard card but are never presented as net savings; the
+// diagnostics view below derives net savings from telemetry and explicit taxes.
+function calculateLegacyGrossTokenSavings(details: Details) {
   const values = Object.values(details)
   const tokensSaved = values.reduce((a, d) => a + (d?.tokens_saved || 0), 0)
   let withoutDwyt = 0
@@ -105,6 +117,7 @@ export default function Dashboard() {
   const [configuringMCP, setConfiguringMCP] = useState('')
   const [configureFeedback, setConfigureFeedback] = useState<{ kind: 'success' | 'error'; message: string; name: string } | null>(null)
   const [kiroPower, setKiroPower] = useState<api.KiroPowerStatus | null>(null)
+  const [netSavings, setNetSavings] = useState<api.NetSavingsReport | null>(null)
   const [refreshingKiroPower, setRefreshingKiroPower] = useState(false)
   // Defaults the product promises (user-facing): auto-refresh every 10s and a
   // 6h savings window. Lifetime totals remain one click away ('All time') but
@@ -121,6 +134,7 @@ export default function Dashboard() {
     selectedProjectRef.current = path
     setComponents({})
     setDetails({})
+    setNetSavings(null)
     setIndexPath(path)
   }, [])
 
@@ -161,6 +175,10 @@ export default function Dashboard() {
       const nextDetails = await api.getToolDetails(requestedProject || undefined, savingsWindow)
       if (isCurrentProject()) setDetails(nextDetails || {})
     } catch { /* keep the current project's previous details */ }
+    try {
+      const report = await api.getNetSavings(savingsWindow, requestedProject || undefined)
+      if (isCurrentProject()) setNetSavings(report)
+    } catch { /* diagnostics are additive; retain the previous report on failure */ }
     try { setLogs((await fetch('http://localhost:2737/api/logs').then(r => r.json())).logs || {}) } catch { /* */ }
     try {
       const ms = await api.getBrainStatus()
@@ -340,7 +358,7 @@ export default function Dashboard() {
   const headroomComponent = components.headroom
   const obsidianComponent = components.obsidian
 
-  const totals = calculateGlobalTokenSavings(details)
+  const totals = calculateLegacyGrossTokenSavings(details)
   const totalSaved = totals.tokensSaved
   const rtkSaved = details['rtk']?.tokens_saved || 0
   const headroomSaved = details['headroom']?.tokens_saved || 0
@@ -554,6 +572,31 @@ export default function Dashboard() {
         )}
       </div>
 
+      <details style={{ marginBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--ctp-mantle)', padding: '5px 10px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Diagnostics · net savings (est.)
+        </summary>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginTop: 6 }}>
+          {[
+            { label: 'Net', value: fmtKnownN(netSavings?.net_estimated_tokens), color: 'var(--yellow)' },
+            { label: 'Gross avoided', value: fmtKnownN(netSavings?.gross_avoided_tokens), color: 'var(--green)' },
+            { label: 'Schema tax', value: fmtKnownN(netSavings?.startup_schema_tax_tokens), color: 'var(--peach)' },
+            { label: 'Instruction tax', value: fmtKnownN(netSavings?.managed_instruction_tax_tokens), color: 'var(--peach)' },
+            { label: 'Compression metadata', value: fmtKnownN(netSavings?.compression_metadata_tokens), color: 'var(--peach)' },
+          ].map(item => (
+            <div key={item.label}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>{item.label}</div>
+              <div style={{ fontSize: 13, color: item.color, fontFamily: 'monospace', fontWeight: 700 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 5, lineHeight: 1.4 }}>
+          {netSavings
+            ? <>provenance: {netSavings.provenance} · startup catalogs: {netSavings.startup_tax_coverage.measured_mcps}/{netSavings.startup_tax_coverage.total_mcps} measured · context: {netSavings.coverage_context_requests}/{netSavings.coverage_requests} · compression metadata: {netSavings.coverage_compression_metadata_requests}/{netSavings.coverage_requests}{netSavings.reason ? ` · ${netSavings.reason}` : ''}</>
+            : '— diagnostics unavailable'}
+        </div>
+      </details>
+
       {showLogs && (
         <div className="card" style={{ marginBottom: 8, padding: '8px 12px' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{t.logsTitle}</div>
@@ -660,7 +703,7 @@ export default function Dashboard() {
           onConfigure={() => handleConfigureMCP('obsidian')}
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
-        <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} />
+        <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} projectPath={indexPath || undefined} />
         <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
       </div>
     </div>

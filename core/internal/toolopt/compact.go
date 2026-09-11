@@ -56,10 +56,11 @@ type Compacted struct {
 	// DWYT does not recognise usually puts its verdict.
 	Tail []string `json:"tail,omitempty"`
 
-	RawRef         string  `json:"raw_ref,omitempty"`
-	RawTokensEst   int     `json:"raw_tokens_est"`
-	SentTokensEst  int     `json:"sent_tokens_est"`
-	CompressionPct float64 `json:"compression_pct"`
+	RawRef                    string  `json:"raw_ref,omitempty"`
+	RawTokensEst              int     `json:"raw_tokens_est"`
+	SentTokensEst             int     `json:"sent_tokens_est"`
+	CompressionMetadataTokens int     `json:"compression_metadata_tokens"`
+	CompressionPct            float64 `json:"compression_pct"`
 
 	// Suppressed counts what was dropped, by category, so the reduction is
 	// auditable rather than magical.
@@ -86,23 +87,38 @@ const (
 	DefaultMinGainTokens = 120
 )
 
+// EstimateCompressionMetadataTokens returns only the future recovery overhead
+// that is not already part of the rendered payload. The raw-ref handle itself
+// is included in SentTokensEst after Render, so charging it again would double
+// count it in both the gate and net-savings calculation.
+func EstimateCompressionMetadataTokens(rawRef string) int {
+	if rawRef == "" {
+		return 0
+	}
+	return RecoveryOverheadTokens
+}
+
 // ApplyCompressionGate decides whether a compaction result is worth sending
-// (Fine-Tuning §3.7: estimate raw cost, estimate compressed cost + metadata
-// + recovery overhead, pass through when the gain is not useful). It is
-// idempotent: applying it twice is a no-op. Structured diagnostics survive
-// regardless of gain — Law 7 (critical evidence) overrides Law 6.
+// (Fine-Tuning §3.7: raw cost minus sent payload — which already contains its
+// raw-ref handle — minus expected future recovery overhead, pass through when
+// the gain is not useful). It is idempotent: applying it twice is a no-op.
+// Structured diagnostics survive regardless of gain — Law 7 (critical
+// evidence) overrides Law 6.
 func ApplyCompressionGate(c Compacted, minGainTokens int) Compacted {
 	if c.PassedThrough || c.RawTokensEst <= 0 {
+		c.CompressionMetadataTokens = 0
 		return c
 	}
-	metadata := estimateTokens(c.RawRef) + RecoveryOverheadTokens
+	metadata := EstimateCompressionMetadataTokens(c.RawRef)
 	netGain := c.RawTokensEst - c.SentTokensEst - metadata
 	hasEvidence := len(c.Errors) > 0 || len(c.Warnings) > 0
 	if netGain >= minGainTokens || hasEvidence {
+		c.CompressionMetadataTokens = metadata
 		return c
 	}
 	c.PassedThrough = true
 	c.SentTokensEst = c.RawTokensEst
+	c.CompressionMetadataTokens = 0
 	c.CompressionPct = 0
 	c.Errors = nil
 	c.Warnings = nil
