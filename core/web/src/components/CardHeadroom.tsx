@@ -1,9 +1,11 @@
-import type { ToolDetail, BadgeText, ToolState } from '../types'
+import type { ToolInfo, ToolDetail, BadgeText, ToolState } from '../types'
 import { CardHeader, Row, Hr, RepoRow } from './CardParts'
+import { mcpActivityLabel } from '../utils'
 import Button from './Button'
 
 interface Props {
   det: ToolDetail | undefined
+  tool: ToolInfo | undefined
   state: ToolState
   badgeText: BadgeText
   repoName: string
@@ -15,7 +17,11 @@ interface Props {
   onOpenStats: () => Promise<void>
 }
 
-export default function CardHeadroom({ det, state, badgeText, repoName, indexPath, t, fmtN, onStart, onStop, onOpenStats }: Props) {
+export default function CardHeadroom({ det, tool, state, badgeText, repoName, indexPath, t, fmtN, onStart, onStop, onOpenStats }: Props) {
+  // The effective proxy port comes from /status (reconciler-observed) first,
+  // falling back to the detail's requested proxy_port when the service hasn't
+  // published an observed port yet.
+  const port = tool?.port || det?.proxy_port
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <CardHeader label={t.compressionActive} color="var(--peach)" state={state} badgeText={badgeText} />
@@ -24,6 +30,8 @@ export default function CardHeadroom({ det, state, badgeText, repoName, indexPat
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} />
       <Row label={t.compression} value={det?.compression_pct ? `${det.compression_pct.toFixed(1)}%` : '\u2014'} />
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
+      {port ? <Row label={t.effectivePort} value={String(port)} /> : null}
+      <Row label={t.mcpActivity} value={mcpActivityLabel(tool?.mcp_activity, t)} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
       {det?.scope === 'global' && (
         <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 1 }}>* {t.scopeGlobalHeadroomNote}</div>

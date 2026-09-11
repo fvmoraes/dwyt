@@ -6,6 +6,8 @@ export interface ToolInfo {
   healthy: boolean
   details: string
   error?: string
+  /** Effective port the managed service bound to (may differ from the requested default). */
+  port?: number
   /** Reconciler lifecycle state (starting/healthy/degraded/failed/stopped). */
   runtime_state?: string
   /** Observed MCP session activity; absent/unknown means not observable. */

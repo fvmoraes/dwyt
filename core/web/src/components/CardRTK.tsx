@@ -15,7 +15,7 @@ interface Props {
 
 export default function CardRTK({ indexPath, repoName, t, rtkTool, getDetail, toolState, badge, fmtUptimeFromDet, fmtN }: Props) {
   const det = getDetail('rtk')
-  const state = toolState(rtkTool, det) as 'not_installed' | 'inactive' | 'active'
+  const state = toolState(rtkTool, det)
   const b = badge(state)
 
   return (

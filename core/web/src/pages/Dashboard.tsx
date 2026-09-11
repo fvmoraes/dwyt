@@ -600,6 +600,7 @@ export default function Dashboard() {
         />
         <CardHeadroom
           det={getDetail('headroom')}
+          tool={hrTool}
           state={toolState(hrTool, getDetail('headroom'))}
           badgeText={badge(toolState(hrTool, getDetail('headroom')), t)}
           repoName={repoName} indexPath={indexPath} t={t} fmtN={fmtN}

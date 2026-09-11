@@ -1,5 +1,6 @@
 import type { ToolInfo, ToolDetail, MCPRegistry, BadgeText, ToolState } from '../types'
 import { CardHeader, Row, Hr, RepoRow } from './CardParts'
+import { mcpActivityLabel } from '../utils'
 import Button from './Button'
 import MCPFeedbackBanner from './MCPFeedbackBanner'
 
@@ -29,7 +30,7 @@ interface Props {
 export default function CardCodebase(props: Props) {
   const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, cbmcp, getDetail, toolState, badge, fmtN, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
   const det = getDetail('codebase-memory-mcp')
-  const state = toolState(cbmcp, det) as 'not_installed' | 'inactive' | 'active'
+  const state = toolState(cbmcp, det)
   const b = badge(state)
   const mcp = mcpRegistry['codebase']
   const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
@@ -49,6 +50,8 @@ export default function CardCodebase(props: Props) {
       <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
       <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
       <Row label="MCP" value={mcpValue} />
+      {cbmcp?.port ? <Row label={t.effectivePort} value={String(cbmcp.port)} /> : null}
+      <Row label={t.mcpActivity} value={mcpActivityLabel(cbmcp?.mcp_activity, t)} />
       <RepoRow projectName={props.repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
       <MCPFeedbackBanner feedback={props.configureFeedback} name="codebase" onDismiss={props.onDismissFeedback} />

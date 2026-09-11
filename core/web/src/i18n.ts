@@ -25,6 +25,10 @@ export const T = {
     // Card status — lifecycle states (unknown is never rendered as offline)
     notInstalled: 'Not Installed', inactive: 'Inactive', active: 'Active',
     cardStarting: 'Starting', degraded: 'Degraded', failed: 'Failed', unknownState: 'Unknown',
+    // Multidimensional diagnostics (effective port + observed MCP activity)
+    effectivePort: 'Port', mcpActivity: 'MCP',
+    mcpActive: 'Active', mcpActiveRecently: 'Active recently', mcpConfiguredActivity: 'Configured',
+    mcpNotObservable: 'Activity not observable',
     // Card actions
     start: '▶ Start', stop: '■ Stop',
     index: 'Index', indexing: '...',
@@ -178,6 +182,10 @@ export const T = {
     // 3 estados
     notInstalled: 'Não instalado', inactive: 'Inativo', active: 'Ativo',
     cardStarting: 'Iniciando', degraded: 'Degradado', failed: 'Falhou', unknownState: 'Desconhecido',
+    // Diagnósticos multidimensionais (porta efetiva + atividade MCP observada)
+    effectivePort: 'Porta', mcpActivity: 'MCP',
+    mcpActive: 'Ativo', mcpActiveRecently: 'Ativo recentemente', mcpConfiguredActivity: 'Configurado',
+    mcpNotObservable: 'Atividade não observável',
     start: '▶ Iniciar', stop: '■ Parar',
     index: 'Indexar', indexing: '...',
     openGraph: 'Abrir Grafo →', openStats: 'Abrir Stats →',
