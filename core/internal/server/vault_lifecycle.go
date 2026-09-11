@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const vaultReadLeaseContextKey = "dwyt.vault_read_lease_held"
+
 // vaultLeaseGuard keeps structural startup/manual migrations from racing HTTP
 // and MCP operations against the same filesystem. /api/health and unrelated
 // service endpoints remain available throughout Dashboard-first startup.
@@ -43,9 +45,16 @@ func vaultLeaseGuard(ds *DashboardServer) gin.HandlerFunc {
 			vaultMigratingResponse(c)
 			return
 		}
+		c.Set(vaultReadLeaseContextKey, true)
 		defer ds.vaultMigrationMu.RUnlock()
 		c.Next()
 	}
+}
+
+func vaultReadLeaseHeld(c *gin.Context) bool {
+	value, ok := c.Get(vaultReadLeaseContextKey)
+	held, _ := value.(bool)
+	return ok && held
 }
 
 func vaultMigratingResponse(c *gin.Context) {

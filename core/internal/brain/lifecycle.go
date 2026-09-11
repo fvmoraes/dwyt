@@ -462,7 +462,7 @@ func TouchAccess(path string, now time.Time) bool {
 	if !ok {
 		return false
 	}
-	return os.WriteFile(path, []byte(updated), 0644) == nil
+	return atomicWriteFile(path, []byte(updated), 0o644) == nil
 }
 
 // replaceFrontmatterFields upserts scalar fields inside a note's frontmatter,

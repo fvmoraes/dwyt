@@ -101,6 +101,33 @@ func TestContextPlanPreservesAnExpandedBudgetAcrossTurns(t *testing.T) {
 	}
 }
 
+func TestSearchAllowanceUsesExpandedExistingSessionBudget(t *testing.T) {
+	g := newOptimizer(t)
+	g.ContextPlan(PlanRequest{TaskID: "t1", Task: "work"})
+
+	sess, ok := g.Session("t1")
+	if !ok {
+		t.Fatal("expected a session to exist")
+	}
+	if _, granted := sess.ExpandBudget(10000); granted == 0 {
+		t.Fatal("expected the session budget to expand")
+	}
+	expected := sess.Budget().ProjectMemory
+	if expected <= 0 {
+		t.Fatalf("expanded project-memory allowance = %d, want positive", expected)
+	}
+
+	if got, ok := g.SearchAllowance("t1", -1); !ok || got != expected {
+		t.Fatalf("unbounded allowance = (%d, %v), want (%d, true)", got, ok, expected)
+	}
+	if got, ok := g.SearchAllowance("t1", expected-1); !ok || got != expected-1 {
+		t.Fatalf("tightened allowance = (%d, %v), want (%d, true)", got, ok, expected-1)
+	}
+	if got, ok := g.SearchAllowance("missing", -1); ok || got != 0 {
+		t.Fatalf("unknown task must have no allowance, got (%d, %v)", got, ok)
+	}
+}
+
 func TestRegisterContextKeepsDropsAndReuses(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ProgressiveExpansion = false // isolate the selection decision

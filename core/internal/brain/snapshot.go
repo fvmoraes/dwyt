@@ -157,7 +157,7 @@ func (pb *ProjectObsidian) SaveCompactSnapshot(s CompactSnapshot) (SnapshotOutco
 	lc.RawRefs = s.RawRefs
 	body := renderCompactSnapshot(s, lc, now, pb)
 
-	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(body), 0o644); err != nil {
 		return outcome, fmt.Errorf("obsidian snapshot: %w", err)
 	}
 	outcome.Written = true

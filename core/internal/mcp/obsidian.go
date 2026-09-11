@@ -31,7 +31,15 @@ func (ot *ObsidianTools) Search(args map[string]interface{}) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?q=%s", dwytAPI, url.QueryEscape(query)))
+	params := url.Values{}
+	params.Set("q", query)
+	if taskID, ok := args["task_id"].(string); ok && strings.TrimSpace(taskID) != "" {
+		params.Set("task_id", taskID)
+	}
+	if maxTokens, ok := args["max_tokens"]; ok {
+		params.Set("max_tokens", fmt.Sprint(maxTokens))
+	}
+	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?%s", dwytAPI, params.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("obsidian search failed: %w", err)
 	}
@@ -300,7 +308,9 @@ func RegisterObsidianTools(s *Server) {
 	s.RegisterTool("obsidian_search",
 		"Search the Obsidian vault for notes matching a query. Returns matching entries with type, content, and creation date.",
 		map[string]Property{
-			"query": {Type: "string", Description: "Search query string to find matching notes in the vault"},
+			"query":      {Type: "string", Description: "Search query string to find matching notes in the vault"},
+			"task_id":    {Type: "string", Description: "Optional existing Optimizer task ID; applies its project-memory allowance"},
+			"max_tokens": {Type: "integer", Description: "Optional non-negative cap that can only reduce the task allowance"},
 		},
 		[]string{"query"},
 		ot.Search,

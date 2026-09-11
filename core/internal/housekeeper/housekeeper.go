@@ -80,10 +80,11 @@ func DefaultConfig() Config {
 type Depth string
 
 const (
-	// Light runs on session close: state hash, access metadata, raw refs.
+	// Light runs on session close and startup: state hash, access metadata,
+	// raw refs.
 	Light Depth = "light"
-	// Deep runs on startup and on the interval: session limit, TTLs, dedup,
-	// stale detection, canonical merge, raw pruning.
+	// Deep runs on the interval: session limit, TTLs, dedup, stale detection,
+	// canonical merge, raw pruning.
 	Deep Depth = "deep"
 )
 
@@ -137,7 +138,7 @@ type Housekeeper struct {
 
 	// stopCh terminates the periodic loop. startOnce/stopOnce make lifecycle
 	// calls idempotent, while lifecycleDone lets daemon shutdown await both the
-	// startup deep pass and the ticker loop.
+	// startup pass and the ticker loop.
 	stopCh          chan struct{}
 	startOnce       sync.Once
 	stopOnce        sync.Once
@@ -201,6 +202,13 @@ func (h *Housekeeper) Run(depth Depth) Report {
 // RunContext executes a pass and stops at safe note/object boundaries when the
 // context is cancelled. Mutations already in progress finish atomically.
 func (h *Housekeeper) RunContext(ctx context.Context, depth Depth) Report {
+	return h.runContext(ctx, depth, true)
+}
+
+// runContext executes one pass. Callers that already hold the lease supplied to
+// SetRunLease pass acquireLease=false to avoid recursively acquiring an RWMutex
+// while a structural migration writer is pending.
+func (h *Housekeeper) runContext(ctx context.Context, depth Depth, acquireLease bool) Report {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -232,7 +240,7 @@ func (h *Housekeeper) RunContext(ctx context.Context, depth Depth) Report {
 		h.mu.Unlock()
 	}()
 
-	if lease != nil {
+	if acquireLease && lease != nil {
 		release := lease()
 		defer release()
 	}
@@ -515,8 +523,9 @@ func (h *Housekeeper) RunDryContext(ctx context.Context, depth Depth) Report {
 	return report
 }
 
-// Start begins the periodic deep pass. It returns immediately and is
-// idempotent. A Stop that wins before Start prevents all work from launching.
+// Start begins a light pass on startup and periodic deep passes. It returns
+// immediately and is idempotent. A Stop that wins before Start prevents all
+// work from launching.
 func (h *Housekeeper) Start() {
 	h.startOnce.Do(func() {
 		select {
@@ -535,7 +544,7 @@ func (h *Housekeeper) Start() {
 			h.lifecycleWG.Add(1)
 			go func() {
 				defer h.lifecycleWG.Done()
-				h.RunContext(h.lifecycleCtx, Deep)
+				h.RunContext(h.lifecycleCtx, Light)
 			}()
 		}
 		if cfg.Interval > 0 {
@@ -592,6 +601,16 @@ func (h *Housekeeper) OnSessionClose() Report {
 		return Report{Depth: Light, Skipped: "run_on_session_close disabled"}
 	}
 	return h.Run(Light)
+}
+
+// OnSessionCloseWithLeaseHeld runs the session-close pass for a caller that
+// already holds the lease supplied through SetRunLease. The caller must retain
+// that lease until this method returns.
+func (h *Housekeeper) OnSessionCloseWithLeaseHeld() Report {
+	if !h.Config().RunOnSessionClose {
+		return Report{Depth: Light, Skipped: "run_on_session_close disabled"}
+	}
+	return h.runContext(context.Background(), Light, false)
 }
 
 // HousekeeperStatus implements optimizer.HousekeeperStatusProvider (spec §55).
@@ -802,33 +821,7 @@ func markState(path string, state brain.NoteState) error {
 	if !ok {
 		return fmt.Errorf("note has no frontmatter to update")
 	}
-	// Atomic write (Fine-Tuning §32): a crash mid-write must never leave a
-	// truncated note. Temp file in the same directory, then rename — rename
-	// within a filesystem is atomic on Linux, macOS and Windows.
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".markstate-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		if err := os.Remove(tmpName); err != nil && !os.IsNotExist(err) {
-			log.Warn("housekeeper: failed to remove temporary state file", log.Fields{"path": tmpName, "error": err.Error()})
-		}
-	}()
-	if _, err := tmp.WriteString(updated); err != nil {
-		if closeErr := tmp.Close(); closeErr != nil {
-			return fmt.Errorf("write note: %w (close temp file: %v)", err, closeErr)
-		}
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return brain.WriteFileAtomic(path, []byte(updated), 0o644)
 }
 
 // snapshotFromNote reconstructs the compact snapshot a session note was rendered

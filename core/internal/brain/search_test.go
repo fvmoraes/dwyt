@@ -151,15 +151,38 @@ func TestSearchV2FiltersByType(t *testing.T) {
 	}
 }
 
-func TestSearchV2RespectsTokenBudgetButAlwaysReturnsTheTopHit(t *testing.T) {
+func TestSearchV2RespectsStrictTokenBudget(t *testing.T) {
 	pb := testVault(t)
 	big := strings.Repeat("a very long body ", 500)
 	writeNote(t, pb, "40-knowledge/big.md", "type: knowledge\ndwyt_managed: true\n", "needle", big)
 	writeNote(t, pb, "40-knowledge/big2.md", "type: knowledge\ndwyt_managed: true\n", "also needle", big)
 
 	results := pb.SearchV2(SearchOptions{Query: "needle", MaxTokens: 10})
-	if len(results) != 1 {
-		t.Fatalf("a tiny budget must still return the single best hit, got %d", len(results))
+	if len(results) != 0 {
+		t.Fatalf("a strict budget must not admit an oversized top hit, got %d", len(results))
+	}
+}
+
+func TestSearchV2NeverExceedsTokenBudgetAndAllowsExplicitZeroCap(t *testing.T) {
+	pb := testVault(t)
+	body := strings.Repeat("budget marker ", 20)
+	writeNote(t, pb, "40-knowledge/one.md", "type: knowledge\ndwyt_managed: true\n", "Budget one", body)
+	writeNote(t, pb, "40-knowledge/two.md", "type: knowledge\ndwyt_managed: true\n", "Budget two", body)
+
+	results := pb.SearchV2(SearchOptions{Query: "budget marker", MaxTokens: 100, MaxTokensSet: true})
+	if len(results) == 0 {
+		t.Fatal("a result that fits the budget should be returned")
+	}
+	spent := 0
+	for _, result := range results {
+		spent += result.TokensEst
+	}
+	if spent > 100 {
+		t.Fatalf("returned %d tokens with a 100-token cap", spent)
+	}
+
+	if got := pb.SearchV2(SearchOptions{Query: "budget marker", MaxTokens: 0, MaxTokensSet: true}); len(got) != 0 {
+		t.Fatalf("an explicit zero cap must return no results, got %d", len(got))
 	}
 }
 

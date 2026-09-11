@@ -132,6 +132,10 @@ func (ds *DashboardServer) apiCanonicalUpsert(c *gin.Context) {
 	source := brain.SourceRef{}
 	if body.SourceFile != "" {
 		source = brain.SourceOf(body.SourceFile)
+		if source.File == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source_file must reference a readable file"})
+			return
+		}
 	}
 	note, err := pb.UpsertCanonical(body.Key, body.Title, body.Body, source)
 	if err != nil {

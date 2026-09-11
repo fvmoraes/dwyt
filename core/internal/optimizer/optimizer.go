@@ -266,6 +266,26 @@ func (g *Optimizer) Session(taskID string) (*contextopt.Session, bool) {
 	return s, ok
 }
 
+// SearchAllowance returns the per-call project-memory allowance for an
+// existing task session. A negative requested value means the caller supplied
+// no additional cap; a non-negative request can only tighten the session
+// budget. Search allowance is a retrieval-set cap, not a cumulative ledger.
+// Unknown tasks deliberately receive no fallback budget.
+func (g *Optimizer) SearchAllowance(taskID string, requested int) (int, bool) {
+	sess, ok := g.Session(taskID)
+	if !ok {
+		return 0, false
+	}
+	allowance := sess.Budget().ProjectMemory
+	if allowance < 0 {
+		allowance = 0
+	}
+	if requested >= 0 && requested < allowance {
+		allowance = requested
+	}
+	return allowance, true
+}
+
 // PlanRequest is the optimizer's public plan input. It mirrors
 // contextopt.PlanRequest plus the task identity, so the MCP layer has a single
 // struct to decode into.

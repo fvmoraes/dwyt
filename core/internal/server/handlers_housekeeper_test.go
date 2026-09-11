@@ -310,6 +310,46 @@ func TestSaveContextSkipsUnchangedStateOverHTTP(t *testing.T) {
 	}
 }
 
+func TestSaveContextTriggersLightHousekeeping(t *testing.T) {
+	ds := brainServer(t)
+	source := filepath.Join(ds.DefaultProject, "architecture-source.go")
+	if err := os.WriteFile(source, []byte("package project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	note, err := ds.ProjectObsidian.UpsertCanonical(
+		"architecture", "", "Architecture derived from source.\n", brain.SourceOf(source),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("package project\n\nfunc Changed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/obsidian/context",
+		bytes.NewBufferString(`{"client":"kiro","summary":"completed task"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec, _ := do(t, ds, ds.apiObsidianSaveContext, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	data, err := os.ReadFile(note.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := brain.ParseLifecycle(string(data)).State; state != brain.NoteStale {
+		t.Fatalf("session-close housekeeping state = %q, want %q", state, brain.NoteStale)
+	}
+	last, ok := ds.Housekeeper.HousekeeperStatus()["last_report"].(*housekeeper.Report)
+	if !ok {
+		t.Fatalf("expected a recorded session-close report, got %#v", ds.Housekeeper.HousekeeperStatus()["last_report"])
+	}
+	if last.Depth != housekeeper.Light {
+		t.Fatalf("session-close report depth = %q, want %q", last.Depth, housekeeper.Light)
+	}
+}
+
 func TestSaveContextRichModeStillAvailable(t *testing.T) {
 	ds := brainServer(t)
 	body := `{"client":"kiro","summary":"complex handoff","commands":["rtk go test ./..."]}`
@@ -439,5 +479,91 @@ func TestWindowForMapping(t *testing.T) {
 		if start, _ := windowFor(name); !start.Before(time.Now()) {
 			t.Fatalf("window %q does not start in the past: %v", name, start)
 		}
+	}
+}
+
+func TestCanonicalUpsertRejectsUnreadableSourceFile(t *testing.T) {
+	ds := brainServer(t)
+	payload, err := json.Marshal(map[string]string{
+		"key":         "architecture",
+		"body":        "must not be saved\n",
+		"source_file": filepath.Join(t.TempDir(), "missing.go"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/memory/canonical", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	if rec, _ := do(t, ds, ds.apiCanonicalUpsert, req); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unreadable source_file must be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSearchV2EndpointAppliesTaskAllowanceAndValidatesCaps(t *testing.T) {
+	ds := brainServer(t)
+	if _, err := ds.ProjectObsidian.UpsertCanonical("architecture", "", "task search marker\n", brain.SourceRef{}); err != nil {
+		t.Fatal(err)
+	}
+	ds.Optimizer.ContextPlan(optimizer.PlanRequest{TaskID: "search-task", Task: "retrieve architecture"})
+	allowance, ok := ds.Optimizer.SearchAllowance("search-task", -1)
+	if !ok || allowance <= 0 {
+		t.Fatalf("expected a positive task allowance, got (%d, %v)", allowance, ok)
+	}
+
+	rec, payload := do(t, ds, ds.apiObsidianSearch,
+		httptest.NewRequest(http.MethodGet, "/api/obsidian/search?q=task+search+marker&task_id=search-task&max_tokens=999999", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := payload["effective_max_tokens"].(float64); int(got) != allowance {
+		t.Fatalf("effective cap = %v, want task allowance %d", payload["effective_max_tokens"], allowance)
+	}
+
+	rec, payload = do(t, ds, ds.apiObsidianSearch,
+		httptest.NewRequest(http.MethodGet, "/api/obsidian/search?q=task+search+marker&max_tokens=0", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("explicit zero cap should be valid, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := payload["effective_max_tokens"].(float64); got != 0 {
+		t.Fatalf("effective zero cap = %v, want 0", got)
+	}
+	if results, _ := payload["results"].([]interface{}); len(results) != 0 {
+		t.Fatalf("explicit zero cap returned %d results", len(results))
+	}
+
+	for _, target := range []string{
+		"/api/obsidian/search?q=task+search+marker&task_id=unknown-task",
+		"/api/obsidian/search?q=task+search+marker&max_tokens=-1",
+		"/api/obsidian/search?q=task+search+marker&max_tokens=not-a-number",
+	} {
+		if rec, _ := do(t, ds, ds.apiObsidianSearch, httptest.NewRequest(http.MethodGet, target, nil)); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s should be rejected with 400, got %d: %s", target, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestSaveContextReusesMiddlewareVaultLease(t *testing.T) {
+	ds := brainServer(t)
+	leaseCalls := 0
+	ds.Housekeeper.SetRunLease(func() func() {
+		leaseCalls++
+		return func() {}
+	})
+
+	router := gin.New()
+	router.Use(vaultLeaseGuard(ds))
+	router.POST("/api/obsidian/context", ds.apiObsidianSaveContext)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/obsidian/context",
+		bytes.NewBufferString(`{"client":"kiro","summary":"completed task"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if leaseCalls != 0 {
+		t.Fatalf("context save re-acquired the middleware vault lease %d times", leaseCalls)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
@@ -371,6 +372,38 @@ func TestTTLOverrideOfZeroDisablesExpiry(t *testing.T) {
 	}
 }
 
+func TestStartRunsLightThenPeriodicDeep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Interval = time.Hour
+		h := New(cfg, nil, nil)
+		h.Start()
+		synctest.Wait()
+
+		startup, ok := h.HousekeeperStatus()["last_report"].(*Report)
+		if !ok {
+			t.Fatalf("expected a startup report, got %#v", h.HousekeeperStatus()["last_report"])
+		}
+		if startup.Depth != Light {
+			t.Fatalf("startup depth = %q, want %q", startup.Depth, Light)
+		}
+
+		time.Sleep(cfg.Interval)
+		synctest.Wait()
+		periodic, ok := h.HousekeeperStatus()["last_report"].(*Report)
+		if !ok {
+			t.Fatalf("expected a periodic report, got %#v", h.HousekeeperStatus()["last_report"])
+		}
+		if periodic.Depth != Deep {
+			t.Fatalf("periodic depth = %q, want %q", periodic.Depth, Deep)
+		}
+
+		if err := h.StopContext(context.Background()); err != nil {
+			t.Fatalf("StopContext() error = %v", err)
+		}
+	})
+}
+
 func TestStopIsIdempotent(t *testing.T) {
 	h := New(DefaultConfig(), nil, nil)
 	h.Stop()
@@ -477,12 +510,12 @@ func TestSessionSurvivesWhenPromotionIsDisabled(t *testing.T) {
 }
 
 // TestMarkStateIsAtomic pins the crash-safety contract (Fine-Tuning §32):
-// the state flip must never leave a truncated or half-written note behind —
-// the write lands via a temp file + rename in the same directory.
+// the state flip must never leave a truncated or half-written note behind, and
+// must preserve a user's existing restrictive permissions.
 func TestMarkStateIsAtomic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session-note.md")
 	body := "---\ntype: session\nstate: active\n---\n\nbody line\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -495,6 +528,13 @@ func TestMarkStateIsAtomic(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "state: stale") || !strings.Contains(string(data), "body line") {
 		t.Fatalf("state flip lost content: %s", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("mode = %#o, want %#o", got, want)
 	}
 }
 
@@ -568,5 +608,22 @@ func TestStopContextWaitsForStartupPass(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("StopContext did not finish after the startup pass exited")
+	}
+}
+
+func TestOnSessionCloseWithLeaseHeldSkipsRunLease(t *testing.T) {
+	h := New(DefaultConfig(), nil, nil)
+	leaseCalls := 0
+	h.SetRunLease(func() func() {
+		leaseCalls++
+		return func() {}
+	})
+
+	report := h.OnSessionCloseWithLeaseHeld()
+	if report.Depth != Light {
+		t.Fatalf("report depth = %q, want %q", report.Depth, Light)
+	}
+	if leaseCalls != 0 {
+		t.Fatalf("a caller-held lease must not be acquired again; calls = %d", leaseCalls)
 	}
 }
