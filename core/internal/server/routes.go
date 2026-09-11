@@ -86,6 +86,9 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		// MCP Startup Tax diagnostics (Fine-Tuning §8): schema overhead,
 		// measured and labeled estimated.
 		api.GET("/diagnostics/startup-tax", ds.apiStartupTax)
+		// Net savings derivation (Fine-Tuning §12.4): gross avoided minus
+		// measurable overheads; unknown stays unknown, never zero.
+		api.GET("/diagnostics/net-savings", ds.apiNetSavings)
 		api.GET("/optimizer/policy", ds.apiOptimizerPolicy)
 		// Brain v5: canonical memory, the Memory Compiler and the Housekeeper.
 		api.GET("/housekeeper/status", ds.apiHousekeeperStatus)
