@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "schema_gate_estimated_tokens": 3757,
+  "mcps": [
+    {
+      "name": "dwyt_optimizer",
+      "availability": "measured",
+      "tools": 12,
+      "tools_list_result_bytes": 9522,
+      "estimated_tokens": 2381
+    },
+    {
+      "name": "dwyt_codebase",
+      "availability": "unknown",
+      "tools": 0,
+      "tools_list_result_bytes": 0,
+      "estimated_tokens": 0
+    },
+    {
+      "name": "dwyt_obsidian",
+      "availability": "measured",
+      "tools": 9,
+      "tools_list_result_bytes": 5061,
+      "estimated_tokens": 1266
+    }
+  ],
+  "managed_instruction": {
+    "bytes": 1468,
+    "estimated_tokens": 367
+  }
+}

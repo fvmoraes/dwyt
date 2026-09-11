@@ -93,6 +93,15 @@ type Server struct {
 	logFile  string
 }
 
+func newSchemaServer(name, version string) *Server {
+	return &Server{
+		name:     name,
+		version:  version,
+		tools:    []Tool{},
+		handlers: map[string]ToolHandler{},
+	}
+}
+
 func NewServer(name, version string) *Server {
 	logPath := os.Getenv("MCP_LOG")
 	if logPath == "" {
@@ -101,13 +110,10 @@ func NewServer(name, version string) *Server {
 	}
 	os.MkdirAll(filepath.Dir(logPath), 0755)
 
-	return &Server{
-		name:     name,
-		version:  version,
-		reader:   bufio.NewReader(os.Stdin),
-		writer:   os.Stdout,
-		handlers: make(map[string]ToolHandler),
-	}
+	server := newSchemaServer(name, version)
+	server.reader = bufio.NewReader(os.Stdin)
+	server.writer = os.Stdout
+	return server
 }
 
 func (s *Server) RegisterTool(name, description string, props map[string]Property, required []string, handler ToolHandler) {
@@ -135,8 +141,9 @@ func (s *Server) ToolPayloads() []Tool {
 	return out
 }
 
-// ToolsListJSON returns the serialized tools/list result payload — the exact
-// bytes a client receives and pays for on every startup (MCP Startup Tax).
+// ToolsListJSON returns the schema-bearing JSON value placed in the JSON-RPC
+// tools/list result. It intentionally excludes the transport envelope, whose
+// request ID and newline are client-specific.
 func (s *Server) ToolsListJSON() []byte {
 	b, err := json.Marshal(map[string]interface{}{"tools": s.tools})
 	if err != nil {

@@ -90,3 +90,32 @@ func TestNetSavingsDerivationSubtractsTaxes(t *testing.T) {
 		t.Fatalf("reported tax components double-count or omit instruction tax: schema=%d instruction=%d total=%d", payload.StartupSchemaTaxTokens, payload.ManagedInstructionTaxTokens, tax.TotalEstimatedTokens)
 	}
 }
+func TestStartupTaxDiagnosticsCountsRealInstructionBlock(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	ds := &DashboardServer{Port: 2737}
+	registerRoutes(router, ds)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:2737/api/diagnostics/startup-tax", nil)
+	req.Host = "localhost:2737"
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var payload mcp.StartupTaxReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	instruction := []byte(integrate.InstructionBlock())
+	if payload.ManagedInstructionBytes != len(instruction) || payload.ManagedInstructionTokens <= 0 {
+		t.Fatalf("managed instruction = bytes=%d tokens=%d, want bytes=%d and positive tokens", payload.ManagedInstructionBytes, payload.ManagedInstructionTokens, len(instruction))
+	}
+	if payload.Coverage.TotalMCPs != 3 || payload.Coverage.MeasuredMCPs != 2 || payload.Coverage.UnknownMCPs != 1 {
+		t.Fatalf("coverage = %+v, want total=3 measured=2 unknown=1", payload.Coverage)
+	}
+	if payload.Provenance != "estimated" {
+		t.Fatalf("provenance = %q, want estimated", payload.Provenance)
+	}
+}

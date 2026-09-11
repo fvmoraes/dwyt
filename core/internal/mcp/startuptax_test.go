@@ -2,45 +2,72 @@ package mcp
 
 import (
 	"encoding/json"
-	"strings"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 )
 
-// The startup tax report makes the MCP tool-schema overhead visible and
-// auditable (Fine-Tuning §8): three first-party MCPs, per-tool sizes,
-// estimated tokens clearly labeled estimated — never presented as
-// provider-observed usage.
+const startupTaxBaselinePath = "testdata/startup-tax-baseline.json"
+
+type startupTaxBaseline struct {
+	Version                   int                      `json:"version"`
+	SchemaGateEstimatedTokens int                      `json:"schema_gate_estimated_tokens"`
+	MCPs                      []startupTaxMCPBaseline  `json:"mcps"`
+	ManagedInstruction        startupTaxBaselineMetric `json:"managed_instruction"`
+}
+
+type startupTaxMCPBaseline struct {
+	Name            string `json:"name"`
+	Availability    string `json:"availability"`
+	Tools           int    `json:"tools"`
+	SerializedBytes int    `json:"tools_list_result_bytes"`
+	EstimatedTokens int    `json:"estimated_tokens"`
+}
+
+type startupTaxBaselineMetric struct {
+	Bytes           int `json:"bytes"`
+	EstimatedTokens int `json:"estimated_tokens"`
+}
 
 func TestStartupTaxReportShape(t *testing.T) {
 	report := MeasureStartupTax(nil)
-	if len(report.MCPs) != 2 {
-		t.Fatalf("expected 2 first-party MCP servers (optimizer, obsidian), got %d", len(report.MCPs))
+	names := mcpregistry.CanonicalNames()
+	if len(report.MCPs) != len(names) {
+		t.Fatalf("MCP count = %d, want canonical count %d", len(report.MCPs), len(names))
 	}
-	var optimizer, obsidian *MCPTaxReport
-	for i := range report.MCPs {
-		switch report.MCPs[i].Name {
-		case "dwyt_optimizer":
-			optimizer = &report.MCPs[i]
-		case "dwyt_obsidian":
-			obsidian = &report.MCPs[i]
+	for i, name := range names {
+		if report.MCPs[i].Name != name {
+			t.Fatalf("MCP %d = %q, want canonical %q", i, report.MCPs[i].Name, name)
 		}
 	}
-	if optimizer == nil || obsidian == nil {
-		t.Fatalf("missing MCPs in report: %+v", report.MCPs)
+
+	if report.Coverage.TotalMCPs != 3 || report.Coverage.MeasuredMCPs != 2 || report.Coverage.UnknownMCPs != 1 {
+		t.Fatalf("coverage = %+v, want total=3 measured=2 unknown=1", report.Coverage)
 	}
-	if optimizer.Tools != 12 {
-		t.Errorf("optimizer tool count = %d, want 12", optimizer.Tools)
-	}
-	if obsidian.Tools != 9 {
-		t.Errorf("obsidian tool count = %d, want 9", obsidian.Tools)
-	}
-	for _, m := range report.MCPs {
-		if m.SerializedBytes <= 0 || m.EstimatedTokens <= 0 {
-			t.Errorf("%s: bytes=%d tokens=%d, both must be measured", m.Name, m.SerializedBytes, m.EstimatedTokens)
+
+	optimizer := startupTaxMCP(t, report, mcpregistry.ServerOptimizer)
+	obsidian := startupTaxMCP(t, report, mcpregistry.ServerObsidian)
+	codebase := startupTaxMCP(t, report, mcpregistry.ServerCodebase)
+	for _, mcpReport := range []MCPTaxReport{optimizer, obsidian} {
+		if mcpReport.Availability != MCPAvailabilityMeasured {
+			t.Errorf("%s availability = %q, want measured", mcpReport.Name, mcpReport.Availability)
 		}
-		if len(m.PerTool) != m.Tools {
-			t.Errorf("%s: per_tool entries = %d, want %d", m.Name, len(m.PerTool), m.Tools)
+		if mcpReport.SerializedBytes <= 0 || mcpReport.EstimatedTokens <= 0 {
+			t.Errorf("%s: bytes=%d tokens=%d, both must be measured", mcpReport.Name, mcpReport.SerializedBytes, mcpReport.EstimatedTokens)
 		}
+		if len(mcpReport.PerTool) != mcpReport.Tools {
+			t.Errorf("%s: per_tool entries = %d, want %d", mcpReport.Name, len(mcpReport.PerTool), mcpReport.Tools)
+		}
+	}
+	if codebase.Availability != MCPAvailabilityUnknown || codebase.UnavailableReason == "" {
+		t.Fatalf("codebase catalog must be explicit unknown, got %+v", codebase)
+	}
+	if codebase.Tools != 0 || codebase.SerializedBytes != 0 || codebase.EstimatedTokens != 0 {
+		t.Fatalf("unknown codebase catalog must not fabricate metrics, got %+v", codebase)
 	}
 	if report.TotalEstimatedTokens <= 0 {
 		t.Error("total tokens must be positive")
@@ -52,68 +79,129 @@ func TestStartupTaxReportShape(t *testing.T) {
 
 func TestStartupTaxPerToolSumsToTotal(t *testing.T) {
 	report := MeasureStartupTax(nil)
-	for _, m := range report.MCPs {
+	for _, mcpReport := range report.MCPs {
+		if mcpReport.Availability != MCPAvailabilityMeasured {
+			continue
+		}
 		sum := 0
-		for _, tt := range m.PerTool {
-			if tt.Name == "" {
-				t.Fatalf("%s: per-tool entry without a name", m.Name)
+		for _, tool := range mcpReport.PerTool {
+			if tool.Name == "" {
+				t.Fatalf("%s: per-tool entry without a name", mcpReport.Name)
 			}
-			sum += tt.EstimatedTokens
+			sum += tool.EstimatedTokens
 		}
 		// Array serialization adds separators/wrapping the per-object marshal
 		// does not, so the sum is approximate — bounded drift, not exact.
-		drift := sum - m.EstimatedTokens
+		drift := sum - mcpReport.EstimatedTokens
 		if drift < 0 {
 			drift = -drift
 		}
 		if drift > 10 {
-			t.Fatalf("%s: per-tool tokens sum to %d, total says %d (drift %d > 10)", m.Name, sum, m.EstimatedTokens, drift)
+			t.Fatalf("%s: per-tool tokens sum to %d, total says %d (drift %d > 10)", mcpReport.Name, sum, mcpReport.EstimatedTokens, drift)
 		}
 	}
 }
 
-// TestStartupTaxSerializationIsHonest pins that the measured bytes are what
-// the client actually receives from tools/list: a JSON object with a tools
-// array that parses back into the reported tool count.
 func TestStartupTaxSerializationIsHonest(t *testing.T) {
 	report := MeasureStartupTax(nil)
-	for _, m := range report.MCPs {
+	for _, mcpReport := range report.MCPs {
+		if mcpReport.Availability != MCPAvailabilityMeasured {
+			continue
+		}
 		var decoded struct {
 			Tools []struct {
 				Name string `json:"name"`
 			} `json:"tools"`
 		}
-		if err := json.Unmarshal([]byte(m.Serialized), &decoded); err != nil {
-			t.Fatalf("%s: serialized payload does not parse: %v", m.Name, err)
+		if err := json.Unmarshal([]byte(mcpReport.Serialized), &decoded); err != nil {
+			t.Fatalf("%s: serialized payload does not parse: %v", mcpReport.Name, err)
 		}
-		if len(decoded.Tools) != m.Tools {
-			t.Fatalf("%s: serialized %d tools, report says %d", m.Name, len(decoded.Tools), m.Tools)
+		if len(decoded.Tools) != mcpReport.Tools {
+			t.Fatalf("%s: serialized %d tools, report says %d", mcpReport.Name, len(decoded.Tools), mcpReport.Tools)
 		}
 	}
 }
 
-// TestStartupTaxGate pins the CI regression ceiling: tool schemas must not
-// grow silently (Fine-Tuning §8.3, §28.8). The ceiling derives from the
-// Fase 0/Fase 8 baseline with a deliberate margin; raising it is a decision
-// that belongs in a commit message with numbers, not an accident.
-func TestStartupTaxGate(t *testing.T) {
-	const gateTokens = 3700 // measured baseline @ Fase 8: 3589 est. tokens (21 tools) + ~3% margin
+func TestMeasureStartupTaxDoesNotCreateRuntimeFiles(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "logs", "startup-tax.log")
+	t.Setenv("MCP_LOG", logPath)
+
+	MeasureStartupTax(nil)
+
+	_, err := os.Stat(filepath.Dir(logPath))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("measurement created runtime log directory: stat error = %v", err)
+	}
+}
+
+func TestStartupTaxRegressionGate(t *testing.T) {
+	baseline := loadStartupTaxBaseline(t)
 	report := MeasureStartupTax(nil)
-	if report.TotalEstimatedTokens > gateTokens {
-		t.Fatalf("startup tax grew to %d est. tokens (gate %d). If this growth is justified, document the before/after table in the commit (Fine-Tuning §8.3); otherwise shorten descriptions (Law: no startup-token regression without evidence).",
-			report.TotalEstimatedTokens, gateTokens)
+	if report.TotalEstimatedTokens > baseline.SchemaGateEstimatedTokens {
+		t.Fatalf("startup tax grew to %d est. tokens (gate %d). If this growth is justified, document the before/after table in the commit; otherwise shorten descriptions.", report.TotalEstimatedTokens, baseline.SchemaGateEstimatedTokens)
 	}
 }
 
-// TestManagedInstructionCounted keeps the instruction block inside the same
-// audit: the Entry Contract size feeds the same startup-tax math.
-func TestManagedInstructionCounted(t *testing.T) {
-	instruction := []byte(strings.Repeat("# DWYT\n", 100))
+func TestStartupTaxBaseline(t *testing.T) {
+	baseline := loadStartupTaxBaseline(t)
+	if baseline.Version != 1 {
+		t.Fatalf("baseline version = %d, want 1", baseline.Version)
+	}
+
+	report := MeasureStartupTax([]byte(integrate.InstructionBlock()))
+	if len(report.MCPs) != len(baseline.MCPs) {
+		t.Fatalf("report has %d MCPs, baseline has %d", len(report.MCPs), len(baseline.MCPs))
+	}
+	for _, expected := range baseline.MCPs {
+		actual := startupTaxMCP(t, report, expected.Name)
+		if actual.Availability != expected.Availability || actual.Tools != expected.Tools || actual.SerializedBytes != expected.SerializedBytes || actual.EstimatedTokens != expected.EstimatedTokens {
+			t.Fatalf("%s differs from frozen baseline: got availability=%s tools=%d bytes=%d tokens=%d, want availability=%s tools=%d bytes=%d tokens=%d", actual.Name, actual.Availability, actual.Tools, actual.SerializedBytes, actual.EstimatedTokens, expected.Availability, expected.Tools, expected.SerializedBytes, expected.EstimatedTokens)
+		}
+	}
+	if report.ManagedInstructionBytes != baseline.ManagedInstruction.Bytes || report.ManagedInstructionTokens != baseline.ManagedInstruction.EstimatedTokens {
+		t.Fatalf("instruction block differs from frozen baseline: got bytes=%d tokens=%d, want bytes=%d tokens=%d", report.ManagedInstructionBytes, report.ManagedInstructionTokens, baseline.ManagedInstruction.Bytes, baseline.ManagedInstruction.EstimatedTokens)
+	}
+}
+
+func TestInstructionBlockCounted(t *testing.T) {
+	instruction := []byte(integrate.InstructionBlock())
+	if len(instruction) == 0 {
+		t.Fatal("managed instruction block must not be empty")
+	}
+
 	report := MeasureStartupTax(instruction)
+	schemaOnly := MeasureStartupTax(nil)
 	if report.ManagedInstructionBytes != len(instruction) {
 		t.Fatalf("instruction bytes = %d, want %d", report.ManagedInstructionBytes, len(instruction))
 	}
 	if report.ManagedInstructionTokens <= 0 {
 		t.Fatal("instruction tokens must be estimated")
 	}
+	if report.TotalEstimatedTokens != schemaOnly.TotalEstimatedTokens+report.ManagedInstructionTokens {
+		t.Fatalf("total tokens = %d, want schema %d + instruction %d", report.TotalEstimatedTokens, schemaOnly.TotalEstimatedTokens, report.ManagedInstructionTokens)
+	}
+}
+
+func startupTaxMCP(t *testing.T, report StartupTaxReport, name string) MCPTaxReport {
+	t.Helper()
+	for _, mcpReport := range report.MCPs {
+		if mcpReport.Name == name {
+			return mcpReport
+		}
+	}
+	t.Fatalf("missing MCP %q from report: %+v", name, report.MCPs)
+	return MCPTaxReport{}
+}
+
+func loadStartupTaxBaseline(t *testing.T) startupTaxBaseline {
+	t.Helper()
+	data, err := os.ReadFile(startupTaxBaselinePath)
+	if err != nil {
+		t.Fatalf("read startup-tax baseline: %v", err)
+	}
+	var baseline startupTaxBaseline
+	if err := json.Unmarshal(data, &baseline); err != nil {
+		t.Fatalf("decode startup-tax baseline: %v", err)
+	}
+	return baseline
 }
