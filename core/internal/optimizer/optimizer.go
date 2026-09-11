@@ -704,11 +704,16 @@ func (g *Optimizer) CompactToolOutput(req CompactRequest) (toolopt.Compacted, er
 		}
 		compacted.CompressionPct = float64(saved) / float64(compacted.RawTokensEst) * 100
 	}
+	// Law 6 (positive Token ROI): with the raw-ref handle attached and the
+	// sent estimate exact, the gate decides whether the reduction pays for
+	// its metadata and recovery overhead. Critical evidence always survives.
+	compacted = toolopt.ApplyCompressionGate(compacted, toolopt.DefaultMinGainTokens)
 	span.SetAll(map[string]interface{}{
 		"raw_tokens":      compacted.RawTokensEst,
 		"sent_tokens":     compacted.SentTokensEst,
 		"compression_pct": compacted.CompressionPct,
 		"archived":        compacted.RawRef != "",
+		"passed_through":  compacted.PassedThrough,
 	})
 	return compacted, nil
 }
