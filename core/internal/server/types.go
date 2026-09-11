@@ -84,17 +84,18 @@ type DashboardServer struct {
 	// Telemetry is the request and task ledger behind cost-per-completed-task.
 	Telemetry *telemetry.Store
 	// V5Config is the consolidated DWYT v5 configuration (spec §57).
-	V5Config         dwytconfig.Config
-	HeadroomPort     int
-	headroomMu       sync.RWMutex
-	projectMu        sync.RWMutex
-	sseClients       map[chan string]bool
-	sseMu            sync.Mutex
-	installMu        sync.Mutex
-	installStatus    map[string]string
-	installing       bool
-	indexProject     string
-	codebaseProgress struct {
+	V5Config              dwytconfig.Config
+	HeadroomPort          int // effective port used by health/status/client wrappers
+	HeadroomRequestedPort int // configured port retained across transient fallbacks
+	headroomMu            sync.RWMutex
+	projectMu             sync.RWMutex
+	sseClients            map[chan string]bool
+	sseMu                 sync.Mutex
+	installMu             sync.Mutex
+	installStatus         map[string]string
+	installing            bool
+	indexProject          string
+	codebaseProgress      struct {
 		mu       sync.Mutex
 		indexing bool
 		progress string

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
-	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/install"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
@@ -38,7 +37,10 @@ func (ds *DashboardServer) buildStartupTasks() []startupTask {
 	return []startupTask{
 		{name: "vault_reconciliation", run: ds.taskVaultReconciliation},
 		{name: "mcp_config_sync", run: ds.taskMCPConfigSync},
-		{name: "headroom_probe", run: ds.taskHeadroomProbe},
+		// Headroom lifecycle is intentionally NOT a startup task. The service
+		// reconciler is the single owner of Headroom's start/health/adoption
+		// decisions (runHeadroomLifecycle → startHeadroomIfNeeded → the
+		// reconciler); a parallel probe here would bypass identity/adoption.
 		{name: "obsidian_mcp_validation", run: ds.taskObsidianMCPValidation},
 		{name: "housekeeper_start", run: ds.taskHousekeeperStart},
 	}
@@ -162,16 +164,6 @@ func (ds *DashboardServer) taskMCPConfigSync(ctx context.Context) error {
 		return fmt.Errorf("sync mcp configs: %w", err)
 	}
 	log.Info("mcp configs synced", log.Fields{"clients": strings.Join(ds.setupConfig.Ias, ",")})
-	return nil
-}
-
-func (ds *DashboardServer) taskHeadroomProbe(ctx context.Context) error {
-	// A Headroom process started outside this daemon (previous run, manual
-	// start) is adopted into the runtime state so the dashboard shows it;
-	// actual start/health supervision is startHeadroomIfNeeded's job.
-	if health.ProbeURLContext(ctx, fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)) {
-		ds.RuntimeState.RegisterProcess("headroom", 0, ds.HeadroomPort)
-	}
 	return nil
 }
 

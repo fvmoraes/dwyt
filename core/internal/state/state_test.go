@@ -173,7 +173,9 @@ func TestRuntimeState_Persistence(t *testing.T) {
 	state1 := Init(tmpDir)
 	state1.RegisterProcess("test", 12345, 8080)
 	state1.SetCurrentProject("/tmp/project", "project")
-	state1.Save()
+	if err := state1.Save(); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
 
 	// Verify file was created
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
@@ -196,24 +198,24 @@ func TestRuntimeState_Persistence(t *testing.T) {
 	}
 }
 
-func TestRuntimeState_SaveFailureBackup(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create read-only directory to force save failure
-	readonlyDir := filepath.Join(tmpDir, "readonly")
-	os.MkdirAll(readonlyDir, 0555)
-	defer os.Chmod(readonlyDir, 0755) // cleanup
-
-	state := Init(readonlyDir)
+func TestRuntimeState_SaveWritesMatchingMainAndBackup(t *testing.T) {
+	home := t.TempDir()
+	state := Init(home)
 	state.RegisterProcess("test", 12345, 8080)
+	if err := state.Save(); err != nil {
+		t.Fatalf("Save error = %v", err)
+	}
 
-	// This should fail but create backup
-	state.Save()
-
-	// Check if backup was created
-	backupPath := filepath.Join(readonlyDir, "state.json.backup")
-	if _, err := os.Stat(backupPath); err == nil {
-		t.Log("Backup created successfully")
+	mainData, err := os.ReadFile(filepath.Join(home, "state.json"))
+	if err != nil {
+		t.Fatalf("read state.json: %v", err)
+	}
+	backupData, err := os.ReadFile(filepath.Join(home, "state.json.backup"))
+	if err != nil {
+		t.Fatalf("read state.json.backup: %v", err)
+	}
+	if string(mainData) != string(backupData) {
+		t.Fatalf("main and backup differ:\nmain: %s\nbackup: %s", mainData, backupData)
 	}
 }
 
@@ -243,20 +245,82 @@ func TestRuntimeState_ProjectLastOpen(t *testing.T) {
 	tmpDir := t.TempDir()
 	state := Init(tmpDir)
 
-	// Set project first time
 	state.SetCurrentProject("/tmp/project", "project")
-	proj1 := state.Projects["/tmp/project"]
-	time1 := proj1.LastOpen
+	project := state.Projects["/tmp/project"]
+	baseline := time.Unix(1, 0)
+	project.LastOpen = baseline
+	state.Projects["/tmp/project"] = project
 
-	// Wait a bit
-	time.Sleep(10 * time.Millisecond)
-
-	// Set same project again
 	state.SetCurrentProject("/tmp/project", "project")
-	proj2 := state.Projects["/tmp/project"]
-	time2 := proj2.LastOpen
+	updated := state.Projects["/tmp/project"].LastOpen
+	if !updated.After(baseline) {
+		t.Fatalf("LastOpen = %v, want after %v", updated, baseline)
+	}
+}
 
-	if !time2.After(time1) {
-		t.Error("LastOpen should be updated on subsequent access")
+func TestRuntimeStatePersistsLifecycleContract(t *testing.T) {
+	home := t.TempDir()
+	first := Init(home)
+	first.SetProcessLifecycle(ProcessInfo{
+		Name: "codebase", PID: 4242, Port: 9750,
+		RequestedPort: 9749, EffectivePort: 9750,
+		Healthy: true, State: "healthy", DesiredState: "running",
+		Ownership: "managed", Identity: "identity-token",
+	})
+
+	reloaded := Init(home)
+	process, ok := reloaded.GetProcess("codebase")
+	if !ok {
+		t.Fatal("lifecycle process was not persisted")
+	}
+	if process.RequestedPort != 9749 || process.EffectivePort != 9750 || process.Port != 9750 ||
+		process.DesiredState != "running" || process.Ownership != "managed" || process.Identity != "identity-token" {
+		t.Fatalf("persisted lifecycle contract = %+v", process)
+	}
+}
+
+func TestRuntimeStateInitFallsBackToBackupAfterTruncatedState(t *testing.T) {
+	home := t.TempDir()
+	statePath := filepath.Join(home, "state.json")
+	backupPath := statePath + ".backup"
+	if err := os.WriteFile(statePath, []byte(`{"processes":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	backup := `{"version":"backup","processes":{"codebase":{"name":"codebase","desired_state":"stopped"}},"tool_errors":{},"projects":{}}`
+	if err := os.WriteFile(backupPath, []byte(backup), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := Init(home)
+	if loaded.Version != "backup" {
+		t.Fatalf("version = %q, want backup", loaded.Version)
+	}
+	process, ok := loaded.GetProcess("codebase")
+	if !ok || process.DesiredState != "stopped" {
+		t.Fatalf("backup lifecycle state was not recovered: %+v (present=%v)", process, ok)
+	}
+}
+
+func TestAtomicWriteFileReplacesWholeDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWriteFile(path, []byte(`{"complete":true}`), 0600); err != nil {
+		t.Fatalf("atomicWriteFile error = %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != `{"complete":true}` {
+		t.Fatalf("contents = %q", contents)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".state.json.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary state files leaked: %v", matches)
 	}
 }

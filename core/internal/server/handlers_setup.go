@@ -95,32 +95,21 @@ func (ds *DashboardServer) apiSetupStatus(c *gin.Context) {
 
 func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 	results := make(map[string]string)
-
-	if status, err := ds.ProcMan.Start("codebase"); err != nil {
-		results["codebase-memory-mcp"] = "error: " + err.Error()
-		if ds.RuntimeState != nil {
-			ds.RuntimeState.SetToolError("codebase", err.Error())
+	for _, service := range []string{"codebase", "headroom"} {
+		status, err := ds.startManagedService(c.Request.Context(), service)
+		label := service
+		if service == "codebase" {
+			label = "codebase-memory-mcp"
 		}
-	} else {
-		results["codebase-memory-mcp"] = "started"
-		if ds.RuntimeState != nil && status != nil {
-			ds.RuntimeState.RegisterProcess("codebase", status.PID, status.Port)
-			ds.RuntimeState.SetProcessHealthy("codebase", status.Healthy, status.Error)
+		if err != nil {
+			results[label] = "error: " + err.Error()
+			if ds.RuntimeState != nil {
+				ds.RuntimeState.SetToolError(service, err.Error())
+			}
+			continue
 		}
-	}
-
-	if status, err := ds.startHeadroom(); err != nil {
-		results["headroom"] = "error: " + err.Error()
-		if ds.RuntimeState != nil {
-			ds.RuntimeState.SetToolError("headroom", err.Error())
-		}
-	} else {
-		results["headroom"] = "started"
-		if ds.RuntimeState != nil && status != nil {
-			ds.RuntimeState.RegisterProcess("headroom", status.PID, status.Port)
-			ds.RuntimeState.SetProcessHealthy("headroom", status.Healthy, status.Error)
-		}
-		if status != nil && status.Healthy {
+		results[label] = "started"
+		if service == "headroom" && status != nil && status.Healthy {
 			ds.configureHeadroomClients(ds.DefaultProject)
 		}
 	}
@@ -131,7 +120,6 @@ func (ds *DashboardServer) apiServicesStartAll(c *gin.Context) {
 	} else {
 		results["obsidian"] = "no_vault"
 	}
-
 	c.JSON(200, gin.H{"status": "started", "services": results})
 }
 
@@ -139,16 +127,12 @@ func (ds *DashboardServer) apiServicesStopAll(c *gin.Context) {
 	failures := make(map[string]string)
 	var stopErrors []error
 	for _, service := range []string{"codebase", "headroom"} {
-		if _, err := ds.ProcMan.Stop(service); err != nil {
+		if _, err := ds.stopManagedService(c.Request.Context(), service); err != nil {
 			failures[service] = err.Error()
 			stopErrors = append(stopErrors, fmt.Errorf("stopping %s: %w", service, err))
 			if ds.RuntimeState != nil {
 				ds.RuntimeState.SetToolError(service, err.Error())
 			}
-			continue
-		}
-		if ds.RuntimeState != nil {
-			ds.RuntimeState.RemoveProcess(service)
 		}
 	}
 	if err := errors.Join(stopErrors...); err != nil {

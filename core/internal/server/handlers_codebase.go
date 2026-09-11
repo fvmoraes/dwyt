@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
-	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/log"
+	"github.com/fvmoraes/dwyt/internal/procman"
+	toolstatus "github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
 
@@ -110,54 +111,58 @@ func (ds *DashboardServer) apiCodebaseIndexStatus(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseOpenUI(c *gin.Context) {
-	uiPort := 9749
-	if st := ds.ProcMan.Status("codebase"); st != nil && st.Running && st.Healthy && st.Port > 0 {
-		uiPort = st.Port
+	uiPort := toolstatus.CodebasePort()
+	current := ds.ProcMan.Status("codebase")
+	if current != nil && current.Running && current.Healthy && current.Port > 0 {
+		uiPort = current.Port
 		c.JSON(200, gin.H{"url": fmt.Sprintf("http://localhost:%d", uiPort), "started": false, "ready": true})
 		return
 	}
-	uiURL := fmt.Sprintf("http://localhost:%d", uiPort)
-
-	bin := ds.codebasePath()
-	if isPortOpen(uiPort) {
-		c.JSON(200, gin.H{"url": uiURL, "started": false, "ready": true})
+	// Consult the reconciler-owned view (identity-validated) rather than a bare
+	// HTTP 200 to decide the service is already serving its UI.
+	if observed := ds.observedServiceStatus("codebase", uiPort); observed.Healthy {
+		if observed.Port > 0 {
+			uiPort = observed.Port
+		}
+		c.JSON(200, gin.H{"url": fmt.Sprintf("http://localhost:%d", uiPort), "started": false, "ready": true})
 		return
 	}
-	if _, err := os.Stat(bin); err != nil {
+	if _, err := os.Stat(ds.codebasePath()); err != nil {
 		c.JSON(404, gin.H{"status": "not_installed", "error": "codebase-memory-mcp not installed", "url": ""})
 		return
 	}
 
-	uiPort = health.FindFreePort(uiPort)
-	uiURL = fmt.Sprintf("http://localhost:%d", uiPort)
-	if mpStatus := ds.ProcMan.Status("codebase"); mpStatus != nil && mpStatus.Port != uiPort {
-		// ProcessManager owns the actual port selection. Updating through start is
-		// intentionally avoided here; the returned URL is advisory for the browser.
+	var (
+		started *procman.ServiceStatus
+		err     error
+	)
+	if current != nil && current.Running {
+		started, err = ds.restartManagedService(c.Request.Context(), "codebase")
+	} else {
+		started, err = ds.startManagedService(c.Request.Context(), "codebase")
 	}
-	if !ds.stopCodebaseForOpenUI(c) {
+	if err != nil {
+		c.JSON(500, gin.H{"status": "error", "error": err.Error(), "url": ""})
 		return
 	}
-	time.Sleep(50 * time.Millisecond)
-
-	go func() {
-		ds.ProcMan.Start("codebase")
-	}()
-	c.JSON(200, gin.H{"url": uiURL, "started": true, "ready": false, "starting": true})
+	if started != nil && started.Port > 0 {
+		uiPort = started.Port
+	}
+	c.JSON(200, gin.H{
+		"url":     fmt.Sprintf("http://localhost:%d", uiPort),
+		"started": true, "ready": started != nil && started.Healthy,
+		"starting": started == nil || !started.Healthy,
+	})
 }
 
 func (ds *DashboardServer) stopCodebaseForOpenUI(c *gin.Context) bool {
-	if _, err := ds.ProcMan.Stop("codebase"); err != nil {
+	if _, err := ds.stopManagedService(c.Request.Context(), "codebase"); err != nil {
 		c.JSON(500, gin.H{"status": "error", "error": err.Error(), "url": ""})
 		return false
 	}
 	return true
 }
 
-// creditCodebaseUsage records one real codebase MCP interaction (a (re)index
-// completed via the dashboard) against a project and credits a bounded
-// per-call saving. Agent tool calls (search_graph, trace_path, ...) are
-// counted separately and harness-independently by the dwyt stdio shim, which
-// reports them to /api/mcp/usage.
 func (ds *DashboardServer) creditCodebaseUsage(projectPath string) {
 	if ds.Store == nil || projectPath == "" {
 		return
@@ -172,7 +177,7 @@ func (ds *DashboardServer) creditCodebaseUsage(projectPath string) {
 }
 
 func (ds *DashboardServer) apiCodebaseStart(c *gin.Context) {
-	status, err := ds.ProcMan.Start("codebase")
+	status, err := ds.startManagedService(c.Request.Context(), "codebase")
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -181,7 +186,7 @@ func (ds *DashboardServer) apiCodebaseStart(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseStop(c *gin.Context) {
-	status, err := ds.ProcMan.Stop("codebase")
+	status, err := ds.stopManagedService(c.Request.Context(), "codebase")
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -190,21 +195,22 @@ func (ds *DashboardServer) apiCodebaseStop(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiCodebaseStatus(c *gin.Context) {
-	st := ds.ProcMan.Status("codebase")
-	if health.ProbeURL("http://127.0.0.1:9749/health") {
-		st.Status = "online"
-		st.State = "online"
-		st.Running = true
-		st.Healthy = true
-		st.Port = 9749
-		st.Error = ""
-	} else if isPortOpen(9749) {
+	port := toolstatus.CodebasePort()
+	// Owner-respecting status: derive online/healthy from ProcessManager plus
+	// the reconciler's identity-validated projection, never from a bare HTTP
+	// 200 that could belong to an unrelated process on the port.
+	st := ds.observedServiceStatus("codebase", port)
+	if !st.Healthy && isPortOpen(port) {
 		st.Status = "port_open_no_health"
 		st.State = "port_open_no_health"
 		st.Running = false
 		st.Healthy = false
-		st.Port = 9749
-		st.Error = "port 9749 open but healthcheck failed"
+		if st.Port == 0 {
+			st.Port = port
+		}
+		if st.Error == "" {
+			st.Error = fmt.Sprintf("port %d open but healthcheck failed", port)
+		}
 	}
 	c.JSON(200, st)
 }

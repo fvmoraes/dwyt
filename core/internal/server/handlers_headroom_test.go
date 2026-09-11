@@ -99,7 +99,7 @@ func TestHeadroomLifecycleUsesSelectedExternalToolPath(t *testing.T) {
 	}
 }
 
-func TestAPIHeadroomStopPMKeepsRuntimeStateOnStopError(t *testing.T) {
+func TestAPIHeadroomStopPMReconcilesStaleRuntimeHint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	home := t.TempDir()
 	runtimeState := state.Init(home)
@@ -114,21 +114,15 @@ func TestAPIHeadroomStopPMKeepsRuntimeStateOnStopError(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/headroom/stop", nil)
 	ds.apiHeadroomStopPM(c)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("stop status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, want 200 for an already-absent process; body=%s", rec.Code, rec.Body.String())
 	}
-	var body struct {
-		Status string `json:"status"`
-		Error  string `json:"error"`
+	process, ok := runtimeState.GetProcess("headroom")
+	if !ok {
+		t.Fatal("desired state must remain persisted after stop")
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Status != "error" || body.Error == "" {
-		t.Fatalf("stop response = %+v, want explicit error", body)
-	}
-	if _, ok := runtimeState.GetProcess("headroom"); !ok {
-		t.Fatal("failed stop must not remove headroom from runtime state")
+	if process.DesiredState != desiredStopped || process.State != svcStopped || process.Healthy {
+		t.Fatalf("stale runtime hint was not reconciled safely: %+v", process)
 	}
 }
 
@@ -158,12 +152,15 @@ func TestAPIHeadroomStatsURLUsesRegisteredProcessManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pm := procman.New(t.TempDir())
+	home := t.TempDir()
+	pm := procman.New(home)
 	pm.Register("headroom", os.Args[0], "/health", blockedPort,
 		"-test.run=^TestHeadroomStatsProxyHelper$", "--", "--port", "{port}")
 	ds := &DashboardServer{
 		DwytBin:      t.TempDir(), // no legacy headroom binary exists here
+		DwytHome:     home,
 		ProcMan:      pm,
+		RuntimeState: state.Init(home),
 		HeadroomPort: blockedPort,
 	}
 	t.Cleanup(func() { _, _ = pm.Stop("headroom") })
@@ -241,4 +238,24 @@ func helperPort(t *testing.T, args []string) int {
 	}
 	t.Fatalf("helper port not found in arguments: %q", args)
 	return 0
+}
+
+func TestHeadroomEffectiveFallbackDoesNotOverwriteRequestedPort(t *testing.T) {
+	t.Setenv("DWYT_HEADROOM_PORT", "8787")
+	ds := &DashboardServer{HeadroomPort: 8787, HeadroomRequestedPort: 8787}
+
+	ds.setHeadroomPort(8788)
+
+	if got := ds.headroomPort(); got != 8788 {
+		t.Fatalf("effective port = %d, want 8788", got)
+	}
+	if got := ds.HeadroomRequestedPort; got != 8787 {
+		t.Fatalf("requested port = %d, want 8787", got)
+	}
+	if got := configuredHeadroomPort(); got != 8787 {
+		t.Fatalf("fallback rewrote configured port to %d, want 8787", got)
+	}
+	if got := os.Getenv("DWYT_HEADROOM_PORT"); got != "8787" {
+		t.Fatalf("fallback rewrote DWYT_HEADROOM_PORT=%q, want 8787", got)
+	}
 }

@@ -132,11 +132,10 @@ func (ds *DashboardServer) goLifecycleLocked(run func()) {
 	}()
 }
 
-// runCodebaseLifecycle performs the legacy warmup after bind, then hands
-// ownership to the reconciler. The lock closes the cancellation/start race:
-// Shutdown either observes a started reconciler or cancellation wins first.
+// runCodebaseLifecycle starts the sole decision owner after the Dashboard has
+// entered Accept. RunContext is non-blocking; a slow Codebase health budget
+// cannot delay Core readiness or this lifecycle goroutine.
 func (ds *DashboardServer) runCodebaseLifecycle(ctx context.Context) {
-	warmCodebaseAttempt(ctx, ds.ProcMan, "http://127.0.0.1:9749/health")
 	if ctx.Err() != nil || ds.SvcCtl == nil {
 		return
 	}
@@ -148,7 +147,7 @@ func (ds *DashboardServer) runCodebaseLifecycle(ctx context.Context) {
 	}
 	ds.SvcCtl.RunContext(ctx)
 	ds.svcCtlStarted = true
-	log.Info("service ready", log.Fields{
+	log.Info("service reconciliation started", log.Fields{
 		"event": "service_ready_duration", "service": "codebase",
 		"duration_ms": time.Since(ds.startupStarted).Milliseconds(),
 	})
@@ -233,9 +232,22 @@ func (ds *DashboardServer) Shutdown(ctx context.Context) error {
 	if err := waitDone(ctx, startupDone, "startup tasks"); err != nil {
 		shutdownErrs = append(shutdownErrs, err)
 	}
-	if svcCtlStarted && svcCtl != nil {
-		if err := svcCtl.StopContext(ctx); err != nil {
-			shutdownErrs = append(shutdownErrs, fmt.Errorf("stop service reconciler: %w", err))
+	// Drain the reconciler loop first so no periodic pass can spawn or restart a
+	// service while we are stopping its children, then stop only the processes
+	// DWYT owns. A lazily-created controller (never Run) is still consulted so a
+	// managed child started by a handler is drained; StopManagedChildren is a
+	// no-op when nothing is owned, so there is never a double stop.
+	if svcCtl == nil {
+		svcCtl = ds.currentServiceController()
+	}
+	if svcCtl != nil {
+		if svcCtlStarted {
+			if err := svcCtl.StopContext(ctx); err != nil {
+				shutdownErrs = append(shutdownErrs, fmt.Errorf("stop service reconciler: %w", err))
+			}
+		}
+		if err := svcCtl.StopManagedChildren(ctx); err != nil {
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("stop managed children: %w", err))
 		}
 	}
 	if ds.Housekeeper != nil {

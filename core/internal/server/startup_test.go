@@ -78,10 +78,13 @@ func blockingStartupTask(name string, release <-chan struct{}) (startupTask, <-c
 	return task, entered
 }
 
-// The optional Headroom probe used to execute synchronously before r.Run bound
-// the dashboard. This test blocks that probe after its TCP connection is
-// accepted and then asks the dashboard for /health. The request can succeed
-// only when the Core listener was created before optional work began.
+// Headroom lifecycle is now owned solely by the reconciler: there is no longer
+// a parallel startup probe. The only network contact with the Headroom port is
+// the reconciler's identity validation during adoption, which runs after the
+// Core listener is already in its accept loop. This test blocks that
+// reconciler-owned connection after it is accepted and asserts the dashboard
+// still answers /health — proving the bind precedes all optional owner work and
+// that no separate probe races the reconciler.
 func TestDashboardBindsBeforeOptionalHeadroomProbeCompletes(t *testing.T) {
 	probeListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

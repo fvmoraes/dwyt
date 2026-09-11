@@ -168,11 +168,16 @@ func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
 		Name string `json:"name"`
 	}
 	c.BindJSON(&body)
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Start(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.startManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -185,11 +190,16 @@ func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
 		Name string `json:"name"`
 	}
 	c.BindJSON(&body)
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Stop(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.stopManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -202,11 +212,16 @@ func (ds *DashboardServer) apiMCPRestart(c *gin.Context) {
 		Name string `json:"name"`
 	}
 	c.BindJSON(&body)
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Restart(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.restartManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

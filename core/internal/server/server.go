@@ -19,7 +19,6 @@ import (
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/dwytconfig"
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
-	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
@@ -193,36 +192,29 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	headroomBin := toolPathFor(dwytBin, toolsource.ToolHeadroom, sources)
 	procmanInstance.Register("headroom", headroomBin, "/health", headroomPort, "proxy", "--port", "{port}")
 
-	// The service reconciler is constructed now because handlers expose its
-	// state, but serveDashboard starts it only after the post-bind Codebase
-	// warmup completes. That preserves a single process owner without putting
-	// optional readiness on the Core critical path.
-	svcCtl := newServiceReconciler(procmanInstance, rs, reconcilerOptions{
-		healthURLs: map[string]string{
-			"headroom": fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort),
-		},
-	})
-
 	ds := &DashboardServer{
-		Port:            port,
-		DwytBin:         dwytBin,
-		DwytHome:        dwytHome,
-		ReleaseVersion:  releaseVersion,
-		StartCwd:        project,
-		DefaultProject:  project,
-		Store:           store,
-		ProjectObsidian: pb,
-		ProcMan:         procmanInstance,
-		RuntimeState:    rs,
-		Optimizer:       optimizer.New(v5cfg.cfg.OptimizerConfig(), dwytHome),
-		V5Config:        v5cfg.cfg,
-		HeadroomPort:    headroomPort,
-		sseClients:      make(map[chan string]bool),
-		installStatus:   make(map[string]string),
-		SvcCtl:          svcCtl,
-		startupStarted:  startupStarted,
-		shutdownDone:    make(chan struct{}),
+		Port:                  port,
+		DwytBin:               dwytBin,
+		DwytHome:              dwytHome,
+		ReleaseVersion:        releaseVersion,
+		StartCwd:              project,
+		DefaultProject:        project,
+		Store:                 store,
+		ProjectObsidian:       pb,
+		ProcMan:               procmanInstance,
+		RuntimeState:          rs,
+		Optimizer:             optimizer.New(v5cfg.cfg.OptimizerConfig(), dwytHome),
+		V5Config:              v5cfg.cfg,
+		HeadroomPort:          headroomPort,
+		HeadroomRequestedPort: headroomPort,
+		sseClients:            make(map[chan string]bool),
+		installStatus:         make(map[string]string),
+		startupStarted:        startupStarted,
+		shutdownDone:          make(chan struct{}),
 	}
+	// Construct the one decision owner only after ds exists so HealthURL and
+	// effective-port publishers can read/update the live dynamic ports.
+	ds.SvcCtl = newServiceReconciler(procmanInstance, rs, reconcilerOptions{services: ds.managedServices()})
 	ds.setHeadroomPort(headroomPort)
 	// The Optimizer reports Brain health and housekeeping state, but must not
 	// import the brain package (the brain's handlers already call into the
@@ -305,8 +297,8 @@ func (ds *DashboardServer) headroomPort() int {
 	return ds.HeadroomPort
 }
 
-// setHeadroomPort publishes a ProcessManager-selected port to every consumer
-// of the shared Headroom proxy (status, stats, wrapping and dashboard APIs).
+// setHeadroomPort publishes only the effective ProcessManager-selected port.
+// A transient fallback must never become the requested port for the next boot.
 func (ds *DashboardServer) setHeadroomPort(port int) {
 	if port <= 0 {
 		return
@@ -315,64 +307,25 @@ func (ds *DashboardServer) setHeadroomPort(port int) {
 	ds.HeadroomPort = port
 	ds.headroomMu.Unlock()
 	status.SetHeadroomPort(port)
-	if err := dwytenv.SetHeadroomPort(ds.DwytHome, port); err != nil {
-		log.Warn("failed to persist selected Headroom port", log.Fields{"port": port, "error": err.Error()})
+}
+
+// setHeadroomRequestedPort is reserved for an explicit configuration change.
+// Unlike effective-port publication, it is intentionally durable.
+func (ds *DashboardServer) setHeadroomRequestedPort(port int) {
+	if port <= 0 {
+		return
 	}
-	// The daemon's descendants (including `headroom init`) inherit these
-	// values. Override a stale requested port when ProcessManager had to use a
-	// free fallback.
+	ds.headroomMu.Lock()
+	ds.HeadroomRequestedPort = port
+	ds.headroomMu.Unlock()
+	if err := dwytenv.SetHeadroomPort(ds.DwytHome, port); err != nil {
+		log.Warn("failed to persist requested Headroom port", log.Fields{"port": port, "error": err.Error()})
+	}
 	_ = os.Setenv("DWYT_HEADROOM_PORT", strconv.Itoa(port))
 }
 
-// warmCodebase brings the "codebase" managed service up in the background.
-// It must never block its caller: procman.Start/Restart wait out the full
-// managed healthcheck budget (60-120s) on a service that never answers its
-// health endpoint, and daemon startup has its own similarly-sized budget
-// racing in parallel — running this synchronously is what let an
-// incompatible Codebase build take the whole daemon down with it.
-//
-// The returned channel closes once the background attempt finishes,
-// regardless of outcome; production callers can safely ignore it (calling
-// warmCodebase as a bare statement is valid Go), it exists so tests can
-// synchronize on completion instead of racing real process/filesystem
-// timing.
-func warmCodebaseAttempt(ctx context.Context, pm *procman.ProcessManager, healthURL string) {
-	if ctx.Err() != nil {
-		return
-	}
-	if health.ProbeURLContext(ctx, healthURL) {
-		return
-	}
-	if ctx.Err() != nil {
-		return
-	}
-	if status := pm.Status("codebase"); status != nil && status.Running {
-		log.Warn("codebase service is running but unhealthy; restarting",
-			log.Fields{"pid": status.PID})
-		if _, err := pm.RestartContext(ctx, "codebase"); err != nil {
-			log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
-		}
-		return
-	}
-	if ctx.Err() != nil {
-		return
-	}
-	if _, err := pm.StartContext(ctx, "codebase"); err != nil {
-		log.Info("codebase service was not started at startup",
-			log.Fields{"reason": err.Error()})
-		return
-	}
-	log.Info("codebase service started")
-}
-
-func warmCodebase(pm *procman.ProcessManager, healthURL string) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		warmCodebaseAttempt(context.Background(), pm, healthURL)
-	}()
-	return done
-}
+// Codebase startup is owned exclusively by ServiceReconciler. Keeping the
+// decision in one place prevents the former warmup/reconciler policy split.
 
 // runVaultMigration adopts the canonical "<hash>_<name>" vault layout for
 // every directory in ~/.dwyt/projects/ that is still in the legacy
@@ -587,6 +540,13 @@ func (ds *DashboardServer) broadcastSSE(event, message string) {
 	}
 }
 
+// startHeadroomIfNeeded is deliberately thin: it may only check that the
+// Headroom binary exists and then declare the desired state (StartService) to
+// the reconciler, which is the single owner of Headroom's start/health/adoption
+// and effective-port decisions. It performs NO generic HTTP probe,
+// RegisterProcess or SetProcessHealthy that would bypass identity/adoption;
+// those facts are published exclusively by the reconciler. Clients are
+// configured only after the reconciler reports a healthy Headroom.
 func (ds *DashboardServer) startHeadroomIfNeeded(ctx context.Context) error {
 	ds.headroomStartMu.Lock()
 	defer ds.headroomStartMu.Unlock()
@@ -596,13 +556,8 @@ func (ds *DashboardServer) startHeadroomIfNeeded(ctx context.Context) error {
 	}
 	headroomBin := ds.headroomPath()
 	if _, err := os.Stat(headroomBin); err != nil {
-		return nil
-	}
-
-	port := ds.headroomPort()
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	if health.ProbeURLContext(ctx, healthURL) {
-		log.Info("headroom already running", log.Fields{"port": port})
+		// No binary: nothing for the owner to supervise. The reconciler will
+		// adopt an already-running instance if one appears with valid identity.
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -611,17 +566,13 @@ func (ds *DashboardServer) startHeadroomIfNeeded(ctx context.Context) error {
 
 	started, err := ds.startHeadroomContext(ctx)
 	if err != nil {
-		ds.RuntimeState.SetProcessHealthy("headroom", false, err.Error())
-		return fmt.Errorf("start headroom on port %d: %w", port, err)
+		return fmt.Errorf("start headroom: %w", err)
 	}
 
-	ds.RuntimeState.RegisterProcess("headroom", started.PID, started.Port)
-	ds.RuntimeState.SetProcessHealthy("headroom", started.Healthy, started.Error)
-	log.Info("headroom spawned by daemon", log.Fields{"pid": started.PID, "port": started.Port})
-
-	if started.Healthy {
+	if started != nil && started.Healthy {
+		log.Info("headroom healthy via reconciler", log.Fields{"pid": started.PID, "port": started.Port})
 		ds.configureHeadroomClients(ds.DefaultProject)
-	} else {
+	} else if started != nil {
 		log.Warn("headroom started but not healthy", log.Fields{"port": started.Port})
 	}
 	return nil

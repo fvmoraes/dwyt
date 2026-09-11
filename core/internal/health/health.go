@@ -145,14 +145,32 @@ func IsPortOccupied(port int) bool {
 	return false
 }
 
-func FindFreePort(defaultPort int) int {
-	for offset := 0; offset < 5; offset++ {
+// ErrPortConflict reports that none of the bounded candidate ports can be
+// reserved. Callers must surface/degrade this condition instead of retrying an
+// already-occupied requested port through a full health timeout.
+var ErrPortConflict = fmt.Errorf("no free port in bounded candidate range")
+
+func FindFreePortE(defaultPort int) (int, error) {
+	if defaultPort <= 0 || defaultPort > 65535 {
+		return defaultPort, nil
+	}
+	for offset := 0; offset < 5 && defaultPort+offset <= 65535; offset++ {
 		port := defaultPort + offset
 		if !IsPortOccupied(port) {
-			return port
+			return port, nil
 		}
 	}
-	return defaultPort
+	return 0, fmt.Errorf("%w starting at %d", ErrPortConflict, defaultPort)
+}
+
+// FindFreePort is the compatibility helper for advisory callers. Lifecycle
+// code must use FindFreePortE so exhaustion is never converted into a port.
+func FindFreePort(defaultPort int) int {
+	port, err := FindFreePortE(defaultPort)
+	if err != nil {
+		return defaultPort
+	}
+	return port
 }
 
 func StopAll() {

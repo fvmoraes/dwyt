@@ -11,18 +11,26 @@ import (
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
-// ProcessInfo tracks a single managed process.
+// ProcessInfo tracks one managed or safely adopted service. Port remains the
+// compatibility alias for EffectivePort; new code keeps requested and effective
+// values distinct so a fallback never silently changes future configuration.
 type ProcessInfo struct {
-	Name      string    `json:"name"`
-	PID       int       `json:"pid"`
-	Port      int       `json:"port,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	Healthy   bool      `json:"healthy"`
-	// State is the reconciler's lifecycle state (starting/healthy/degraded/
-	// failed/stopped). Additive field: pre-v5 state.json files simply lack it.
-	State     string `json:"state,omitempty"`
-	LastError string `json:"last_error,omitempty"`
-	Uptime    int64  `json:"uptime_secs,omitempty"`
+	Name          string    `json:"name"`
+	PID           int       `json:"pid"`
+	Port          int       `json:"port,omitempty"`
+	RequestedPort int       `json:"requested_port,omitempty"`
+	EffectivePort int       `json:"effective_port,omitempty"`
+	StartedAt     time.Time `json:"started_at"`
+	Healthy       bool      `json:"healthy"`
+	// State is the reconciler's observed lifecycle state. DesiredState is the
+	// operator/startup intent and Ownership determines whether DWYT may stop the
+	// process (managed) or must leave a pre-existing instance alone (adopted).
+	State        string `json:"state,omitempty"`
+	DesiredState string `json:"desired_state,omitempty"`
+	Ownership    string `json:"ownership,omitempty"`
+	Identity     string `json:"identity,omitempty"`
+	LastError    string `json:"last_error,omitempty"`
+	Uptime       int64  `json:"uptime_secs,omitempty"`
 }
 
 // RuntimeState holds the live operational state of DWYT.
@@ -68,9 +76,27 @@ func Init(dwytHome string) *RuntimeState {
 		Path:        p,
 	}
 
-	if data, err := os.ReadFile(p); err == nil {
-		json.Unmarshal(data, s)
+	mainData, mainErr := os.ReadFile(p)
+	var loaded RuntimeState
+	if mainErr == nil {
+		mainErr = json.Unmarshal(mainData, &loaded)
 	}
+	if mainErr == nil {
+		s = &loaded
+	} else {
+		backupData, backupErr := os.ReadFile(p + ".backup")
+		var recovered RuntimeState
+		if backupErr == nil {
+			backupErr = json.Unmarshal(backupData, &recovered)
+		}
+		if backupErr == nil {
+			s = &recovered
+			log.Warn("state: recovered valid backup after main state was unavailable", log.Fields{"error": mainErr.Error()})
+		} else if !os.IsNotExist(mainErr) {
+			log.Warn("state: main and backup state are unavailable", log.Fields{"state_error": mainErr.Error(), "backup_error": backupErr.Error()})
+		}
+	}
+	s.Path = p
 	if s.Processes == nil {
 		s.Processes = make(map[string]ProcessInfo)
 	}
@@ -122,24 +148,28 @@ func (s *RuntimeState) SetToolError(tool, msg string) {
 
 // ── Process tracking ──────────────────────────────────────────────────────
 
-// RegisterProcess adds or updates a managed process in the state. The
-// reconciler's lifecycle State is preserved across (re)registrations so a
-// health refresh never erases a just-published transition.
+// RegisterProcess adds or updates a managed process in the state without
+// discarding lifecycle or configuration fields already published for it.
 func (s *RuntimeState) RegisterProcess(name string, pid, port int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prevState := ""
-	if prev, ok := s.Processes[name]; ok {
-		prevState = prev.State
+
+	process, exists := s.Processes[name]
+	pidChanged := !exists || process.PID != pid
+	process.Name = name
+	process.PID = pid
+	process.Port = port
+	process.EffectivePort = port
+	if process.RequestedPort == 0 {
+		process.RequestedPort = port
 	}
-	s.Processes[name] = ProcessInfo{
-		Name:      name,
-		PID:       pid,
-		Port:      port,
-		StartedAt: time.Now(),
-		Healthy:   true,
-		State:     prevState,
+	if pidChanged {
+		process.StartedAt = time.Now()
 	}
+	if !exists {
+		process.Healthy = true
+	}
+	s.Processes[name] = process
 	s.maybeSave()
 }
 
@@ -290,25 +320,23 @@ func (s *RuntimeState) saveLocked() error {
 	if s.Path == "" {
 		return nil
 	}
-	os.MkdirAll(filepath.Dir(s.Path), 0755)
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
 	// 0600: the state lists project paths and client names for the local user.
-	return os.WriteFile(s.Path, data, 0600)
+	// Publish the main document first. A failed main replacement must leave the
+	// last known-good backup untouched; only a successful main generation is
+	// mirrored to the recovery file.
+	if err := atomicWriteFile(s.Path, data, 0600); err != nil {
+		return err
+	}
+	return atomicWriteFile(s.Path+".backup", data, 0600)
 }
 
 func (s *RuntimeState) maybeSave() {
 	if err := s.saveLocked(); err != nil {
 		log.Error("failed to save state", log.Fields{"error": err.Error()})
-		// Try to save backup
-		if s.Path != "" {
-			backupPath := s.Path + ".backup"
-			if data, marshalErr := json.MarshalIndent(s, "", "  "); marshalErr == nil {
-				os.WriteFile(backupPath, data, 0600)
-			}
-		}
 	}
 }
 
@@ -321,15 +349,35 @@ func (s *RuntimeState) Snapshot() map[string]interface{} {
 
 	processes := make([]map[string]interface{}, 0, len(s.Processes))
 	for _, p := range s.Processes {
+		effectivePort := p.EffectivePort
+		if effectivePort == 0 {
+			effectivePort = p.Port
+		}
 		processes = append(processes, map[string]interface{}{
-			"name":        p.Name,
-			"pid":         p.PID,
-			"port":        p.Port,
-			"started_at":  p.StartedAt.Format(time.RFC3339),
-			"healthy":     p.Healthy,
-			"last_error":  p.LastError,
-			"uptime_secs": p.Uptime,
+			"name":           p.Name,
+			"pid":            p.PID,
+			"port":           effectivePort,
+			"requested_port": p.RequestedPort,
+			"effective_port": effectivePort,
+			"started_at":     p.StartedAt.Format(time.RFC3339),
+			"healthy":        p.Healthy,
+			"state":          p.State,
+			"desired_state":  p.DesiredState,
+			"ownership":      p.Ownership,
+			"identity":       p.Identity,
+			"last_error":     p.LastError,
+			"uptime_secs":    p.Uptime,
 		})
+	}
+
+	toolErrors := make(map[string]string, len(s.ToolErrors))
+	for tool, message := range s.ToolErrors {
+		toolErrors[tool] = message
+	}
+	clients := append([]string(nil), s.Clients...)
+	toolSources := make(map[string]toolsource.Selection, len(s.ToolSources))
+	for tool, source := range s.ToolSources {
+		toolSources[tool] = source
 	}
 
 	return map[string]interface{}{
@@ -337,8 +385,8 @@ func (s *RuntimeState) Snapshot() map[string]interface{} {
 		"current_project":      s.CurrentProject,
 		"current_project_name": s.CurrentProjectName,
 		"processes":            processes,
-		"tool_errors":          s.ToolErrors,
-		"clients":              s.Clients,
-		"tool_sources":         s.ToolSources,
+		"tool_errors":          toolErrors,
+		"clients":              clients,
+		"tool_sources":         toolSources,
 	}
 }

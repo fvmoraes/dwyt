@@ -97,6 +97,30 @@ func runningProcessManager(t *testing.T) (*ProcessManager, *ManagedProcess) {
 	return pm, mp
 }
 
+// TestProcessManagerStatusAfterRegisterReportsRequestedNotEffective proves
+// requirement (1): immediately after Register — before any Start — Status
+// reports the requested port with a zero effective port (nothing is bound yet).
+func TestProcessManagerStatusAfterRegisterReportsRequestedNotEffective(t *testing.T) {
+	pm := New(t.TempDir())
+	bin, args := longRunningCmd()
+	const requested = 45123
+	pm.Register("svc", bin, "/health", requested, args...)
+
+	status := pm.Status("svc")
+	if status.RequestedPort != requested {
+		t.Fatalf("RequestedPort = %d, want %d", status.RequestedPort, requested)
+	}
+	if status.EffectivePort != 0 {
+		t.Fatalf("EffectivePort = %d, want 0 before start", status.EffectivePort)
+	}
+	if status.Port != 0 {
+		t.Fatalf("Port (compat alias) = %d, want 0 before start", status.Port)
+	}
+	if status.Running {
+		t.Fatalf("service must not be running before Start, got %+v", status)
+	}
+}
+
 func TestProcessManager_StartStop(t *testing.T) {
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
