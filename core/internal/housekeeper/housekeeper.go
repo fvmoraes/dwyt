@@ -670,7 +670,27 @@ func markState(path string, state brain.NoteState) error {
 	if !ok {
 		return fmt.Errorf("note has no frontmatter to update")
 	}
-	return os.WriteFile(path, []byte(updated), 0644)
+	// Atomic write (Fine-Tuning §32): a crash mid-write must never leave a
+	// truncated note. Temp file in the same directory, then rename — rename
+	// within a filesystem is atomic on Linux, macOS and Windows.
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".markstate-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := tmp.WriteString(updated); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // snapshotFromNote reconstructs the compact snapshot a session note was rendered

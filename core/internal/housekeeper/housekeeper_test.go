@@ -474,3 +474,25 @@ func TestSessionSurvivesWhenPromotionIsDisabled(t *testing.T) {
 		t.Fatal("extraction was disabled, so nothing should have been written")
 	}
 }
+
+// TestMarkStateIsAtomic pins the crash-safety contract (Fine-Tuning §32):
+// the state flip must never leave a truncated or half-written note behind —
+// the write lands via a temp file + rename in the same directory.
+func TestMarkStateIsAtomic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-note.md")
+	body := "---\ntype: session\nstate: active\n---\n\nbody line\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := markState(path, brain.NoteStale); err != nil {
+		t.Fatalf("markState failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "state: stale") || !strings.Contains(string(data), "body line") {
+		t.Fatalf("state flip lost content: %s", data)
+	}
+}
