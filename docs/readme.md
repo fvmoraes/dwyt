@@ -7,6 +7,7 @@ Everything there is to know about DWYT, organized by what you are trying to do.
 | Document | What it covers |
 |---|---|
 | [how-it-works.md](how-it-works.md) | Architecture and internals: packages, startup flow, complete API reference, data layout, build and release pipeline |
+| [startup-lifecycle.md](startup-lifecycle.md) | Dashboard-first boot, service reconciler, lifecycle states and honest status rules |
 | [architecture-v5.md](architecture-v5.md) | Component roles and ownership — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — and the v5 rules they follow |
 | [tokens-saved.md](tokens-saved.md) | Where every savings number comes from: real metrics vs local estimates, sessions and windows, honesty rules |
 

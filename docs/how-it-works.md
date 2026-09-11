@@ -115,17 +115,24 @@ dwyt .
 
 ### Daemon Process
 
+`New()` does only the work the Core needs to bind :2737 — everything else
+runs as ordered background tasks after the dashboard is already serving
+(**dashboard-first startup**; see [startup-lifecycle.md](startup-lifecycle.md)).
+
 ```
 dwyt daemon
   │
   ├─ server.New(2737, dwytBin, dwytHome)
   │   ├─ db.New()                 → open/create ~/.dwyt/dwyt.db (SQLite)
-  │   ├─ brain.MigrateOldMemoryDirs()  → convert old memory.json → .md files
   │   ├─ state.Init()             → load/create ~/.dwyt/state.json
-  │   ├─ brain.NewProjectObsidian()  → create/load Obsidian vault
+  │   ├─ brain.NewProjectObsidian()  → attach Obsidian vault (registered projects only)
   │   ├─ procman.New()            → create ProcessManager
   │   ├─ procman.Register("codebase", ...) → register Codebase service
   │   ├─ procman.Register("headroom", ...) → register Headroom service
+  │   ├─ warmCodebase()           → background; gates the ServiceReconciler
+  │   ├─ ServiceReconciler        → watchdog: adopts healthy instances, publishes
+  │   │                             lifecycle states, recovers dead services with
+  │   │                             bounded backoff (1s→3s→10s)
   │   └─ store.TouchProject()     → register project in SQLite
   │
   └─ server.Start()
@@ -134,8 +141,17 @@ dwyt daemon
       ├─ API routes (/api/*)
       ├─ broadcastLoop()          → SSE every 3s
       ├─ startHeadroomIfNeeded()  → procman.Start("headroom") in goroutine
+      ├─ startBackgroundReconciliation() → ordered non-critical tasks:
+      │     brain.MigrateOldMemoryDirs → brain v5 layout migration →
+      │     vault migration → vault stats → Obsidian MCP validation →
+      │     MCP config sync → Headroom probe → Housekeeper.Start (LAST,
+      │     so the deep pass never races the migrations)
       └─ r.Run("127.0.0.1:2737")  → blocking listen
 ```
+
+A failing background task is logged and skipped — it never blocks the
+bind and never takes the daemon down. Every task keeps the exact log and
+error-tolerance semantics it had when it ran synchronously.
 
 ---
 
@@ -727,6 +743,13 @@ Component mounts
 | GET | `/api/session/summary?path=&gap_minutes=` | Current + previous sessions (savings, MCP calls, observed tokens/s, models) |
 | GET | `/api/fs/browse?path=` | Filesystem browser |
 | GET | `/api/logs` | Tool log status |
+
+### Diagnostics
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/diagnostics/startup-tax` | MCP tool-schema overhead per server + managed instruction block; provenance is always `estimated` |
+| GET | `/api/diagnostics/net-savings?window=` | Gross avoided tokens minus the measurable startup/instruction taxes; unknown when the window has no telemetry — never zero |
 | GET | `/api/telemetry/summary?window=` | Optimizer aggregate + brain health + housekeeper + cache capability |
 | GET | `/api/telemetry/requests` | Request ledger (paginated) |
 | POST | `/api/telemetry/task/complete` | Task outcome ledger entry |
