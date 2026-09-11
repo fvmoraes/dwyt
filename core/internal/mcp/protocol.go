@@ -123,6 +123,28 @@ func (s *Server) RegisterTool(name, description string, props map[string]Propert
 	s.handlers[name] = handler
 }
 
+// ToolCount reports how many tools this server exposes.
+func (s *Server) ToolCount() int {
+	return len(s.tools)
+}
+
+// ToolPayloads returns the tool definitions in wire order, for size audits.
+func (s *Server) ToolPayloads() []Tool {
+	out := make([]Tool, len(s.tools))
+	copy(out, s.tools)
+	return out
+}
+
+// ToolsListJSON returns the serialized tools/list result payload — the exact
+// bytes a client receives and pays for on every startup (MCP Startup Tax).
+func (s *Server) ToolsListJSON() []byte {
+	b, err := json.Marshal(map[string]interface{}{"tools": s.tools})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
 func (s *Server) Run() error {
 	for {
 		line, err := s.reader.ReadBytes('\n')

@@ -222,3 +222,10 @@ Keep operational answers short: status, changed files, validation, blockers.
 Do not truncate an artifact the user asked for.
 `
 }
+
+// InstructionBlock exposes the entry contract for audits that need the
+// exact bytes clients receive (MCP startup-tax measurement). It is the same
+// text dwytInstructions returns; the alias documents intent at call sites.
+func InstructionBlock() string {
+	return dwytInstructions()
+}

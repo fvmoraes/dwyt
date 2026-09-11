@@ -83,6 +83,9 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/optimizer/housekeeper", ds.apiOptimizerHousekeeper)
 		api.GET("/optimizer/memory-health", ds.apiOptimizerMemoryHealth)
 		api.POST("/optimizer/route", ds.apiOptimizerRoute)
+		// MCP Startup Tax diagnostics (Fine-Tuning §8): schema overhead,
+		// measured and labeled estimated.
+		api.GET("/diagnostics/startup-tax", ds.apiStartupTax)
 		api.GET("/optimizer/policy", ds.apiOptimizerPolicy)
 		// Brain v5: canonical memory, the Memory Compiler and the Housekeeper.
 		api.GET("/housekeeper/status", ds.apiHousekeeperStatus)
