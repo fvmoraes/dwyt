@@ -11,15 +11,15 @@ $ErrorActionPreference = "Stop"
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("dwyt-install-e2e-" + [Guid]::NewGuid().ToString("N"))
 
 try {
-  $home = Join-Path $sandbox "home"
-  $appData = Join-Path $home "AppData\Roaming"
+  $sandboxHome = Join-Path $sandbox "home"
+  $appData = Join-Path $sandboxHome "AppData\Roaming"
   $dwytHome = Join-Path $appData "dwyt"
   $binDir = Join-Path $dwytHome "bin"
   $sourceBinary = Join-Path $sandbox "source\dwyt.exe"
   $launcher = Join-Path $binDir "dwyt.exe"
   $vault = Join-Path $dwytHome "projects\example\vault.md"
   $managed = Join-Path $dwytHome "cache\managed.txt"
-  $externalConfig = Join-Path $home "config\unmanaged.txt"
+  $externalConfig = Join-Path $sandboxHome "config\unmanaged.txt"
 
   $null = New-Item -ItemType Directory -Force -Path (Split-Path $sourceBinary -Parent)
 
@@ -36,8 +36,8 @@ try {
     Pop-Location
   }
 
-  $env:HOME = $home
-  $env:USERPROFILE = $home
+  $env:HOME = $sandboxHome
+  $env:USERPROFILE = $sandboxHome
   $env:APPDATA = $appData
   $env:DWYT_HOME = $dwytHome
 
