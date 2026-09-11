@@ -1,8 +1,8 @@
 # DWYT — Don't Waste Your Tokens
 
-> The invisible Context Optimizer that reduces token consumption across your AI clients.
+DWYT is a Context Optimizer and token usage reduction platform with an integrated AI client. It is built around three MCP servers with strictly separated responsibilities, a persistent knowledge layer, and deterministic rules for context budget, retrieval, memory lifecycle, output control, prompt cache optimization, and cost management.
 
-DWYT v5 is a **Context Optimizer**: three MCP servers with strictly separated jobs, a persistent brain, and deterministic rules for context budget, retrieval, memory lifecycle, output, cache and cost. It works with Claude Code, Codex, Copilot, Kiro, Cursor, and OpenCode — all managed through a single web UI, with no CLI configuration needed.
+It works with Claude Code, Codex, Copilot, Kiro, Cursor, and OpenCode, all managed through a single web interface with no CLI configuration required.
 
 | Component | Role |
 |---|---|
@@ -109,13 +109,16 @@ dwyt .
 
 ## The Tools
 
-DWYT coordinates tools in this order when the task calls for them:
+There is no global priority order. Tools are used in the stage that calls
+for them (see the [Optimizer Law](docs/optimizer-law.md)):
 
-1. **RTK** for shell commands and terminal output.
-2. **`dwyt_codebase`** for current code structure.
-3. **`dwyt_obsidian`** for memory, decisions, tasks, and handoff context.
-4. **`dwyt_optimizer`** for context budget, output contract, tool-output compaction, and cache guidance.
-5. **Headroom** for compatible API proxy/cache optimization.
+1. **PLAN** — `dwyt_optimizer` establishes the context budget, output contract and retrieval envelope before broad retrieval.
+2. **RETRIEVE** — `dwyt_codebase` supplies current code structure; `dwyt_obsidian` supplies memory, decisions, tasks and handoff context.
+3. **EXECUTE** — RTK compresses shell commands and terminal output.
+4. **REDUCE / REUSE** — `dwyt_optimizer` reuses, compacts or evicts context when the Token ROI is positive.
+5. **TRANSPORT** — Headroom optimizes compatible API traffic.
+
+A supplier supplies; the Optimizer decides.
 
 ### RTK — terminal compression
 
@@ -239,7 +242,7 @@ A proxy/cache optimization for compatible AI clients. DWYT owns the proxy throug
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Each card** shows the tool name, a one-line description, and real status (🟢 online / 🟡 stopped / 🔴 not installed). Cards fill their grid cell, so each pair aligns perfectly. The savings window defaults to **6h** and auto-refresh to **10s** — a value the backend could not measure renders as "—", never as a fake zero.
+**Each card** shows the tool name, a one-line description, and its real state — lifecycle states come from the service reconciler, so a warming service shows **🟡 Starting** (never a red offline), two consecutive failed probes show 🟡 Degraded, and a state DWYT cannot observe renders as ⚪ Unknown, not offline. Cards fill their grid cell, so each pair aligns perfectly. The savings window defaults to **6h** and auto-refresh to **10s** — a value the backend could not measure renders as "—", never as a fake zero. See [Startup Lifecycle & Service Status](docs/startup-lifecycle.md).
 
 ---
 
@@ -348,14 +351,13 @@ Setup creates or updates these files in the project directory. Local configs wit
     └── steering/dwyt.md
 ```
 
-**All instruct IAs** in this priority order:
-1. **RTK** — prefix shell commands with `rtk`
-2. **`dwyt_codebase`** — use the graph before structural code work
-3. **`dwyt_obsidian`** — search/summarize memory and save context
-4. **`dwyt_optimizer`** — context budget, output contract, tool-output compaction, cache guidance
-5. **Headroom** — use only as compatible proxy/cache optimization
+**All instruct IAs** with the same stage-based flow:
+1. **PLAN** — `dwyt_optimizer` sets the context budget before broad retrieval
+2. **RETRIEVE** — `dwyt_codebase` for the code graph, `dwyt_obsidian` for memory and context
+3. **EXECUTE** — RTK prefix for shell commands
+4. **REDUCE** — tool-output compaction, cache guidance, output contracts
 
-The generated instructions enforce the [Codebase Law](docs/codebase-law.md) and [Obsidian Law](docs/obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
+The generated instructions enforce the [Optimizer Law](docs/optimizer-law.md), the [Codebase Law](docs/codebase-law.md) and the [Obsidian Law](docs/obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
 
 For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/architecture-v5.md).
 
@@ -562,7 +564,9 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 | Document | Contents |
 |---|---|
 | [How It Works](docs/how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
+| [Startup Lifecycle & Service Status](docs/startup-lifecycle.md) | Dashboard-first boot, service reconciler, lifecycle states, honest status rules |
 | [Architecture v5](docs/architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
+| [Optimizer Law](docs/optimizer-law.md) | Context budget, Token ROI, reuse, compression and output invariants |
 | [Codebase Law](docs/codebase-law.md) | Mandatory code-graph workflow for agents |
 | [Obsidian Law](docs/obsidian-law.md) | Mandatory memory workflow for agents |
 | [Tokens Saved](docs/tokens-saved.md) | Where the savings numbers come from; sessions and windows |

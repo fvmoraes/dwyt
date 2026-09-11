@@ -244,14 +244,19 @@ See [Obsidian Law](obsidian-law.md) and [Codebase Law](codebase-law.md).
 
 ---
 
-## Agent priority order
+## Agent stage flow
+
+There is no global tool priority order. Tools act in the stage that calls
+for them, and the Optimizer decides how much context each stage may spend
+(see [Optimizer Law](optimizer-law.md)):
 
 ```
-1. RTK              prefix shell commands with `rtk`
-2. dwyt_codebase    structural code questions, before editing
-3. dwyt_obsidian    memory: decisions, tasks, handoff context
-4. dwyt_optimizer   budget, output contract, tool compaction, cache guidance
-5. Headroom         optional transport compression, never a source of truth
+PLAN      dwyt_optimizer    budget, output contract, retrieval envelope
+RETRIEVE  dwyt_codebase     structural code questions, before editing
+          dwyt_obsidian     memory: decisions, tasks, handoff context
+EXECUTE   RTK               prefix shell commands with `rtk`
+REDUCE    dwyt_optimizer    tool compaction, cache guidance, reuse
+TRANSPORT Headroom          optional transport compression, never a source of truth
 ```
 
 Codex authenticated through ChatGPT/OAuth must not be routed through Headroom.

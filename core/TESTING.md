@@ -1,35 +1,40 @@
 # DWYT Testing Guide
 
-Este guia explica como executar e criar testes para o DWYT.
+This guide explains how to run and write tests for DWYT.
 
-## Memoria de teste no Obsidian
+## Test memory in Obsidian
 
-Antes de alterar ou executar validacoes relevantes, consulte o Obsidian do projeto para contexto. Durante a investigacao, salve decisoes tecnicas como `decision` e status de validacao como `task`. Ao finalizar, salve contexto completo com pedido, resumo, arquivos, decisoes, acoes, comandos, erros, resultado, proximos passos e contexto para agentes futuros.
+Before changing or running relevant validations, consult the project's
+Obsidian vault for context. During an investigation, save technical
+decisions as `decision` entries and validation status as `task` entries.
+When finished, save the full context — request, summary, files, decisions,
+actions, commands, errors, outcome, next steps — so future agents inherit
+the state.
 
-Consulte tambem [`docs/obsidian-law.md`](../docs/obsidian-law.md).
+See also [`docs/obsidian-law.md`](../docs/obsidian-law.md).
 
-## 📋 Tipos de Testes
+## 📋 Test Types
 
-### 1. Testes Unitários
+### 1. Unit tests
 
-Testam componentes individuais isoladamente.
+Individual components, isolated.
 
-**Localização:** `core/internal/*/`
+**Location:** `core/internal/*/`
 
-**Executar todos:**
+**Run everything:**
 ```bash
 cd core
-go test ./... -v
+go test ./... -shuffle=on
 ```
 
-**Executar pacote específico:**
+**Run one package:**
 ```bash
 go test ./internal/procman -v
 go test ./internal/state -v
 go test ./internal/brain -v
 ```
 
-**Com coverage:**
+**With coverage:**
 ```bash
 go test ./... -cover
 go test ./... -coverprofile=coverage.out
@@ -38,40 +43,40 @@ go tool cover -html=coverage.out
 
 ---
 
-### 2. Testes de Integração
+### 2. Integration tests
 
-Testam interação entre componentes.
+Component-to-component interaction.
 
-**Executar:**
+**Run:**
 ```bash
 go test ./internal/server -v -tags=integration
 ```
 
 ---
 
-### 3. Testes E2E
+### 3. E2E tests
 
-Testam o sistema completo end-to-end.
+The complete system, end to end.
 
-**Executar:**
+**Run:**
 ```bash
 cd core
 ./test-e2e.sh
 ```
 
-**O que é testado:**
-- Daemon startup e health
+**What is covered:**
+- Daemon startup and health
 - Brain save, search, summarize
 - Project switching
-- Brain isolation entre projetos
-- State persistence após restart
-- Todos os endpoints da API
+- Brain isolation between projects
+- State persistence across restarts
+- All API endpoints
 
 ---
 
-## 🧪 Escrevendo Testes
+## 🧪 Writing Tests
 
-### Estrutura de Teste Unitário
+### Unit test structure
 
 ```go
 package mypackage
@@ -84,10 +89,10 @@ func TestMyFunction(t *testing.T) {
 	// Arrange
 	input := "test"
 	expected := "expected result"
-	
+
 	// Act
 	result := MyFunction(input)
-	
+
 	// Assert
 	if result != expected {
 		t.Errorf("Expected %s, got %s", expected, result)
@@ -95,27 +100,27 @@ func TestMyFunction(t *testing.T) {
 }
 ```
 
-### Usando t.TempDir()
+### Using t.TempDir()
 
-Para testes que precisam de filesystem:
+For tests that need a filesystem:
 
 ```go
 func TestWithFiles(t *testing.T) {
-	tmpDir := t.TempDir() // Cleanup automático
-	
+	tmpDir := t.TempDir() // cleaned up automatically
+
 	filePath := filepath.Join(tmpDir, "test.txt")
 	os.WriteFile(filePath, []byte("content"), 0644)
-	
+
 	// Test code...
 }
 ```
 
-### Testando Concorrência
+### Testing concurrency
 
 ```go
 func TestConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
-	
+
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(n int) {
@@ -123,27 +128,27 @@ func TestConcurrent(t *testing.T) {
 			// Test code...
 		}(i)
 	}
-	
+
 	wg.Wait()
 	// Verify results...
 }
 ```
 
-### Testando HTTP Endpoints
+### Testing HTTP endpoints
 
 ```go
 func TestAPIEndpoint(t *testing.T) {
 	// Start test server
 	srv := setupTestServer(t)
 	defer srv.Close()
-	
+
 	// Make request
 	resp, err := http.Get(srv.URL + "/api/health")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Verify response
 	if resp.StatusCode != 200 {
 		t.Errorf("Expected 200, got %d", resp.StatusCode)
@@ -153,55 +158,44 @@ func TestAPIEndpoint(t *testing.T) {
 
 ---
 
-## 🎯 Cobertura de Testes
+## 🎯 Coverage
 
-### Pacotes Testados
-
-| Pacote | Cobertura | Status |
-|--------|-----------|--------|
-| `procman` | ✅ Alta | 6 testes |
-| `state` | ✅ Alta | 11 testes |
-| `brain` | 🟡 Média | Adicionar mais |
-| `server` | 🟡 Média | Adicionar mais |
-| `integrate` | 🔴 Baixa | Adicionar |
-| `install` | 🔴 Baixa | Adicionar |
-
-### Metas de Cobertura
-
-- **Crítico (procman, state, brain):** > 80%
-- **Importante (server, integrate):** > 60%
-- **Outros:** > 40%
+The CI matrix (`.github/workflows/ci.yml`) runs the full suite with
+`-shuffle=on` on Linux, macOS and Windows, plus a dedicated race-detector
+job and golangci-lint. Coverage is a gap finder, not a target: cover
+behavior, not lines. The packages with the strictest expectations are the
+concurrency-heavy ones (`procman`, `state`, `server`, `housekeeper`).
 
 ---
 
-## 🐛 Debugging de Testes
+## 🐛 Debugging Tests
 
-### Verbose Output
+### Verbose output
 
 ```bash
 go test -v ./internal/procman
 ```
 
-### Run Specific Test
+### Run a specific test
 
 ```bash
 go test -v -run TestProcessManager_StartStop ./internal/procman
 ```
 
-### Race Detector
+### Race detector
 
 ```bash
 go test -race ./...
 ```
 
-### Memory Profiling
+### Memory profiling
 
 ```bash
 go test -memprofile=mem.prof ./internal/state
 go tool pprof mem.prof
 ```
 
-### CPU Profiling
+### CPU profiling
 
 ```bash
 go test -cpuprofile=cpu.prof ./internal/brain
@@ -210,170 +204,161 @@ go tool pprof cpu.prof
 
 ---
 
-## 🔍 Testes de Regressão
+## 🔍 Regression Tests
 
-### Casos Conhecidos
+### Known cases
 
-1. **ProcessManager Loop Infinito**
-   - Teste: `TestProcessManager_HealthcheckFailure`
-   - Verifica que processo é morto após falha de healthcheck
+1. **Daemon startup racing the Codebase healthcheck** (PR #24)
+   - Test: `TestWarmCodebaseDoesNotBlockCaller`
+   - Proves the Codebase warmup never blocks the caller and the dashboard
+     bind never waits for a failing service.
 
-2. **Brain Corrupção de Arquivo**
-   - Teste: `TestBrain_ConcurrentSaves` (TODO)
-   - Verifica que writes concorrentes não corrompem arquivo
+2. **Dashboard-first startup** (startup.go)
+   - Tests: `TestDashboardServesWhileStartupTasksRun`,
+     `TestStartupTaskFailureDoesNotKillDashboard`
+   - Prove the dashboard answers while background startup tasks are still
+     running and a failing task never kills the daemon.
 
-3. **State Perda de Dados**
-   - Teste: `TestRuntimeState_SaveFailureBackup`
-   - Verifica que backup é criado em caso de falha
+3. **Service reconciler** (svcctl.go)
+   - Tests: adoption, no-restart-while-running, bounded backoff,
+     hysteresis
+   - Pin the single-owner lifecycle: no double starts, no restart storms.
 
-4. **UI Cache Stale**
-   - Teste: E2E project switch
-   - Verifica que UI atualiza após troca de projeto
+4. **Unknown is not offline** (handlers_status)
+   - Tests: `TestEnrichSystemStatusCarriesRuntimeState` and friends
+   - Prove the status payload carries the lifecycle state so the UI never
+     collapses unknown into offline.
+
+5. **State data loss**
+   - Test: `TestRuntimeState_SaveFailureBackup`
+   - Verifies a backup is created when a save fails.
 
 ---
 
 ## 📊 CI/CD Integration
 
-### GitHub Actions
-
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-      
-      - name: Unit Tests
-        run: |
-          cd core
-          go test ./... -v -cover
-      
-      - name: E2E Tests
-        run: |
-          cd core
-          ./test-e2e.sh
-```
+CI lives in `.github/workflows/ci.yml`: a three-OS test matrix
+(`fail-fast: false`), a race job on Linux/macOS, golangci-lint,
+govulncheck and frontend lint/build. Releases are handled by
+`release.yml` (scope-aware semver). Do not duplicate that logic in ad-hoc
+scripts; extend the workflows instead.
 
 ---
 
 ## 🚀 Performance Tests
 
-### Benchmark
+### Benchmarks
+
+Follow the benchmark methodology: `-benchmem -count=10`, compare with
+`benchstat`, never claim an improvement from a single run.
 
 ```go
 func BenchmarkBrainSearch(b *testing.B) {
 	brain := setupTestBrain(b)
-	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		brain.Search("keyword")
 	}
 }
 ```
 
-**Executar:**
+**Run:**
 ```bash
-go test -bench=. ./internal/brain
+go test -bench=. -benchmem -count=10 ./internal/brain
 ```
 
-### Load Testing
+### Load testing
 
 ```bash
 # Install hey
 go install github.com/rakyll/hey@latest
 
-# Test API endpoint
+# Test an API endpoint
 hey -n 1000 -c 10 http://127.0.0.1:2737/api/health
 ```
 
 ---
 
-## ✅ Checklist de Testes
+## ✅ Test Checklist
 
-Antes de fazer commit:
+Before committing:
 
-- [ ] Todos os testes unitários passam
-- [ ] Nenhum race condition detectado (`go test -race`)
-- [ ] Cobertura não diminuiu
-- [ ] Testes E2E passam (se mudou server/API)
-- [ ] Documentação atualizada se necessário
+- [ ] All unit tests pass (`go test ./... -shuffle=on`)
+- [ ] No data races detected (`go test -race`)
+- [ ] Coverage did not regress
+- [ ] E2E tests pass (if server/API changed)
+- [ ] Frontend build and lint pass (if `core/web` changed)
+- [ ] Documentation updated if behavior changed
 
-Antes de fazer release:
+Before a release:
 
-- [ ] Todos os testes passam em Linux/Mac/Windows
-- [ ] Testes E2E passam
-- [ ] Performance benchmarks não regrediram
-- [ ] Load tests passam
-- [ ] Documentação completa
+- [ ] All tests pass on Linux/macOS/Windows (CI matrix green)
+- [ ] Race job green
+- [ ] Benchmarks did not regress (benchstat, when performance-related)
+- [ ] Documentation complete
 
 ---
 
-## 📚 Recursos
+## 📚 Resources
 
 - [Go Testing Package](https://pkg.go.dev/testing)
 - [Table Driven Tests](https://go.dev/wiki/TableDrivenTests)
-- [Testify Library](https://github.com/stretchr/testify)
 - [Go Race Detector](https://go.dev/doc/articles/race_detector)
+- [testing/synctest](https://go.dev/blog/synctest) — deterministic time in tests (Go 1.25+)
 
 ---
 
-## 🤝 Contribuindo com Testes
+## 🤝 Contributing Tests
 
-### Prioridades
+### Priorities
 
-1. **Alta:** Testes para bugs críticos conhecidos
-2. **Média:** Aumentar cobertura de pacotes importantes
-3. **Baixa:** Testes de edge cases
+1. **High:** tests for known critical bugs (regression tests first, red-green)
+2. **Medium:** deepen coverage of concurrency-heavy packages
+3. **Low:** edge cases
 
 ### Guidelines
 
-- Um teste deve testar uma coisa
-- Nomes descritivos: `TestFunctionName_Scenario_ExpectedBehavior`
-- Usar `t.Helper()` em funções auxiliares
-- Cleanup automático com `t.Cleanup()` ou `defer`
-- Evitar sleeps - usar channels ou polling com timeout
+- One test should test one thing
+- Descriptive names: `TestFunctionName_Scenario_ExpectedBehavior`
+- Use `t.Helper()` in test helpers
+- Automatic cleanup with `t.Cleanup()` or `defer`
+- No sleeps — synchronize on channels, state or `testing/synctest`;
+  never on wall-clock timing
 
-### Exemplo de Bom Teste
+### Example of a good test
 
 ```go
 func TestProcessManager_StartStop_ProcessIsKilled(t *testing.T) {
 	t.Helper()
-	
+
 	// Arrange
 	tmpDir := t.TempDir()
 	pm := New(tmpDir)
 	pm.Register("test", "/bin/sleep", "", 0, "10")
-	
+
 	// Act - Start
 	status, err := pm.Start("test")
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	
+
 	// Assert - Running
 	if !status.Running {
 		t.Error("Expected process to be running")
 	}
-	
+
 	// Act - Stop
 	status, err = pm.Stop("test")
 	if err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
-	
+
 	// Assert - Stopped
 	if status.Running {
 		t.Error("Expected process to be stopped")
 	}
-	
-	// Verify process was actually killed
+
+	// Verify the process was actually killed
 	time.Sleep(100 * time.Millisecond)
 	proc, _ := os.FindProcess(status.PID)
 	if err := proc.Signal(syscall.Signal(0)); err == nil {
@@ -384,4 +369,4 @@ func TestProcessManager_StartStop_ProcessIsKilled(t *testing.T) {
 
 ---
 
-**Última atualização:** 2026-05-04
+**Last updated:** 2026-09-10
