@@ -31,21 +31,6 @@ func (ds *DashboardServer) apiStatus(c *gin.Context) {
 	c.JSON(200, ds.enrichSystemStatus(status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil)))
 }
 
-// procToolName maps a RuntimeState/procman process name to the status tool
-// name it surfaces as on the dashboard.
-func procToolName(proc string) string {
-	switch proc {
-	case "codebase":
-		return "codebase-memory-mcp"
-	case "headroom":
-		return "headroom"
-	case "obsidian":
-		return "obsidian"
-	default:
-		return proc
-	}
-}
-
 // enrichSystemStatus overlays the reconciler's lifecycle states and MCP
 // activity on the probe-derived status. The probes answer "is the HTTP
 // health endpoint answering right now"; the reconciler answers "what phase

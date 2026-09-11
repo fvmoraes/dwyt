@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -109,6 +110,13 @@ type MigrationOptions struct {
 // and reported as unidentifiable or skipped. The user is expected to
 // resolve those cases from the dashboard.
 func MigrateVaultsToNamedLayout(dwytHome string, opts MigrationOptions) (MigrationReport, error) {
+	return MigrateVaultsToNamedLayoutContext(context.Background(), dwytHome, opts)
+}
+
+func MigrateVaultsToNamedLayoutContext(ctx context.Context, dwytHome string, opts MigrationOptions) (MigrationReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	report := MigrationReport{}
 
@@ -121,6 +129,9 @@ func MigrateVaultsToNamedLayout(dwytHome string, opts MigrationOptions) (Migrati
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
 		if !entry.IsDir() {
 			continue
 		}

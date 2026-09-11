@@ -13,12 +13,12 @@ import (
 func (ds *DashboardServer) apiVaultMigrationReport(c *gin.Context) {
 	opts := ds.vaultMigrationOpts()
 	opts.DryRun = true
-	report, err := brain.MigrateVaultsToNamedLayout(ds.DwytHome, opts)
+	report, err := brain.MigrateVaultsToNamedLayoutContext(c.Request.Context(), ds.DwytHome, opts)
 	if err != nil {
 		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
 		return
 	}
-	gc := brain.GCSweepVaults(ds.DwytHome, ds.vaultGCOptions(true))
+	gc := brain.GCSweepVaultsContext(c.Request.Context(), ds.DwytHome, ds.vaultGCOptions(true))
 	c.JSON(200, gin.H{"status": "ok", "report": report, "gc": gc})
 }
 
@@ -27,13 +27,13 @@ func (ds *DashboardServer) apiVaultMigrationReport(c *gin.Context) {
 // user can confirm a manual rename after pointing DWYT at a project whose
 // vault directory could not be resolved automatically.
 func (ds *DashboardServer) apiVaultMigrate(c *gin.Context) {
-	report, err := brain.MigrateVaultsToNamedLayout(ds.DwytHome, ds.vaultMigrationOpts())
+	report, err := brain.MigrateVaultsToNamedLayoutContext(c.Request.Context(), ds.DwytHome, ds.vaultMigrationOpts())
 	if err != nil {
 		log.Warn("vault migration: manual run failed", log.Fields{"error": err.Error()})
 		c.JSON(500, gin.H{"status": "error", "error": err.Error()})
 		return
 	}
-	gc := brain.GCSweepVaults(ds.DwytHome, ds.vaultGCOptions(false))
+	gc := brain.GCSweepVaultsContext(c.Request.Context(), ds.DwytHome, ds.vaultGCOptions(false))
 	log.Info("vault migration: manual run",
 		log.Fields{"migrated": report.Migrated, "unidentifiable": report.Unidentifiable,
 			"gc_removed": gc.Removed, "gc_kept": gc.KeptWithContent})

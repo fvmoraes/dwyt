@@ -1,11 +1,16 @@
 package root
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
@@ -27,9 +32,34 @@ var daemonCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Info("daemon process starting")
-		procutil.WritePID(DwytHome, "daemon", os.Getpid())
+		if err := procutil.WritePID(DwytHome, "daemon", os.Getpid()); err != nil {
+			return fmt.Errorf("record daemon PID: %w", err)
+		}
+		defer procutil.RemovePID(DwytHome, "daemon")
 		srv := server.New(2737, DwytBin, DwytHome, version)
-		return srv.Start()
+
+		signalCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stopSignals()
+		serveDone := make(chan struct{})
+		shutdownResult := make(chan error, 1)
+		go func() {
+			select {
+			case <-signalCtx.Done():
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				shutdownResult <- srv.Shutdown(shutdownCtx)
+			case <-serveDone:
+				shutdownResult <- nil
+			}
+		}()
+
+		serveErr := srv.Start()
+		close(serveDone)
+		shutdownErr := <-shutdownResult
+		if shutdownErr != nil {
+			log.Warn("daemon graceful shutdown incomplete", log.Fields{"error": shutdownErr.Error()})
+		}
+		return errors.Join(serveErr, shutdownErr)
 	},
 }
 
@@ -37,8 +67,12 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop all DWYT services",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if requestGracefulDaemonShutdown(2 * time.Second) {
+			waitForTrackedDaemonExit(11 * time.Second)
+		}
 		health.StopAll()
-		// Cross-platform: terminate every PID DWYT recorded (daemon + services).
+		// Cross-platform fallback: terminate every PID DWYT still records
+		// (managed services plus a daemon that missed its graceful budget).
 		procutil.StopAllTracked(DwytHome)
 		// Unix best-effort fallback for processes from older versions that
 		// predate PID files. Skipped on Windows (no pkill; PID files suffice).
@@ -53,6 +87,39 @@ var stopCmd = &cobra.Command{
 		fmt.Println("  \u2713 Servi\u00E7os parados")
 		return nil
 	},
+}
+
+func requestGracefulDaemonShutdown(timeout time.Duration) bool {
+	return requestGracefulDaemonShutdownURL("http://127.0.0.1:2737/api/shutdown", timeout)
+}
+
+func requestGracefulDaemonShutdownURL(url string, timeout time.Duration) bool {
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusAccepted
+}
+
+func waitForTrackedDaemonExit(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		pid := procutil.ListPIDs(DwytHome)["daemon"]
+		if pid == 0 || !procutil.Alive(pid) {
+			procutil.RemovePID(DwytHome, "daemon")
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 var statusCmd = &cobra.Command{
@@ -171,6 +238,9 @@ var uninstallCmd = &cobra.Command{
 
 func stopAllProcesses() {
 	fmt.Println("  → Stopping all processes...")
+	if requestGracefulDaemonShutdown(2 * time.Second) {
+		waitForTrackedDaemonExit(11 * time.Second)
+	}
 	health.StopAll()
 	// Cross-platform: terminate every recorded PID (daemon + managed services).
 	procutil.StopAllTracked(DwytHome)

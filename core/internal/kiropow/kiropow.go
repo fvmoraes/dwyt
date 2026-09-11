@@ -1,6 +1,7 @@
 package kiropow
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,13 @@ type PowerStatus struct {
 }
 
 func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
+	return EnsurePowerContext(context.Background(), dwytHome, dwytBin, projectPath)
+}
+
+func EnsurePowerContext(ctx context.Context, dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	powerDir := filepath.Join(dwytHome, "powers", "dwyt-power")
 	status := &PowerStatus{
 		PowerDir:         powerDir,
@@ -35,19 +43,34 @@ func EnsurePower(dwytHome, dwytBin, projectPath string) (*PowerStatus, error) {
 		UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
 	}
 
+	if err := ctx.Err(); err != nil {
+		return status, err
+	}
 	if err := os.MkdirAll(filepath.Join(powerDir, "steering"), 0755); err != nil {
+		return status, err
+	}
+	if err := ctx.Err(); err != nil {
 		return status, err
 	}
 	if _, err := writeIfChanged(filepath.Join(powerDir, "POWER.md"), GeneratePowerMD(dwytBin, projectPath, status.MCPs)); err != nil {
 		return status, err
 	}
 	mcpJSON, err := GenerateMCPJSON(dwytBin, status.MCPs)
+	if err := ctx.Err(); err != nil {
+		return status, err
+	}
 	if err != nil {
 		status.Errors = append(status.Errors, err.Error())
 	} else if _, err := writeIfChanged(filepath.Join(powerDir, "mcp.json"), mcpJSON); err != nil {
 		return status, err
 	}
+	if err := ctx.Err(); err != nil {
+		return status, err
+	}
 	if err := GenerateSteeringFiles(powerDir, projectPath); err != nil {
+		return status, err
+	}
+	if err := ctx.Err(); err != nil {
 		return status, err
 	}
 	if err := RegisterWithKiro(powerDir); err != nil {

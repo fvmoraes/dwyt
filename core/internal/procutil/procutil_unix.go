@@ -3,6 +3,8 @@
 package procutil
 
 import (
+	"context"
+	"errors"
 	"os"
 	"syscall"
 	"time"
@@ -23,6 +25,13 @@ func Alive(pid int) bool {
 // Terminate asks the process to stop with SIGTERM, then escalates to SIGKILL
 // if it is still alive after a short grace period.
 func Terminate(pid int) error {
+	return TerminateContext(context.Background(), pid)
+}
+
+func TerminateContext(ctx context.Context, pid int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if pid <= 0 {
 		return nil
 	}
@@ -31,11 +40,20 @@ func Terminate(pid int) error {
 		return err
 	}
 	_ = p.Signal(syscall.SIGTERM)
-	for i := 0; i < 30; i++ {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
 		if !Alive(pid) {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), p.Kill())
+		case <-timer.C:
+			return p.Kill()
+		case <-ticker.C:
+		}
 	}
-	return p.Kill()
 }

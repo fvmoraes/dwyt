@@ -85,6 +85,10 @@ type serviceManager interface {
 	Start(name string) (*procman.ServiceStatus, error)
 }
 
+type contextServiceManager interface {
+	StartContext(ctx context.Context, name string) (*procman.ServiceStatus, error)
+}
+
 type reconcilerOptions struct {
 	// waitWarmDone, when set, gates the first reconcile pass on the
 	// startup warmCodebase attempt finishing (no racing owners).
@@ -99,15 +103,15 @@ type reconcilerOptions struct {
 }
 
 type svcPolicy struct {
-	name         string
-	autoStart    bool
-	healthURL    string
-	state        string
-	failCount    int
-	attempt      int
-	nextRetry    time.Time
-	lastChange   time.Time
-	starts       int
+	name       string
+	autoStart  bool
+	healthURL  string
+	state      string
+	failCount  int
+	attempt    int
+	nextRetry  time.Time
+	lastChange time.Time
+	starts     int
 }
 
 type ServiceReconciler struct {
@@ -119,6 +123,7 @@ type ServiceReconciler struct {
 	inFlight map[string]bool
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	runOnce  sync.Once
 	done     chan struct{}
 }
 
@@ -158,29 +163,62 @@ func newServiceReconciler(pm serviceManager, rs *state.RuntimeState, opts reconc
 	return rc
 }
 
-// Run launches the reconcile loop. It returns immediately; Stop ends it.
+// Run launches the reconcile loop with a background context. It is kept for
+// callers that do not own a lifecycle; DashboardServer uses RunContext.
 func (rc *ServiceReconciler) Run() {
-	go func() {
-		defer close(rc.done)
-		// time.NewTimer + Reset, not time.After in a loop (timer churn).
-		timer := time.NewTimer(rc.opts.interval)
-		defer timer.Stop()
-		for {
-			select {
-			case <-rc.stopCh:
-				return
-			case <-timer.C:
-				rc.once(context.Background())
-				timer.Reset(rc.opts.interval)
-			}
-		}
-	}()
+	rc.RunContext(context.Background())
 }
 
-// Stop terminates the loop. Safe to call multiple times.
+// RunContext launches the reconcile loop once and propagates cancellation to
+// an in-progress warmup gate. Repeated calls are harmless.
+func (rc *ServiceReconciler) RunContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rc.runOnce.Do(func() {
+		go func() {
+			defer close(rc.done)
+			// time.NewTimer + Reset, not time.After in a loop (timer churn).
+			timer := time.NewTimer(rc.opts.interval)
+			defer timer.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-rc.stopCh:
+					return
+				case <-timer.C:
+					rc.once(ctx)
+					if ctx.Err() != nil {
+						return
+					}
+					timer.Reset(rc.opts.interval)
+				}
+			}
+		}()
+	})
+}
+
+// Stop terminates the loop. Safe before Run and safe to call multiple times.
 func (rc *ServiceReconciler) Stop() {
+	_ = rc.StopContext(context.Background())
+}
+
+// StopContext bounds the wait for the reconcile loop. Starting the loop after
+// closing stopCh makes Stop-before-Run safe: it exits immediately and closes
+// done instead of waiting forever for a Run call that may never come.
+func (rc *ServiceReconciler) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	rc.stopOnce.Do(func() { close(rc.stopCh) })
-	<-rc.done
+	rc.Run()
+	select {
+	case <-rc.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // stateOf reports the current lifecycle state of a service (test and
@@ -208,17 +246,19 @@ func (rc *ServiceReconciler) once(ctx context.Context) {
 		case <-rc.opts.waitWarmDone:
 		case <-ctx.Done():
 			return
+		case <-rc.stopCh:
+			return
 		}
 	}
 	for _, name := range []string{"codebase", "headroom"} {
 		if ctx.Err() != nil {
 			return
 		}
-		rc.reconcileService(name)
+		rc.reconcileService(ctx, name)
 	}
 }
 
-func (rc *ServiceReconciler) reconcileService(name string) {
+func (rc *ServiceReconciler) reconcileService(ctx context.Context, name string) {
 	rc.mu.Lock()
 	p, ok := rc.policies[name]
 	if !ok {
@@ -275,11 +315,19 @@ func (rc *ServiceReconciler) reconcileService(name string) {
 	rc.inFlight[name] = true
 	p.starts++
 	p.attempt++
+	p.state = svcStarting
 	p.lastChange = now
+	rc.publishLocked(p, st)
 	rc.mu.Unlock()
 
 	started := time.Now()
-	st2, err := rc.pm.Start(name)
+	var st2 *procman.ServiceStatus
+	var err error
+	if manager, ok := rc.pm.(contextServiceManager); ok {
+		st2, err = manager.StartContext(ctx, name)
+	} else {
+		st2, err = rc.pm.Start(name)
+	}
 	durationMs := time.Since(started).Milliseconds()
 
 	rc.mu.Lock()
@@ -290,7 +338,7 @@ func (rc *ServiceReconciler) reconcileService(name string) {
 		p.state, p.failCount = svcStarting, 0 // grace begins
 	case err != nil:
 		p.state, p.failCount = svcFailed, 0
-	case st2.Healthy:
+	case st2 != nil && st2.Healthy:
 		p.state, p.failCount, p.attempt = svcHealthy, 0, 0
 		p.nextRetry = time.Time{}
 	default:

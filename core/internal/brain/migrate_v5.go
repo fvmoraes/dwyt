@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,6 +102,13 @@ var legacyToCanonical = map[string]string{
 // It is safe to call on an already-migrated vault and on a vault that was never
 // touched by DWYT: both are no-ops beyond creating the empty areas.
 func (pb *ProjectObsidian) MigrateToV5(opts V5MigrationOptions) V5MigrationReport {
+	return pb.MigrateToV5Context(context.Background(), opts)
+}
+
+func (pb *ProjectObsidian) MigrateToV5Context(ctx context.Context, opts V5MigrationOptions) V5MigrationReport {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	report := V5MigrationReport{VaultDir: pb.GetBrainDir(), DryRun: opts.DryRun}
 	keep := opts.KeepLatestSessions
 	if keep <= 0 {
@@ -118,10 +126,18 @@ func (pb *ProjectObsidian) MigrateToV5(opts V5MigrationOptions) V5MigrationRepor
 		}
 	}
 
-	pb.migrateLegacyRootNotes(&report, opts)
-	pb.migrateLegacySessions(&report, opts, keep)
-	if opts.BackfillLifecycle {
-		pb.backfillLifecycle(&report, opts)
+	pb.migrateLegacyRootNotes(ctx, &report, opts)
+	if err := ctx.Err(); err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return report
+	}
+	pb.migrateLegacySessions(ctx, &report, opts, keep)
+	if opts.BackfillLifecycle && ctx.Err() == nil {
+		pb.backfillLifecycle(ctx, &report, opts)
+	}
+	if err := ctx.Err(); err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return report
 	}
 	pb.registerLegacyRaw(&report, opts)
 
@@ -134,9 +150,12 @@ func (pb *ProjectObsidian) MigrateToV5(opts V5MigrationOptions) V5MigrationRepor
 // It copies rather than moves: the originals stay until the caller confirms the
 // migration, and the pre-v5 notes already tell the reader they are legacy
 // pointers.
-func (pb *ProjectObsidian) migrateLegacyRootNotes(report *V5MigrationReport, opts V5MigrationOptions) {
+func (pb *ProjectObsidian) migrateLegacyRootNotes(ctx context.Context, report *V5MigrationReport, opts V5MigrationOptions) {
 	dir := pb.GetBrainDir()
 	for legacy, key := range legacyToCanonical {
+		if ctx.Err() != nil {
+			return
+		}
 		source := filepath.Join(dir, legacy)
 		content := readFileString(source)
 		if strings.TrimSpace(content) == "" {
@@ -178,13 +197,16 @@ func (pb *ProjectObsidian) migrateLegacyRootNotes(report *V5MigrationReport, opt
 	// Pre-v5 decisions lived in decisions.md and decisions/index.md. Both fold
 	// into the append-only canonical log, deduplicated.
 	for _, legacy := range []string{"decisions.md", filepath.Join("decisions", "index.md")} {
-		pb.migrateLegacyDecisions(report, opts, legacy)
+		if ctx.Err() != nil {
+			return
+		}
+		pb.migrateLegacyDecisions(ctx, report, opts, legacy)
 	}
 }
 
 // migrateLegacyDecisions folds the bullets of a pre-v5 decisions note into the
 // canonical append-only log.
-func (pb *ProjectObsidian) migrateLegacyDecisions(report *V5MigrationReport, opts V5MigrationOptions, legacy string) {
+func (pb *ProjectObsidian) migrateLegacyDecisions(ctx context.Context, report *V5MigrationReport, opts V5MigrationOptions, legacy string) {
 	content := readFileString(filepath.Join(pb.GetBrainDir(), legacy))
 	if strings.TrimSpace(content) == "" {
 		return
@@ -193,6 +215,9 @@ func (pb *ProjectObsidian) migrateLegacyDecisions(report *V5MigrationReport, opt
 
 	promoted := 0
 	for _, line := range strings.Split(bodyOf(content), "\n") {
+		if ctx.Err() != nil {
+			return
+		}
 		trimmed := strings.TrimSpace(line)
 		// Accept bullets, "### <heading>" entries and plain prose lines, since
 		// the pre-v5 format was never enforced.
@@ -260,7 +285,7 @@ func looksLikeTimestamp(s string) bool {
 
 // migrateLegacySessions converts pre-v5 context notes into the v5 session area
 // and compiles the ones outside the retention window (spec §60.2).
-func (pb *ProjectObsidian) migrateLegacySessions(report *V5MigrationReport, opts V5MigrationOptions, keep int) {
+func (pb *ProjectObsidian) migrateLegacySessions(ctx context.Context, report *V5MigrationReport, opts V5MigrationOptions, keep int) {
 	legacyDir := filepath.Join(pb.GetBrainDir(), "context")
 	entries, err := os.ReadDir(legacyDir)
 	if err != nil {
@@ -275,6 +300,9 @@ func (pb *ProjectObsidian) migrateLegacySessions(report *V5MigrationReport, opts
 	}
 	var sessions []legacySession
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return
+		}
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || e.Name() == "index.md" {
 			continue
 		}
@@ -295,6 +323,9 @@ func (pb *ProjectObsidian) migrateLegacySessions(report *V5MigrationReport, opts
 
 	targetDir := filepath.Join(pb.GetBrainDir(), filepath.FromSlash(snapshotDir))
 	for i, s := range sessions {
+		if ctx.Err() != nil {
+			return
+		}
 		snapshot := legacySnapshotFromNote(s.content)
 		if snapshot.Empty() {
 			report.Items = append(report.Items, V5MigrationItem{
@@ -428,9 +459,12 @@ func legacySnapshotFromNote(content string) CompactSnapshot {
 // Opt-in on purpose: it rewrites frontmatter, and a note without DWYT metadata
 // might be one the user wrote. Marking it managed hands its retention to the
 // housekeeper, which must be a deliberate choice.
-func (pb *ProjectObsidian) backfillLifecycle(report *V5MigrationReport, opts V5MigrationOptions) {
+func (pb *ProjectObsidian) backfillLifecycle(ctx context.Context, report *V5MigrationReport, opts V5MigrationOptions) {
 	dir := pb.GetBrainDir()
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}

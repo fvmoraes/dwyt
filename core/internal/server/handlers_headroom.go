@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/fvmoraes/dwyt/internal/health"
@@ -13,7 +14,11 @@ import (
 // publishes a fallback port selected by ProcessManager before callers build
 // URLs or configure client wrappers.
 func (ds *DashboardServer) startHeadroom() (*procman.ServiceStatus, error) {
-	status, err := ds.ProcMan.Start("headroom")
+	return ds.startHeadroomContext(context.Background())
+}
+
+func (ds *DashboardServer) startHeadroomContext(ctx context.Context) (*procman.ServiceStatus, error) {
+	status, err := ds.ProcMan.StartContext(ctx, "headroom")
 	if status != nil {
 		ds.setHeadroomPort(status.Port)
 	}

@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -497,12 +498,22 @@ Links: [[context/index]] [[maps/project-map]] [[instructions/codebase-law]] [[in
 }
 
 func MigrateOldMemoryDirs(dwytHome string) error {
+	return MigrateOldMemoryDirsContext(context.Background(), dwytHome)
+}
+
+func MigrateOldMemoryDirsContext(ctx context.Context, dwytHome string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return nil
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -523,11 +534,19 @@ func MigrateOldMemoryDirs(dwytHome string) error {
 				}
 				if err := json.Unmarshal(data, &pm); err == nil {
 					for _, e := range pm.Entries {
+						if err := ctx.Err(); err != nil {
+							return err
+						}
 						appendToMarkdown(baseDir, e.Type, e.Content)
 					}
 				}
 			}
-			os.RemoveAll(memoryDir)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := os.RemoveAll(memoryDir); err != nil {
+				return fmt.Errorf("remove migrated memory directory %s: %w", memoryDir, err)
+			}
 		}
 	}
 	return nil
@@ -912,6 +931,14 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 }
 
 func (pb *ProjectObsidian) Stats() map[string]interface{} {
+	stats, _ := pb.StatsContext(context.Background())
+	return stats
+}
+
+func (pb *ProjectObsidian) StatsContext(ctx context.Context) (map[string]interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Short TTL cache: the dashboard polls every few seconds and several
 	// handlers call Stats() within a single poll. Walking the vault each time
 	// is wasteful, so reuse a recent result. Writes invalidate via invalidateStats.
@@ -919,7 +946,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	if pb.statsCache != nil && time.Since(pb.statsAt) < 2*time.Second {
 		cached := pb.statsCache
 		pb.statsMu.Unlock()
-		return cached
+		return cached, nil
 	}
 	pb.statsMu.Unlock()
 
@@ -930,7 +957,10 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	totalFiles := 0
 	var totalBytes int64
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
@@ -940,6 +970,9 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 		typeCount[entryType]++
 		return nil
 	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
 
 	result := map[string]interface{}{
 		"project_id":    pb.ProjectID,
@@ -960,7 +993,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	pb.statsCache = result
 	pb.statsAt = time.Now()
 	pb.statsMu.Unlock()
-	return result
+	return result, nil
 }
 
 // invalidateStats drops the cached Stats() result so the next read reflects a

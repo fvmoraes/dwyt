@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -20,7 +21,6 @@ import (
 	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/health"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
-	"github.com/fvmoraes/dwyt/internal/kiropow"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
 	"github.com/fvmoraes/dwyt/internal/platform"
@@ -86,6 +86,7 @@ func projectDirExists(path string) bool {
 }
 
 func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
+	startupStarted := time.Now()
 	cwd, _ := os.Getwd()
 	project := os.Getenv("DWYT_PROJECT")
 	if project == "" {
@@ -180,24 +181,9 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	security.Load(dwytHome)
 	security.InitObsidianConfig(dwytHome)
 
-	// Warm the Codebase service before any AI client needs it. The stdio
-	// codebase MCP hands off to the daemon on :9749, and a daemon that
-	// listens but does not serve makes every client pay a ~30s timeout
-	// before failing — exactly the red codebase entry users see in their
-	// client MCP panels. Probe, and restart the managed service when it
-	// does not answer its health endpoint.
-	//
-	// This runs in the background rather than blocking New(): Start/Restart
-	// wait up to managedHealthcheckTimeout (60-120s) for the health probe to
-	// return 200, and that budget used to be spent here, synchronously,
-	// before the daemon ever reached srv.Start() and bound its own dashboard
-	// port. The CLI polls that dashboard port with its own similarly-sized
-	// budget (daemonHealthcheckTimeout) starting at nearly the same instant
-	// it spawns the daemon — so a Codebase build that never answers /health
-	// (e.g. an incompatible version) made the daemon lose that race and get
-	// killed just as it would have finished starting. Codebase readiness is
-	// not required for the dashboard itself, so it must not gate it.
-	codebaseWarmDone := warmCodebase(procmanInstance, "http://127.0.0.1:9749/health")
+	// Codebase warmup is intentionally not started here. New() is part of
+	// the pre-bind critical path; serveDashboard starts the warmup only after
+	// the Dashboard listener has entered its accept loop.
 
 	// MCP config sync, vault migration and the Headroom probe moved to
 	// ordered background tasks (startup.go) — see the dashboard-first note
@@ -207,12 +193,11 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	headroomBin := toolPathFor(dwytBin, toolsource.ToolHeadroom, sources)
 	procmanInstance.Register("headroom", headroomBin, "/health", headroomPort, "proxy", "--port", "{port}")
 
-	// The service reconciler takes over after the warmup attempt: it adopts
-	// healthy instances, publishes lifecycle states and performs bounded
-	// recovery for dead auto-start services (svcctl.go). The warmup gate
-	// keeps the two owners from racing the same process.
+	// The service reconciler is constructed now because handlers expose its
+	// state, but serveDashboard starts it only after the post-bind Codebase
+	// warmup completes. That preserves a single process owner without putting
+	// optional readiness on the Core critical path.
 	svcCtl := newServiceReconciler(procmanInstance, rs, reconcilerOptions{
-		waitWarmDone: codebaseWarmDone,
 		healthURLs: map[string]string{
 			"headroom": fmt.Sprintf("http://127.0.0.1:%d/health", headroomPort),
 		},
@@ -235,6 +220,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		sseClients:      make(map[chan string]bool),
 		installStatus:   make(map[string]string),
 		SvcCtl:          svcCtl,
+		startupStarted:  startupStarted,
+		shutdownDone:    make(chan struct{}),
 	}
 	ds.setHeadroomPort(headroomPort)
 	// The Optimizer reports Brain health and housekeeping state, but must not
@@ -253,6 +240,10 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	// (taskBrainV5Migration in startup.go); the Housekeeper construction
 	// stays here because Start() and the API handlers depend on it.
 	ds.Housekeeper = housekeeper.New(v5cfg.cfg.HousekeeperConfig(), pb, ds.Optimizer.RawStore())
+	ds.Housekeeper.SetRunLease(func() func() {
+		ds.vaultMigrationMu.RLock()
+		return ds.vaultMigrationMu.RUnlock
+	})
 	ds.Optimizer.SetHousekeeperStatusProvider(ds.Housekeeper)
 
 	// Telemetry lives in the same SQLite file as the rest of DWYT's state. A
@@ -280,13 +271,8 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		store.SetConfig("project_path", project)
 	}
 
-	if hasSetupCfg && (contains(setupCfg.Ias, "kiro") || contains(setupCfg.Clients, "kiro")) {
-		go func() {
-			if _, err := kiropow.EnsurePower(dwytHome, dwytBin, project); err != nil {
-				log.Warn("kiro power ensure failed", log.Fields{"error": err.Error()})
-			}
-		}()
-	}
+	// Kiro Power reconciliation is optional and therefore starts from the
+	// post-bind lifecycle rather than from New().
 
 	// The setup snapshot feeds background tasks (MCP config sync) that run
 	// after New() has returned.
@@ -350,27 +336,40 @@ func (ds *DashboardServer) setHeadroomPort(port int) {
 // warmCodebase as a bare statement is valid Go), it exists so tests can
 // synchronize on completion instead of racing real process/filesystem
 // timing.
+func warmCodebaseAttempt(ctx context.Context, pm *procman.ProcessManager, healthURL string) {
+	if ctx.Err() != nil {
+		return
+	}
+	if health.ProbeURLContext(ctx, healthURL) {
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if status := pm.Status("codebase"); status != nil && status.Running {
+		log.Warn("codebase service is running but unhealthy; restarting",
+			log.Fields{"pid": status.PID})
+		if _, err := pm.RestartContext(ctx, "codebase"); err != nil {
+			log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
+		}
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if _, err := pm.StartContext(ctx, "codebase"); err != nil {
+		log.Info("codebase service was not started at startup",
+			log.Fields{"reason": err.Error()})
+		return
+	}
+	log.Info("codebase service started")
+}
+
 func warmCodebase(pm *procman.ProcessManager, healthURL string) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if health.ProbeURL(healthURL) {
-			return
-		}
-		if status := pm.Status("codebase"); status != nil && status.Running {
-			log.Warn("codebase service is running but unhealthy; restarting",
-				log.Fields{"pid": status.PID})
-			if _, err := pm.Restart("codebase"); err != nil {
-				log.Warn("codebase restart failed", log.Fields{"error": err.Error()})
-			}
-			return
-		}
-		if _, err := pm.Start("codebase"); err != nil {
-			log.Info("codebase service was not started at startup",
-				log.Fields{"reason": err.Error()})
-			return
-		}
-		log.Info("codebase service started")
+		warmCodebaseAttempt(context.Background(), pm, healthURL)
 	}()
 	return done
 }
@@ -380,7 +379,11 @@ func warmCodebase(pm *procman.ProcessManager, healthURL string) <-chan struct{} 
 // "<hash>" form. It is fully idempotent and never deletes content; a
 // directory whose project name cannot be determined is left untouched and
 // logged so the dashboard can surface it for manual resolution.
-func runVaultMigration(dwytHome string, store *db.Store) {
+func runVaultMigration(dwytHome string, store *db.Store) error {
+	return runVaultMigrationContext(context.Background(), dwytHome, store)
+}
+
+func runVaultMigrationContext(ctx context.Context, dwytHome string, store *db.Store) error {
 	opts := brain.MigrationOptions{
 		ProjectPathResolver: func(hash string) (string, string, bool) {
 			if store == nil {
@@ -403,10 +406,9 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 			return err != nil
 		},
 	}
-	report, err := brain.MigrateVaultsToNamedLayout(dwytHome, opts)
+	report, err := brain.MigrateVaultsToNamedLayoutContext(ctx, dwytHome, opts)
 	if err != nil {
-		log.Warn("vault migration: scan failed", log.Fields{"error": err.Error()})
-		return
+		return fmt.Errorf("scan vault migration: %w", err)
 	}
 	if report.Migrated > 0 || report.Unidentifiable > 0 {
 		log.Info("vault migration: completed",
@@ -432,7 +434,7 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 	// ghosts older versions left behind for every directory DWYT ever ran in
 	// — without this they pile up forever and the migration card keeps asking
 	// the user to associate directories they have never heard of.
-	gc := brain.GCSweepVaults(dwytHome, brain.VaultGCOptions{
+	gc := brain.GCSweepVaultsContext(ctx, dwytHome, brain.VaultGCOptions{
 		KnownHash: func(hash string) bool {
 			if store == nil {
 				return false
@@ -448,6 +450,10 @@ func runVaultMigration(dwytHome string, store *db.Store) {
 			"scan_errors": len(gc.Errors),
 		})
 	}
+	if len(gc.Errors) > 0 {
+		return fmt.Errorf("vault GC: %s", strings.Join(gc.Errors, "; "))
+	}
+	return nil
 }
 
 func (ds *DashboardServer) Start() error {
@@ -489,25 +495,7 @@ func (ds *DashboardServer) Start() error {
 	})
 
 	registerRoutes(r, ds)
-
-	go ds.broadcastLoop()
-
-	addr := fmt.Sprintf("127.0.0.1:%d", ds.Port)
-	fmt.Printf("   Dashboard → http://localhost:%d\n", ds.Port)
-
-	ds.startHeadroomIfNeeded()
-	// Dashboard-first: ordered background reconciliation (vault migrations,
-	// MCP config sync, stats, probes) runs now that the server is about to
-	// bind — its housekeeper_start task must stay last so the deep pass
-	// never races the migrations.
-	ds.startBackgroundReconciliation()
-	// The reconciler's first pass is gated on the startup warmCodebase
-	// attempt; from then on it observes, adopts and recovers with backoff.
-	if ds.SvcCtl != nil {
-		ds.SvcCtl.Run()
-	}
-
-	return r.Run(addr)
+	return ds.serveDashboard(r)
 }
 
 // staticContentType resolves the MIME type for an embedded asset, with
@@ -562,10 +550,14 @@ func (ds *DashboardServer) apiSSE(c *gin.Context) {
 	}
 }
 
-func (ds *DashboardServer) broadcastLoop() {
+func (ds *DashboardServer) broadcastLoop(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
-	go func() {
-		for range ticker.C {
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 			s := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
 			data, _ := json.Marshal(s)
 			ds.sseMu.Lock()
@@ -577,7 +569,7 @@ func (ds *DashboardServer) broadcastLoop() {
 			}
 			ds.sseMu.Unlock()
 		}
-	}()
+	}
 }
 
 func (ds *DashboardServer) broadcastSSE(event, message string) {
@@ -595,40 +587,44 @@ func (ds *DashboardServer) broadcastSSE(event, message string) {
 	}
 }
 
-func (ds *DashboardServer) startHeadroomIfNeeded() {
+func (ds *DashboardServer) startHeadroomIfNeeded(ctx context.Context) error {
 	ds.headroomStartMu.Lock()
 	defer ds.headroomStartMu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	headroomBin := ds.headroomPath()
 	if _, err := os.Stat(headroomBin); err != nil {
-		return
+		return nil
 	}
 
 	port := ds.headroomPort()
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	if health.ProbeURL(healthURL) {
+	if health.ProbeURLContext(ctx, healthURL) {
 		log.Info("headroom already running", log.Fields{"port": port})
-		return
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
-	go func() {
-		status, err := ds.startHeadroom()
-		if err != nil {
-			log.Warn("headroom start failed", log.Fields{"error": err.Error(), "port": port})
-			ds.RuntimeState.SetProcessHealthy("headroom", false, err.Error())
-			return
-		}
+	started, err := ds.startHeadroomContext(ctx)
+	if err != nil {
+		ds.RuntimeState.SetProcessHealthy("headroom", false, err.Error())
+		return fmt.Errorf("start headroom on port %d: %w", port, err)
+	}
 
-		ds.RuntimeState.RegisterProcess("headroom", status.PID, status.Port)
-		ds.RuntimeState.SetProcessHealthy("headroom", status.Healthy, status.Error)
-		log.Info("headroom spawned by daemon", log.Fields{"pid": status.PID, "port": status.Port})
+	ds.RuntimeState.RegisterProcess("headroom", started.PID, started.Port)
+	ds.RuntimeState.SetProcessHealthy("headroom", started.Healthy, started.Error)
+	log.Info("headroom spawned by daemon", log.Fields{"pid": started.PID, "port": started.Port})
 
-		if status.Healthy {
-			ds.configureHeadroomClients(ds.DefaultProject)
-		} else {
-			log.Warn("headroom started but not healthy", log.Fields{"port": status.Port})
-		}
-	}()
+	if started.Healthy {
+		ds.configureHeadroomClients(ds.DefaultProject)
+	} else {
+		log.Warn("headroom started but not healthy", log.Fields{"port": started.Port})
+	}
+	return nil
 }
 
 // clientsString returns the comma-separated AI clients the user selected in

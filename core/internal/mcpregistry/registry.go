@@ -1,6 +1,7 @@
 package mcpregistry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1117,6 +1118,16 @@ func (r *Registry) ConfigureMCPByName(projectPath, name string, clients []string
 
 // ConfigureMCP writes MCP configurations to the AI clients the user selected.
 func (r *Registry) ConfigureMCP(projectPath string, clients []string) error {
+	return r.ConfigureMCPContext(context.Background(), projectPath, clients)
+}
+
+func (r *Registry) ConfigureMCPContext(ctx context.Context, projectPath string, clients []string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Save the updated registry first
 	if err := r.Save(); err != nil {
 		return fmt.Errorf("mcp registry save failed: %w", err)
@@ -1128,7 +1139,7 @@ func (r *Registry) ConfigureMCP(projectPath string, clients []string) error {
 		backup[k] = v
 	}
 
-	errors := r.syncConfiguredTargets(projectPath, clients, nil)
+	errors := r.syncConfiguredTargetsContext(ctx, projectPath, clients, nil)
 
 	if len(errors) > 0 {
 		// Rollback: restore registry to pre-sync state

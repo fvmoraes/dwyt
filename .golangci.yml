@@ -12,6 +12,8 @@ linters:
     - unconvert   # redundant conversions hide real type intent
     - copyloopvar # Go 1.22+ loop-var copies are unnecessary
   exclusions:
+    paths:
+      - web/node_modules
     rules:
       # Test files legitimately sleep and discard some returns.
       - path: _test\.go
@@ -21,3 +23,9 @@ linters:
 formatters:
   enable:
     - gofmt
+
+issues:
+  # The repository predates this gate and has a documented legacy backlog.
+  # Review only findings introduced after the branch merge base; new code must
+  # still satisfy the complete configured linter set.
+  new-from-merge-base: main

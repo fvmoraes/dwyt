@@ -235,3 +235,68 @@ func (f *fakeServiceManager) Start(name string) (*procman.ServiceStatus, error) 
 	}
 	return &procman.ServiceStatus{Name: name, Running: true, Healthy: true, PID: 4242, Port: 9749}, nil
 }
+
+func TestReconcilerStopBeforeRunDoesNotBlock(t *testing.T) {
+	rc := newServiceReconciler(newFakeManager(), state.Init(t.TempDir()), reconcilerOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := rc.StopContext(ctx); err != nil {
+		t.Fatalf("StopContext before Run() error = %v", err)
+	}
+	// The compatibility Stop method is idempotent after the bounded stop.
+	rc.Stop()
+}
+
+func TestReconcilerPublishesStartingBeforeBlockedStartCompletes(t *testing.T) {
+	fm := newBlockingContextManager()
+	fm.status["codebase"] = &procman.ServiceStatus{Name: "codebase", Running: false}
+	rs := state.Init(t.TempDir())
+	rc := newServiceReconciler(fm, rs, reconcilerOptions{waitWarmDone: closedChan()})
+
+	done := make(chan struct{})
+	go func() {
+		rc.once(context.Background())
+		close(done)
+	}()
+	select {
+	case <-fm.entered:
+	case <-time.After(time.Second):
+		t.Fatal("reconciler never started the dead service")
+	}
+	if got := rc.stateOf("codebase"); got != svcStarting {
+		t.Fatalf("state during blocked start = %s, want starting", got)
+	}
+	close(fm.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reconcile pass did not finish")
+	}
+	if got := rc.stateOf("codebase"); got != svcHealthy {
+		t.Fatalf("state after successful start = %s, want healthy", got)
+	}
+}
+
+type blockingContextManager struct {
+	*fakeServiceManager
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newBlockingContextManager() *blockingContextManager {
+	return &blockingContextManager{
+		fakeServiceManager: newFakeManager(),
+		entered:            make(chan struct{}),
+		release:            make(chan struct{}),
+	}
+}
+
+func (f *blockingContextManager) StartContext(ctx context.Context, name string) (*procman.ServiceStatus, error) {
+	close(f.entered)
+	select {
+	case <-f.release:
+		return &procman.ServiceStatus{Name: name, Running: true, Healthy: true, PID: 4242, Port: 9749}, nil
+	case <-ctx.Done():
+		return &procman.ServiceStatus{Name: name, Running: false, Error: ctx.Err().Error()}, ctx.Err()
+	}
+}

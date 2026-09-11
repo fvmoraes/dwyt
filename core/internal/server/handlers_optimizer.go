@@ -182,6 +182,8 @@ func (ds *DashboardServer) apiOptimizerPolicy(c *gin.Context) {
 // health from the vault itself rather than from a cached counter, so a vault
 // edited outside DWYT is still described accurately.
 func (ds *DashboardServer) MemoryHealth() map[string]interface{} {
+	ds.vaultMigrationMu.RLock()
+	defer ds.vaultMigrationMu.RUnlock()
 	pb := ds.projectObsidian()
 	if pb == nil {
 		return map[string]interface{}{"available": false, "reason": "no project vault"}
@@ -248,5 +250,5 @@ func (ds *DashboardServer) apiBrainMigrateV5(c *gin.Context) {
 		// authored, so it stays opt-in even here.
 		BackfillLifecycle: c.Query("backfill_lifecycle") == "true",
 	}
-	c.JSON(http.StatusOK, pb.MigrateToV5(opts))
+	c.JSON(http.StatusOK, pb.MigrateToV5Context(c.Request.Context(), opts))
 }

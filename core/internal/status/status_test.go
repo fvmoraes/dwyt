@@ -80,6 +80,37 @@ func TestSetHeadroomPortRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestPollCBMCPUsesEffectivePort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+
+	previous := CodebasePort()
+	port := listener.Addr().(*net.TCPAddr).Port
+	SetCodebasePort(port)
+	t.Cleanup(func() { SetCodebasePort(previous) })
+
+	all := PollAllWithPaths("", "", "", false)
+	if len(all.Tools) == 0 {
+		t.Fatal("status poll returned no tools")
+	}
+	tool := all.Tools[0]
+	if tool.Status != StateOnline || tool.Port != port {
+		t.Fatalf("codebase status = %+v, want healthy service on effective port %d", tool, port)
+	}
+}
+
 func TestCommandOutputWithTimeoutBoundsHungTool(t *testing.T) {
 	if os.Getenv("DWYT_STATUS_TIMEOUT_HELPER") == "1" {
 		select {}

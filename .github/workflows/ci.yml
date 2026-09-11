@@ -5,14 +5,22 @@ on:
     branches: [ main, 'fix/**', 'feat/**', 'plan/**' ]
     paths:
       - "core/**"
+      - "install.sh"
       - "install.ps1"
-      - ".github/workflows/ci.yml"
+      - "install-lib/**"
+      - ".golangci.yml"
+      - ".github/workflows/**"
+      - "plan/**"
   pull_request:
     branches: [ main ]
     paths:
       - "core/**"
+      - "install.sh"
       - "install.ps1"
-      - ".github/workflows/ci.yml"
+      - "install-lib/**"
+      - ".golangci.yml"
+      - ".github/workflows/**"
+      - "plan/**"
 
 permissions:
   contents: read
@@ -27,10 +35,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26.6"
           cache: true
           cache-dependency-path: core/go.sum
 
@@ -45,12 +55,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -shuffle=on ./... 2>&1 | tee /tmp/go-test-output.txt
+          go test -shuffle=on -count=1 ./... 2>&1 | tee /tmp/go-test-output.txt
 
       - name: Report failing tests
         if: failure()
         shell: bash
         run: |
+          if [[ ! -f /tmp/go-test-output.txt ]]; then
+            {
+              echo "### Go test output unavailable"
+              echo "The test step did not run; inspect the first failed step above."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           # Emit failing test names as workflow annotations (readable via the
           # public check-runs annotations API) and the output tail as a step
           # summary, so Windows failures are diagnosable without log access.
@@ -66,6 +83,23 @@ jobs:
             tail -n 150 /tmp/go-test-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: core/web/package-lock.json
+
+      - name: Lint frontend
+        working-directory: core/web
+        run: npm ci && npm run lint
+
+      - name: Build frontend
+        working-directory: core/web
+        run: npm run build
+
+      - name: Check embedded frontend is current
+        run: git diff --exit-code -- core/internal/server/dashboard/dist
 
       - name: Vet
         working-directory: core
@@ -90,20 +124,6 @@ jobs:
             throw ($parseErrors | Out-String)
           }
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: core/web/package-lock.json
-
-      - name: Lint frontend
-        working-directory: core/web
-        run: npm ci && npm run lint
-
-      - name: Build frontend
-        working-directory: core/web
-        run: npm run build
-
   race:
     # Data races are undefined behavior; run the detector on the two fastest
     # runners. Windows is skipped: its race builds are slow and the same code
@@ -119,13 +139,13 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26.6"
           cache: true
           cache-dependency-path: core/go.sum
 
       - name: Race tests
         working-directory: core
-        run: go test -race -shuffle=on ./...
+        run: go test -race -shuffle=on -count=1 ./...
 
   lint:
     name: golangci-lint
@@ -134,10 +154,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26.6"
           cache: true
           cache-dependency-path: core/go.sum
 
@@ -156,12 +178,12 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26.6"
           cache: true
           cache-dependency-path: core/go.sum
 
       - name: govulncheck
         working-directory: core
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...

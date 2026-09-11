@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/integrate"
+	"github.com/fvmoraes/dwyt/internal/mcp"
 	"github.com/fvmoraes/dwyt/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
@@ -76,10 +78,15 @@ func TestNetSavingsDerivationSubtractsTaxes(t *testing.T) {
 	if *payload.GrossAvoidedTokens != 50000 {
 		t.Fatalf("gross avoided = %d, want 50000", *payload.GrossAvoidedTokens)
 	}
-	if *payload.NetEstimatedTokens != 50000-payload.StartupSchemaTaxTokens-payload.ManagedInstructionTaxTokens {
-		t.Fatalf("net = %d does not equal gross minus taxes", *payload.NetEstimatedTokens)
+	tax := mcp.MeasureStartupTax([]byte(integrate.InstructionBlock()))
+	wantNet := 50000 - tax.TotalEstimatedTokens
+	if *payload.NetEstimatedTokens != wantNet {
+		t.Fatalf("net = %d, want gross minus one complete startup tax (%d)", *payload.NetEstimatedTokens, wantNet)
 	}
 	if payload.StartupSchemaTaxTokens <= 0 {
 		t.Fatal("startup tax must be included in the derivation")
+	}
+	if payload.StartupSchemaTaxTokens+payload.ManagedInstructionTaxTokens != tax.TotalEstimatedTokens {
+		t.Fatalf("reported tax components double-count or omit instruction tax: schema=%d instruction=%d total=%d", payload.StartupSchemaTaxTokens, payload.ManagedInstructionTaxTokens, tax.TotalEstimatedTokens)
 	}
 }

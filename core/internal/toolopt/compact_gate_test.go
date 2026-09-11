@@ -13,11 +13,11 @@ import (
 
 func gateFixture() Compacted {
 	return Compacted{
-		Status:        "fail",
-		Summary:       "1 error, 2 warnings",
-		RawTokensEst:  4000,
-		SentTokensEst: 300,
-		RawRef:        "dwyt://objects/abcdef12",
+		Status:         "fail",
+		Summary:        "1 error, 2 warnings",
+		RawTokensEst:   4000,
+		SentTokensEst:  300,
+		RawRef:         "dwyt://objects/abcdef12",
 		CompressionPct: 92.5,
 	}
 }

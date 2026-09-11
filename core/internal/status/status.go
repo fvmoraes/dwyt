@@ -72,12 +72,17 @@ type HeadroomMetrics struct {
 }
 
 const defaultHeadroomPort = 8787
+const defaultCodebasePort = 9749
 
 const toolProbeTimeout = 2 * time.Second
 
 var headroomPort atomic.Int64
+var codebasePort atomic.Int64
 
-func init() { headroomPort.Store(defaultHeadroomPort) }
+func init() {
+	headroomPort.Store(defaultHeadroomPort)
+	codebasePort.Store(defaultCodebasePort)
+}
 
 // SetHeadroomPort publishes the port selected by the daemon. Atomic access is
 // required because startup chooses a fallback port in a goroutine while the
@@ -96,6 +101,24 @@ func HeadroomPort() int {
 	port := int(headroomPort.Load())
 	if port < 1 || port > 65535 {
 		return defaultHeadroomPort
+	}
+	return port
+}
+
+// SetCodebasePort publishes the effective port selected for the managed
+// Codebase service. Status probes must follow fallback ports instead of
+// assuming the requested default forever.
+func SetCodebasePort(port int) {
+	if port < 1 || port > 65535 {
+		return
+	}
+	codebasePort.Store(int64(port))
+}
+
+func CodebasePort() int {
+	port := int(codebasePort.Load())
+	if port < 1 || port > 65535 {
+		return defaultCodebasePort
 	}
 	return port
 }
@@ -129,23 +152,24 @@ func pollCBMCP(dwytBin string) ToolStatus {
 }
 
 func pollCBMCPPath(bin string) ToolStatus {
+	port := CodebasePort()
 	ts := ToolStatus{Name: "codebase-memory-mcp", Status: StateNotInstalled, State: StateNotInstalled}
-	if health.ProbeURL("http://127.0.0.1:9749/health") {
+	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", port)) {
 		ts.Status = StateOnline
 		ts.State = StateOnline
 		ts.Running = true
 		ts.Healthy = true
-		ts.Port = 9749
-		ts.Details = "UI on port 9749"
+		ts.Port = port
+		ts.Details = fmt.Sprintf("UI on port %d", port)
 		return ts
 	}
-	if health.ProbePort(9749) {
+	if health.ProbePort(port) {
 		ts.Status = StatePortOpenNoHealth
 		ts.State = StatePortOpenNoHealth
 		ts.Running = false
 		ts.Healthy = false
-		ts.Port = 9749
-		ts.Details = "port 9749 occupied but healthcheck failed"
+		ts.Port = port
+		ts.Details = fmt.Sprintf("port %d occupied but healthcheck failed", port)
 		return ts
 	}
 
@@ -165,7 +189,7 @@ func pollCBMCPPath(bin string) ToolStatus {
 	ts.State = StateInstalled
 	ts.Running = false
 	ts.Healthy = false
-	ts.Port = 9749
+	ts.Port = port
 	ts.Details = "installed (launch on demand)"
 	return ts
 }

@@ -37,8 +37,11 @@ func (ds *DashboardServer) apiNetSavings(c *gin.Context) {
 	report := NetSavingsReport{Window: window, Provenance: "unknown"}
 
 	tax := mcp.MeasureStartupTax([]byte(integrate.InstructionBlock()))
-	report.StartupSchemaTaxTokens = tax.TotalEstimatedTokens
 	report.ManagedInstructionTaxTokens = tax.ManagedInstructionTokens
+	report.StartupSchemaTaxTokens = tax.TotalEstimatedTokens - tax.ManagedInstructionTokens
+	if report.StartupSchemaTaxTokens < 0 {
+		report.StartupSchemaTaxTokens = 0
+	}
 
 	if ds.Telemetry == nil {
 		c.JSON(200, report)

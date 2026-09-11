@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
@@ -101,11 +104,36 @@ type DashboardServer struct {
 	headroomStartMu     sync.Mutex
 	savingsMu           sync.Mutex
 	// Dashboard-first startup: non-critical boot work runs as ordered
-	// background tasks after the bind. startupTasksOverride replaces the
-	// real task list in tests; startupDone closes when the loop finishes.
+	// background tasks only after http.Server has entered its accept loop.
+	// startupTasksOverride replaces the real task list in tests; startupDone
+	// closes when the loop finishes.
 	startupTasksOverride []startupTask
 	startupDone          <-chan struct{}
 	startupCancel        context.CancelFunc
+	startupStarted       time.Time
+
+	// lifecycleMu serializes Start, post-bind service activation and Shutdown.
+	// All WaitGroup additions happen while Start holds this lock and before the
+	// server becomes externally observable, so Shutdown can wait safely.
+	lifecycleMu       sync.Mutex
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
+	httpServer        *http.Server
+	lifecycleWG       sync.WaitGroup
+	lifecycleDone     <-chan struct{}
+	lifecycleStarted  bool
+	lifecycleStopping bool
+	svcCtlStarted     bool
+	shutdownRequested bool
+	shutdownStarted   bool
+	shutdownDone      chan struct{}
+	shutdownErr       error
+
+	// vaultMigrationMu is a filesystem lease for structural vault changes.
+	// HTTP/MCP vault operations hold a read lease; startup/manual migrations
+	// hold the write lease. vaultMigrating enables fail-fast 503 responses.
+	vaultMigrationMu sync.RWMutex
+	vaultMigrating   atomic.Bool
 	// hasSetupConfig/setupConfig mirror the persisted setup so background
 	// tasks (MCP config sync) can act on it after New() returned.
 	hasSetupConfig bool

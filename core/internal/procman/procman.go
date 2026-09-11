@@ -1,6 +1,7 @@
 package procman
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -46,12 +47,13 @@ type ManagedProcess struct {
 }
 
 type ProcessManager struct {
-	processes     map[string]*ManagedProcess
-	mu            sync.RWMutex
-	logDir        string
-	dwytHome      string
-	terminateTree func(int) error
-	stopTimeout   time.Duration
+	processes            map[string]*ManagedProcess
+	mu                   sync.RWMutex
+	logDir               string
+	dwytHome             string
+	terminateTree        func(int) error // optional test override
+	terminateTreeContext func(context.Context, int) error
+	stopTimeout          time.Duration
 }
 
 const defaultProcessStopTimeout = 6 * time.Second
@@ -60,11 +62,11 @@ func New(dwytHome string) *ProcessManager {
 	logDir := filepath.Join(dwytHome, "logs")
 	os.MkdirAll(logDir, 0755)
 	return &ProcessManager{
-		processes:     make(map[string]*ManagedProcess),
-		logDir:        logDir,
-		dwytHome:      dwytHome,
-		terminateTree: procutil.TerminateTree,
-		stopTimeout:   defaultProcessStopTimeout,
+		processes:            make(map[string]*ManagedProcess),
+		logDir:               logDir,
+		dwytHome:             dwytHome,
+		terminateTreeContext: procutil.TerminateTreeContext,
+		stopTimeout:          defaultProcessStopTimeout,
 	}
 }
 
@@ -98,6 +100,16 @@ func buildServiceCommand(binPath string, args []string) *exec.Cmd {
 }
 
 func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
+	return pm.StartContext(context.Background(), name)
+}
+
+func (pm *ProcessManager) StartContext(ctx context.Context, name string) (*ServiceStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return &ServiceStatus{Name: name, Status: "cancelled", State: "cancelled", Error: err.Error()}, err
+	}
 	mp := pm.get(name)
 	if mp == nil {
 		return nil, fmt.Errorf("service %s not registered", name)
@@ -106,6 +118,9 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return &ServiceStatus{Name: name, Status: "cancelled", State: "cancelled", Error: err.Error()}, err
+	}
 	if mp.Running() {
 		return pm.statusLocked(mp), nil
 	}
@@ -161,6 +176,10 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	// undeletable, which breaks TempDir cleanup in tests and log rotation.
 	mp.logFiles = []*os.File{stdout, stderr}
 
+	if err := ctx.Err(); err != nil {
+		mp.closeLogFiles()
+		return &ServiceStatus{Name: name, Status: "cancelled", State: "cancelled", Error: err.Error()}, err
+	}
 	if err := cmd.Start(); err != nil {
 		mp.closeLogFiles()
 		return &ServiceStatus{Name: name, Status: "error", State: "error", Error: fmt.Sprintf("failed to start: %v", err)}, err
@@ -192,7 +211,7 @@ func (pm *ProcessManager) Start(name string) (*ServiceStatus, error) {
 	if mp.HealthURL != "" {
 		healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", mp.Port, mp.HealthURL)
 		timeout := managedHealthcheckTimeout()
-		if err := waitForHealth(healthURL, timeout); err != nil {
+		if err := waitForHealthContext(ctx, healthURL, timeout); err != nil {
 			// Kill the process that failed its healthcheck; the reaper collects it.
 			if cmd.Process != nil {
 				procutil.TerminateTree(cmd.Process.Pid)
@@ -221,10 +240,17 @@ func (mp *ManagedProcess) closeLogFiles() {
 }
 
 func (pm *ProcessManager) terminateProcessTree(pid int) error {
+	return pm.terminateProcessTreeContext(context.Background(), pid)
+}
+
+func (pm *ProcessManager) terminateProcessTreeContext(ctx context.Context, pid int) error {
 	if pm.terminateTree != nil {
 		return pm.terminateTree(pid)
 	}
-	return procutil.TerminateTree(pid)
+	if pm.terminateTreeContext != nil {
+		return pm.terminateTreeContext(ctx, pid)
+	}
+	return procutil.TerminateTreeContext(ctx, pid)
 }
 
 func (pm *ProcessManager) processStopTimeout() time.Duration {
@@ -235,20 +261,36 @@ func (pm *ProcessManager) processStopTimeout() time.Duration {
 }
 
 func waitForProcessExit(done <-chan struct{}, timeout time.Duration) bool {
+	return waitForProcessExitContext(context.Background(), done, timeout)
+}
+
+func waitForProcessExitContext(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
 	if done == nil {
 		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-done:
 		return true
+	case <-ctx.Done():
+		return false
 	case <-timer.C:
 		return false
 	}
 }
 
 func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
+	return pm.StopContext(context.Background(), name)
+}
+
+func (pm *ProcessManager) StopContext(ctx context.Context, name string) (*ServiceStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	mp := pm.get(name)
 	if mp == nil {
 		return nil, fmt.Errorf("service %s not registered", name)
@@ -268,15 +310,21 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 	if done == nil {
 		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d has no exit notification", name, pid)
 	}
-	if err := pm.terminateProcessTree(pid); err != nil {
+	if err := pm.terminateProcessTreeContext(ctx, pid); err != nil {
 		return pm.statusLocked(mp), fmt.Errorf("stopping service %s: terminate process tree %d: %w", name, pid, err)
 	}
 	timeout := pm.processStopTimeout()
-	if !waitForProcessExit(done, timeout) {
-		if err := pm.terminateProcessTree(pid); err != nil {
+	if !waitForProcessExitContext(ctx, done, timeout) {
+		if err := ctx.Err(); err != nil {
+			return pm.statusLocked(mp), fmt.Errorf("stopping service %s: wait for process %d: %w", name, pid, err)
+		}
+		if err := pm.terminateProcessTreeContext(ctx, pid); err != nil {
 			return pm.statusLocked(mp), fmt.Errorf("stopping service %s after %s timeout: terminate process tree %d: %w", name, timeout, pid, err)
 		}
-		if !waitForProcessExit(done, timeout) {
+		if !waitForProcessExitContext(ctx, done, timeout) {
+			if err := ctx.Err(); err != nil {
+				return pm.statusLocked(mp), fmt.Errorf("stopping service %s: wait for process %d: %w", name, pid, err)
+			}
 			return pm.statusLocked(mp), fmt.Errorf("stopping service %s: process %d did not exit after two %s waits", name, pid, timeout)
 		}
 		log.Warn("process required termination retry", log.Fields{"service": name, "pid": pid})
@@ -291,12 +339,25 @@ func (pm *ProcessManager) Stop(name string) (*ServiceStatus, error) {
 }
 
 func (pm *ProcessManager) Restart(name string) (*ServiceStatus, error) {
-	status, err := pm.Stop(name)
+	return pm.RestartContext(context.Background(), name)
+}
+
+func (pm *ProcessManager) RestartContext(ctx context.Context, name string) (*ServiceStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	status, err := pm.StopContext(ctx, name)
 	if err != nil {
 		return status, fmt.Errorf("stopping service %s before restart: %w", name, err)
 	}
-	time.Sleep(500 * time.Millisecond)
-	return pm.Start(name)
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return status, ctx.Err()
+	case <-timer.C:
+	}
+	return pm.StartContext(ctx, name)
 }
 
 func (pm *ProcessManager) Status(name string) *ServiceStatus {
@@ -383,8 +444,19 @@ func probeURL(url string) bool {
 }
 
 func probeHealthURL(url string, timeout time.Duration) (bool, error) {
+	return probeHealthURLContext(context.Background(), url, timeout)
+}
+
+func probeHealthURLContext(ctx context.Context, url string, timeout time.Duration) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
 	}
@@ -420,10 +492,20 @@ func managedHealthcheckTimeout() time.Duration {
 // total deadline. HTTP 200 is intentionally sufficient: Headroom may expose
 // optional components (such as kompress) as degraded while it is ready.
 func waitForHealth(url string, timeout time.Duration) error {
+	return waitForHealthContext(context.Background(), url, timeout)
+}
+
+func waitForHealthContext(ctx context.Context, url string, timeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	started := time.Now()
 	deadline := started.Add(timeout)
 	lastError := "not attempted"
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return fmt.Errorf("healthcheck timeout: url=%s last_error=%s waited=%s", url, lastError, time.Since(started).Round(time.Millisecond))
@@ -432,7 +514,7 @@ func waitForHealth(url string, timeout time.Duration) error {
 		if remaining < requestTimeout {
 			requestTimeout = remaining
 		}
-		if ok, err := probeHealthURL(url, requestTimeout); ok {
+		if ok, err := probeHealthURLContext(ctx, url, requestTimeout); ok {
 			return nil
 		} else if err != nil {
 			lastError = err.Error()
@@ -445,7 +527,13 @@ func waitForHealth(url string, timeout time.Duration) error {
 		if remaining < sleep {
 			sleep = remaining
 		}
-		time.Sleep(sleep)
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,20 +36,47 @@ type startupTask struct {
 // background version is behavior-preserving by construction.
 func (ds *DashboardServer) buildStartupTasks() []startupTask {
 	return []startupTask{
-		{name: "migrate_old_memory_dirs", run: ds.taskMigrateOldMemoryDirs},
-		{name: "brain_v5_migration", run: ds.taskBrainV5Migration},
-		{name: "vault_migration", run: ds.taskVaultMigration},
-		{name: "vault_stats", run: ds.taskVaultStats},
-		{name: "obsidian_mcp_validation", run: ds.taskObsidianMCPValidation},
+		{name: "vault_reconciliation", run: ds.taskVaultReconciliation},
 		{name: "mcp_config_sync", run: ds.taskMCPConfigSync},
 		{name: "headroom_probe", run: ds.taskHeadroomProbe},
+		{name: "obsidian_mcp_validation", run: ds.taskObsidianMCPValidation},
 		{name: "housekeeper_start", run: ds.taskHousekeeperStart},
 	}
 }
 
+func (ds *DashboardServer) taskVaultReconciliation(ctx context.Context) error {
+	stages := []startupTask{
+		{name: "migrate_old_memory_dirs", run: ds.taskMigrateOldMemoryDirs},
+		{name: "brain_v5_migration", run: ds.taskBrainV5Migration},
+		{name: "vault_migration", run: ds.taskVaultMigration},
+		{name: "vault_stats", run: ds.taskVaultStats},
+	}
+	return ds.withVaultMigration(ctx, func(ctx context.Context) error {
+		var stageErrs []error
+		for _, stage := range stages {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			started := time.Now()
+			err := stage.run(ctx)
+			durationMs := time.Since(started).Milliseconds()
+			if err != nil {
+				ds.RuntimeState.SetToolError("startup_"+stage.name, err.Error())
+				log.Warn("startup vault stage failed", log.Fields{
+					"task": stage.name, "duration_ms": durationMs, "error": err.Error(),
+				})
+				stageErrs = append(stageErrs, fmt.Errorf("%s: %w", stage.name, err))
+				continue
+			}
+			ds.RuntimeState.SetToolError("startup_"+stage.name, "")
+			log.Info("startup vault stage done", log.Fields{"task": stage.name, "duration_ms": durationMs})
+		}
+		return errors.Join(stageErrs...)
+	})
+}
+
 func (ds *DashboardServer) taskMigrateOldMemoryDirs(ctx context.Context) error {
-	brain.MigrateOldMemoryDirs(ds.DwytHome)
-	return nil
+	return brain.MigrateOldMemoryDirsContext(ctx, ds.DwytHome)
 }
 
 // taskBrainV5Migration brings the Brain to the v5 layout. Both calls are
@@ -60,10 +88,11 @@ func (ds *DashboardServer) taskBrainV5Migration(ctx context.Context) error {
 	if pb == nil {
 		return nil
 	}
+	var issues []string
 	if err := pb.EnsureCanonicalLayout(); err != nil {
-		log.Warn("brain: canonical layout setup failed", log.Fields{"error": err.Error()})
+		issues = append(issues, fmt.Sprintf("canonical layout: %v", err))
 	}
-	report := pb.MigrateToV5(brain.V5MigrationOptions{
+	report := pb.MigrateToV5Context(ctx, brain.V5MigrationOptions{
 		KeepLatestSessions: ds.V5Config.Housekeeper.Sessions.KeepLatest,
 	})
 	if report.CanonicalSeeded > 0 || report.SessionsConverted > 0 || report.SessionsCompiled > 0 {
@@ -74,25 +103,31 @@ func (ds *DashboardServer) taskBrainV5Migration(ctx context.Context) error {
 			"knowledge_promoted": len(report.KnowledgePromoted),
 		})
 	}
-	for _, e := range report.Errors {
-		log.Warn("brain: v5 migration issue", log.Fields{"error": e})
+	issues = append(issues, report.Errors...)
+	if len(issues) > 0 {
+		return fmt.Errorf("brain v5 migration: %s", strings.Join(issues, "; "))
 	}
 	return nil
 }
 
 func (ds *DashboardServer) taskVaultMigration(ctx context.Context) error {
-	runVaultMigration(ds.DwytHome, ds.Store)
-	return nil
+	return runVaultMigrationContext(ctx, ds.DwytHome, ds.Store)
 }
 
 func (ds *DashboardServer) taskVaultStats(ctx context.Context) error {
-	pb := ds.projectObsidian()
+	ds.projectMu.RLock()
+	pb := ds.ProjectObsidian
+	project := ds.DefaultProject
+	ds.projectMu.RUnlock()
 	if pb == nil {
 		return nil
 	}
-	stats := pb.Stats()
+	stats, err := pb.StatsContext(ctx)
+	if err != nil {
+		return err
+	}
 	if c, ok := stats["total_files"].(int); ok {
-		ds.RuntimeState.UpdateProjectObsidian(ds.DefaultProject, c)
+		ds.RuntimeState.UpdateProjectObsidian(project, c)
 	}
 	return nil
 }
@@ -100,11 +135,14 @@ func (ds *DashboardServer) taskVaultStats(ctx context.Context) error {
 func (ds *DashboardServer) taskObsidianMCPValidation(ctx context.Context) error {
 	// The Obsidian MCP runs over stdio and is spawned on demand by each AI
 	// client. The validator only ensures the main `dwyt` binary is present;
-	// a failure here is a warning, never a Core problem.
-	if err := install.ObsidianMCP(ds.DwytBin); err != nil {
-		log.Warn("obsidian MCP validation failed", log.Fields{"error": err.Error()})
+	// a failure here degrades this optional task, never the Core listener.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return nil
+	if err := install.ObsidianMCP(ds.DwytBin); err != nil {
+		return fmt.Errorf("validate obsidian MCP: %w", err)
+	}
+	return ctx.Err()
 }
 
 // taskMCPConfigSync reconciles the AI clients' MCP configs at startup. A
@@ -118,12 +156,10 @@ func (ds *DashboardServer) taskMCPConfigSync(ctx context.Context) error {
 	}
 	reg, err := mcpregistry.Load()
 	if err != nil {
-		log.Warn("mcp registry unavailable for config sync", log.Fields{"error": err.Error()})
-		return nil
+		return fmt.Errorf("load mcp registry: %w", err)
 	}
-	if err := reg.ConfigureMCP(project, ds.setupConfig.Ias); err != nil {
-		log.Warn("mcp config sync had failures", log.Fields{"error": err.Error()})
-		return nil
+	if err := reg.ConfigureMCPContext(ctx, project, ds.setupConfig.Ias); err != nil {
+		return fmt.Errorf("sync mcp configs: %w", err)
 	}
 	log.Info("mcp configs synced", log.Fields{"clients": strings.Join(ds.setupConfig.Ias, ",")})
 	return nil
@@ -133,7 +169,7 @@ func (ds *DashboardServer) taskHeadroomProbe(ctx context.Context) error {
 	// A Headroom process started outside this daemon (previous run, manual
 	// start) is adopted into the runtime state so the dashboard shows it;
 	// actual start/health supervision is startHeadroomIfNeeded's job.
-	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)) {
+	if health.ProbeURLContext(ctx, fmt.Sprintf("http://127.0.0.1:%d/health", ds.HeadroomPort)) {
 		ds.RuntimeState.RegisterProcess("headroom", 0, ds.HeadroomPort)
 	}
 	return nil
@@ -165,27 +201,42 @@ func (ds *DashboardServer) runStartupTasks(ctx context.Context, tasks []startupT
 			started := time.Now()
 			err := task.run(ctx)
 			durationMs := time.Since(started).Milliseconds()
+			readyDurationMs := durationMs
+			if !ds.startupStarted.IsZero() {
+				readyDurationMs = time.Since(ds.startupStarted).Milliseconds()
+			}
 			if err != nil {
+				if ctx.Err() != nil {
+					log.Info("startup tasks cancelled", log.Fields{"task": task.name})
+					return
+				}
+				ds.RuntimeState.SetToolError("startup_"+task.name, err.Error())
 				log.Warn("startup task failed", log.Fields{
-					"task": task.name, "duration_ms": durationMs, "error": err.Error(),
+					"task": task.name, "duration_ms": durationMs,
+					"ready_duration_ms": readyDurationMs, "error": err.Error(),
 				})
 				continue
 			}
-			log.Info("startup task done", log.Fields{"task": task.name, "duration_ms": durationMs})
+			ds.RuntimeState.SetToolError("startup_"+task.name, "")
+			log.Info("startup task done", log.Fields{
+				"task": task.name, "duration_ms": durationMs,
+				"ready_duration_ms": readyDurationMs,
+			})
 		}
 	}()
 	return done
 }
 
 // startBackgroundReconciliation launches the ordered startup tasks and
-// records their completion channel on the server. Test overrides replace
-// the real task list entirely.
-func (ds *DashboardServer) startBackgroundReconciliation() {
+// records their completion channel on the server. Headroom process startup is
+// tracked independently so its health budget cannot serialize vault migration.
+// Test overrides replace the real task list entirely.
+func (ds *DashboardServer) startBackgroundReconciliation(ctx context.Context) {
 	tasks := ds.startupTasksOverride
 	if tasks == nil {
 		tasks = ds.buildStartupTasks()
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	startupCtx, cancel := context.WithCancel(ctx)
 	ds.startupCancel = cancel
-	ds.startupDone = ds.runStartupTasks(ctx, tasks)
+	ds.startupDone = ds.runStartupTasks(startupCtx, tasks)
 }

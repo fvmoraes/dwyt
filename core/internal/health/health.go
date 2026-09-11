@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -111,8 +112,19 @@ func ProbePort(port int) bool {
 }
 
 func ProbeURL(url string) bool {
+	return ProbeURLContext(context.Background(), url)
+}
+
+func ProbeURLContext(ctx context.Context, url string) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

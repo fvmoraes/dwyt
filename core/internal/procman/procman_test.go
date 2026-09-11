@@ -1,6 +1,7 @@
 package procman
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -385,4 +386,67 @@ func TestProcessManager_AllStatus(t *testing.T) {
 
 	pm.Stop("test1")
 	pm.Stop("test2")
+}
+
+func TestWaitForHealthContextCancelsBlockedProbe(t *testing.T) {
+	entered := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- waitForHealthContext(ctx, server.URL, time.Minute)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("health probe never reached the server")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForHealthContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled health probe did not return")
+	}
+}
+
+func TestProcessManagerStopContextCancelsTermination(t *testing.T) {
+	pm, mp := runningProcessManager(t)
+	pm.terminateTree = nil
+	entered := make(chan struct{})
+	pm.terminateTreeContext = func(ctx context.Context, pid int) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := pm.StopContext(ctx, mp.Name)
+		result <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("StopContext never entered termination")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("StopContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StopContext ignored cancellation")
+	}
 }

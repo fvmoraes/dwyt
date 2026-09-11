@@ -37,8 +37,10 @@ func localOriginGuard(port int) gin.HandlerFunc {
 func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 	api := r.Group("/api")
 	api.Use(localOriginGuard(ds.Port))
+	api.Use(vaultLeaseGuard(ds))
 	{
 		api.GET("/health", ds.apiHealth)
+		api.POST("/shutdown", ds.apiShutdown)
 		api.GET("/status", ds.apiStatus)
 		api.GET("/metrics", ds.apiMetrics)
 		api.GET("/events", ds.apiSSE)

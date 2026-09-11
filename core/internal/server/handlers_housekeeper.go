@@ -41,10 +41,10 @@ func (ds *DashboardServer) apiHousekeeperRun(c *gin.Context) {
 	var report housekeeper.Report
 	run := func() error {
 		if dryRun {
-			report = ds.Housekeeper.RunDry(depth)
+			report = ds.Housekeeper.RunDryContext(c.Request.Context(), depth)
 			return nil
 		}
-		report = ds.Housekeeper.Run(depth)
+		report = ds.Housekeeper.RunContext(c.Request.Context(), depth)
 		return nil
 	}
 	if ds.Optimizer != nil {

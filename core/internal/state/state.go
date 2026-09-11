@@ -20,9 +20,9 @@ type ProcessInfo struct {
 	Healthy   bool      `json:"healthy"`
 	// State is the reconciler's lifecycle state (starting/healthy/degraded/
 	// failed/stopped). Additive field: pre-v5 state.json files simply lack it.
-	State     string    `json:"state,omitempty"`
-	LastError string    `json:"last_error,omitempty"`
-	Uptime    int64     `json:"uptime_secs,omitempty"`
+	State     string `json:"state,omitempty"`
+	LastError string `json:"last_error,omitempty"`
+	Uptime    int64  `json:"uptime_secs,omitempty"`
 }
 
 // RuntimeState holds the live operational state of DWYT.

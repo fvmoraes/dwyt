@@ -1,6 +1,7 @@
 package housekeeper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -494,5 +495,78 @@ func TestMarkStateIsAtomic(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "state: stale") || !strings.Contains(string(data), "body line") {
 		t.Fatalf("state flip lost content: %s", data)
+	}
+}
+
+func TestRunContextParticipatesInVaultLease(t *testing.T) {
+	h := New(DefaultConfig(), nil, nil)
+	leaseEntered := make(chan struct{})
+	leaseRelease := make(chan struct{})
+	h.SetRunLease(func() func() {
+		close(leaseEntered)
+		<-leaseRelease
+		return func() {}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan Report, 1)
+	go func() { result <- h.RunContext(ctx, Deep) }()
+	select {
+	case <-leaseEntered:
+	case <-time.After(time.Second):
+		t.Fatal("housekeeper pass did not acquire the vault lease")
+	}
+	select {
+	case <-result:
+		t.Fatal("housekeeper pass returned before the lease was granted")
+	default:
+	}
+	cancel()
+	close(leaseRelease)
+	select {
+	case report := <-result:
+		if report.Skipped != "cancelled" {
+			t.Fatalf("cancelled report skipped = %q, want cancelled", report.Skipped)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled housekeeper pass did not return")
+	}
+}
+
+func TestStopContextWaitsForStartupPass(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RunOnStartup = true
+	h := New(cfg, nil, nil)
+	leaseEntered := make(chan struct{})
+	leaseRelease := make(chan struct{})
+	h.SetRunLease(func() func() {
+		close(leaseEntered)
+		<-leaseRelease
+		return func() {}
+	})
+	h.Start()
+	select {
+	case <-leaseEntered:
+	case <-time.After(time.Second):
+		t.Fatal("startup pass did not begin")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- h.StopContext(ctx) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopContext returned before startup pass drained: %v", err)
+	default:
+	}
+	close(leaseRelease)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("StopContext error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StopContext did not finish after the startup pass exited")
 	}
 }

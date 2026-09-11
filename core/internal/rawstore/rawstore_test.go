@@ -1,6 +1,8 @@
 package rawstore
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -194,5 +196,29 @@ func TestUsageCountsPayloadsOnly(t *testing.T) {
 func TestNewRejectsEmptyHome(t *testing.T) {
 	if _, err := New(""); err == nil {
 		t.Fatal("an empty home must be rejected rather than writing to the cwd")
+	}
+}
+
+func TestPruneContextCancelledBeforeScanPreservesObjects(t *testing.T) {
+	s := newStore(t)
+	meta, err := s.Put("evidence that must survive cancellation", PutOptions{Kind: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(s.metaPath(meta.ID)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.PruneContext(ctx, nil, time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("PruneContext error = %v, want context.Canceled", err)
+	}
+	content, _, err := s.Get(meta.Ref())
+	if err != nil {
+		t.Fatalf("cancelled prune removed payload: %v", err)
+	}
+	if content != "evidence that must survive cancellation" {
+		t.Fatalf("payload changed after cancelled prune: %q", content)
 	}
 }
