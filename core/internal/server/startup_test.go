@@ -455,8 +455,9 @@ func TestCoreAvailabilityMatrix(t *testing.T) {
 	startDashboard := func(t *testing.T, ds *DashboardServer) <-chan error {
 		t.Helper()
 		done := make(chan error, 1)
+		port := ds.Port // The matrix always supplies a fixed port before Start.
 		go func() { done <- ds.Start() }()
-		if err := waitForDashboard(t, ds.Port, 5*time.Second); err != nil {
+		if err := waitForDashboard(t, port, 5*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {

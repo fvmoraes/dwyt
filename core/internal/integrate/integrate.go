@@ -54,6 +54,12 @@ func Project(projectPath, clients, _ string) {
 		writeOrUpdateInstructionFile(cp, windsurfRuleTemplate())
 	}
 
+	if containsClient(clientList, "continue") {
+		cp := filepath.Join(projectPath, ".continue", "rules", "dwyt.md")
+		os.MkdirAll(filepath.Dir(cp), 0755)
+		writeOrUpdateInstructionFile(cp, continueRuleTemplate())
+	}
+
 	// AGENTS.md is the convention shared by Codex and OpenCode. Respect the
 	// client toggles: only create/update it when one of those clients is on.
 	// Disabling every AGENTS.md client means DWYT leaves the file untouched.

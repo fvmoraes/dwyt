@@ -164,9 +164,13 @@ func windsurfRuleTemplate() string {
 	return dwytInstructions()
 }
 
+func continueRuleTemplate() string {
+	return dwytInstructions()
+}
+
 // dwytInstructions returns the DWYT entry contract that is injected into
 // client instruction files (AGENTS.md, CLAUDE.md, Cursor rules, Kiro steering,
-// Copilot, Windsurf).
+// Copilot, Windsurf, Continue).
 //
 // From v5.0.0 this is deliberately *small and stable* (spec §4). The detailed
 // efficiency policy — budgets, TTLs, retrieval ladders, cache classes, output
@@ -181,46 +185,36 @@ func windsurfRuleTemplate() string {
 // Any change to this text invalidates provider prefix caches for every user,
 // so treat it as a versioned contract, not as a place to document features.
 func dwytInstructions() string {
-	return `# DWYT - Don't Waste Your Tokens
-
-This project uses DWYT for context and token optimization.
-
-## Available MCPs
-
-- **dwyt_optimizer** — context optimizer and efficiency policy.
-- **dwyt_obsidian** — persistent project memory and canonical knowledge.
-- **dwyt_codebase** — structural code retrieval.
-
-## Entry Contract
-
-Before broad repository or memory retrieval, call the DWYT Optimizer
-(` + "`dwyt_context_plan`" + `) to obtain a context plan, then stay inside its
-budget and retrieval boundaries.
-
-Prefer:
-
-- canonical memory over old sessions;
-- symbols and line ranges over full files;
-- summaries over raw output;
-- incremental retrieval over bulk context loading;
-- reusing context already obtained over retrieving it again.
-
-Use dwyt_obsidian as the project brain and dwyt_codebase as the source of current
-structure. Request raw or full data only when the compact context is
-insufficient; raw output stays retrievable by reference
-(` + "`dwyt_get_raw`" + `).
-
-Prefix shell commands with ` + "`rtk`" + ` where supported
-(` + "`rtk go test ./...`" + `). RTK reduces terminal output; it is not an MCP.
-
-At the end of a task, persist a compact context snapshot with
-` + "`obsidian_save_context`" + ` when the task state changed. Set ` + "`client`" + `
-to the current client (codex, opencode, claude, cursor, kiro, copilot,
-windsurf, continue). If saving fails, say so in the final response.
-
-Keep operational answers short: status, changed files, validation, blockers.
-Do not truncate an artifact the user asked for.
-`
+	return strings.Join([]string{
+		"# DWYT - Don't Waste Your Tokens",
+		"",
+		"DWYT exposes three local MCPs. **Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.",
+		"Always report concise telemetry promptly with `dwyt_report_usage` after meaningful work so the UI remains accurate; mark `observed` only for provider-reported values.",
+		"",
+		"## 1. Optimizer first",
+		"`dwyt_optimizer` — context optimizer for context planning, token budget, output profile, routing, cache guidance, output compaction and raw-data retrieval.",
+		"Before broad retrieval call `dwyt_context_plan`; use `dwyt_context_status` to reuse state and `dwyt_register_context` after obtaining reusable source or memory.",
+		"Use `dwyt_output_profile` for response budget, `dwyt_route` for effort, and `dwyt_cache_guidance` for cache order. Use `dwyt_compact_tool_output` for verbose output; call `dwyt_get_raw` only when its compact reference is insufficient.",
+		"",
+		"## 2. Codebase first",
+		"`dwyt_codebase` — structural code retrieval and the **PRIMARY** repository layer for architecture, symbols, implementations, references, dependencies, execution paths and blast-radius analysis.",
+		"**Codebase first. Shell discovery only as fallback.**",
+		"`get_architecture` maps the repository; `search_graph` finds definitions, implementations, symbols and relationships; `query_graph` answers advanced graph relationships.",
+		"`trace_path` follows callers/callees, data flow and cross-service paths; `get_code_snippet` reads one already-located implementation.",
+		"Use `detect_changes` for Git blast radius; `check_index_coverage`/`index_status` for completeness; `index_repository` only when a refresh is necessary; `manage_adr` to record an architectural decision.",
+		"Use `search_code` only when graph lookup is insufficient. Examples: implementation → `search_graph`; callers/dependencies → `trace_path`; one implementation → `get_code_snippet`; architecture → `get_architecture`; change impact → `detect_changes`.",
+		"Do not begin with `grep`, `rg`, `find`, recursive scans, filename guesses, or opening many files manually while Codebase can answer structurally.",
+		"Direct shell/file access is allowed only for exact raw text, non-indexed files, generated/config files outside the graph, incomplete coverage, or physical final verification.",
+		"",
+		"## 3. Obsidian after Codebase",
+		"`dwyt_obsidian` — persistent project memory and canonical knowledge for architecture, decisions, conventions, constraints, lessons and reusable knowledge.",
+		"Read `obsidian_canonical` first; use `obsidian_search` only when canonical knowledge is insufficient. Use `obsidian_save_context` at meaningful task end, `obsidian_upsert_canonical` for current facts, `obsidian_compile` to promote reusable knowledge, and `obsidian_summarize` for compact history.",
+		"Codebase = repository now. Obsidian = what the project knows and decided. If they disagree, current source verified through Codebase wins; update canonical memory when appropriate.",
+		"",
+		"## Output discipline",
+		"Use `rtk` for supported test/build/git commands; it reduces shell output and never replaces Codebase. Use Headroom for verbose logs when available; otherwise compact with `dwyt_compact_tool_output` and retain raw output by reference.",
+		"Keep updates concise: status, files, validation, blockers. Do not truncate requested artifacts.",
+	}, "\n") + "\n"
 }
 
 // InstructionBlock exposes the entry contract for audits that need the

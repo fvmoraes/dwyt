@@ -128,3 +128,26 @@ func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
 		}
 	}
 }
+
+func TestEntryContractDefinesPrescriptiveLocalMCPWorkflow(t *testing.T) {
+	contract := dwytInstructions()
+	for _, want := range []string{
+		"**Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.",
+		"Always report concise telemetry promptly with `dwyt_report_usage`",
+		"`dwyt_context_plan`", "`dwyt_context_status`", "`dwyt_register_context`", "`dwyt_output_profile`",
+		"`dwyt_compact_tool_output`", "`dwyt_get_raw`", "`dwyt_cache_guidance`", "`dwyt_route`",
+		"**Codebase first. Shell discovery only as fallback.**",
+		"`get_architecture`", "`search_graph`", "`query_graph`", "`trace_path`", "`get_code_snippet`",
+		"`search_code` only when graph lookup is insufficient", "`detect_changes`", "`check_index_coverage`/`index_status`",
+		"`index_repository` only when a refresh is necessary", "`manage_adr`",
+		"`obsidian_canonical` first", "`obsidian_search` only when canonical knowledge is insufficient",
+		"`obsidian_save_context`", "`obsidian_upsert_canonical`", "`obsidian_compile`", "`obsidian_summarize`",
+		"Do not begin with `grep`, `rg`, `find`, recursive scans, filename guesses, or opening many files manually",
+		"Codebase = repository now. Obsidian = what the project knows and decided.",
+		"Use Headroom for verbose logs when available; otherwise compact with `dwyt_compact_tool_output`",
+	} {
+		if !strings.Contains(contract, want) {
+			t.Errorf("entry contract is missing prescriptive MCP guidance %q", want)
+		}
+	}
+}

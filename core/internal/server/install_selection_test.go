@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fvmoraes/dwyt/internal/integrate"
@@ -56,6 +57,14 @@ func TestInstallFlowSingleClient(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(projectPath, p)); err != nil {
 			t.Fatalf("expected kiro file %s: %v", p, err)
 		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"))
+	if err != nil {
+		t.Fatalf("read generated Kiro instruction: %v", err)
+	}
+	if !strings.Contains(string(data), integrate.InstructionBlock()) {
+		t.Fatal("install flow did not propagate the canonical DWYT instruction to Kiro")
 	}
 
 	// No other client's project files may exist.

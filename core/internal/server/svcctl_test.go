@@ -985,8 +985,9 @@ func TestDuplicateRuntimeMatrix(t *testing.T) {
 			services: []ManagedService{{Name: "codebase", AutoStart: true}},
 		})
 		serverDone := make(chan error, 1)
+		port := ds.Port // The test has a fixed pre-bind port; do not read it after Start.
 		go func() { serverDone <- ds.Start() }()
-		if err := waitForDashboard(t, ds.Port, 5*time.Second); err != nil {
+		if err := waitForDashboard(t, port, 5*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		select {
