@@ -434,8 +434,7 @@ func (rc *ServiceReconciler) RestartService(ctx context.Context, name string) (*
 	}
 
 	rc.mu.Lock()
-	policy.state = svcStarting
-	policy.lastChange = time.Now()
+	rc.transitionLocked(policy, svcStarting, rc.clock())
 	policy.ownership = ownershipManaged
 	rc.mu.Unlock()
 	rc.publish(policy, rc.pm.Status(name))
@@ -557,7 +556,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 			stopped, err := rc.stopProcess(ctx, name)
 			if err != nil {
 				rc.mu.Lock()
-				policy.state = svcFailed
+				rc.transitionLocked(policy, svcFailed, rc.clock())
 				policy.ownership = ownership
 				rc.mu.Unlock()
 				rc.publish(policy, stopped)
@@ -566,7 +565,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 			observed = stopped
 		}
 		rc.mu.Lock()
-		policy.state = svcStopped
+		rc.transitionLocked(policy, svcStopped, rc.clock())
 		policy.failCount = 0
 		policy.attempt = 0
 		policy.nextRetry = time.Time{}
@@ -580,7 +579,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 	}
 
 	if observed != nil && observed.Running {
-		now := time.Now()
+		now := rc.clock()
 		withinGrace := currentState == svcStarting && now.Sub(lastChange) < rc.opts.grace
 		newState, newFailures := applyObservation(currentState, true, observed.Healthy, failCount, withinGrace)
 		rc.mu.Lock()
@@ -595,10 +594,8 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 			policy.nextRetry = time.Time{}
 			policy.cooldownUntil = time.Time{}
 		}
-		if newState != policy.state {
-			policy.lastChange = now
-		}
-		policy.state, policy.failCount = newState, newFailures
+		rc.transitionLocked(policy, newState, now)
+		policy.failCount = newFailures
 		rc.mu.Unlock()
 		rc.publish(policy, observed)
 		return observed, nil
@@ -618,7 +615,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 			policy.cooldownUntil = now.Add(rc.cooldown())
 		}
 		if now.Before(policy.cooldownUntil) {
-			policy.state = svcDegraded
+			rc.transitionLocked(policy, svcDegraded, now)
 			policy.inFlight = false
 			rc.mu.Unlock()
 			rc.publish(policy, observed)
@@ -637,8 +634,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 	policy.inFlight = true
 	policy.starts++
 	policy.attempt++
-	policy.state = svcStarting
-	policy.lastChange = now
+	rc.transitionLocked(policy, svcStarting, now)
 	attempt := policy.attempt
 	rc.mu.Unlock()
 	rc.publish(policy, observed)
@@ -647,6 +643,7 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 	status, err := rc.startProcess(ctx, name)
 	duration := time.Since(startedAt)
 
+	finishedAt := rc.clock()
 	rc.mu.Lock()
 	policy.inFlight = false
 	if status != nil && status.Port > 0 {
@@ -657,25 +654,29 @@ func (rc *ServiceReconciler) reconcilePolicy(ctx context.Context, policy *svcPol
 	}
 	switch {
 	case err != nil && status != nil && status.Running:
-		policy.state, policy.failCount = svcStarting, 0
-		policy.nextRetry = rc.clock().Add(rc.backoffFor(attempt))
-	case err != nil:
-		if attempt >= maxStartAttempts {
-			policy.state = svcDegraded
-		} else {
-			policy.state = svcFailed
-		}
+		rc.transitionLocked(policy, svcStarting, finishedAt)
 		policy.failCount = 0
-		policy.nextRetry = rc.clock().Add(rc.backoffFor(attempt))
+		policy.nextRetry = finishedAt.Add(rc.backoffFor(attempt))
+	case err != nil:
+		next := svcFailed
+		if attempt >= maxStartAttempts {
+			next = svcDegraded
+		}
+		rc.transitionLocked(policy, next, finishedAt)
+		policy.failCount = 0
+		policy.nextRetry = finishedAt.Add(rc.backoffFor(attempt))
 	case status != nil && status.Healthy:
-		policy.state, policy.failCount, policy.attempt = svcHealthy, 0, 0
+		rc.transitionLocked(policy, svcHealthy, finishedAt)
+		policy.failCount = 0
+		policy.attempt = 0
 		policy.ownership = ownershipManaged
 		policy.nextRetry = time.Time{}
 		policy.cooldownUntil = time.Time{}
 	default:
-		policy.state, policy.failCount = svcStarting, 0
+		rc.transitionLocked(policy, svcStarting, finishedAt)
+		policy.failCount = 0
 		policy.ownership = ownershipManaged
-		policy.nextRetry = rc.clock().Add(rc.backoffFor(attempt))
+		policy.nextRetry = finishedAt.Add(rc.backoffFor(attempt))
 	}
 	finalState, finalAttempt := policy.state, policy.attempt
 	rc.mu.Unlock()
@@ -710,32 +711,32 @@ func (rc *ServiceReconciler) tryAdopt(ctx context.Context, policy *svcPolicy) (b
 		Running: true, Healthy: true, Port: port,
 	}
 	rc.mu.Lock()
-	policy.state = svcHealthy
+	rc.transitionLocked(policy, svcHealthy, rc.clock())
 	policy.ownership = ownershipAdopted
 	policy.effectivePort = port
 	policy.failCount = 0
 	policy.attempt = 0
 	policy.nextRetry = time.Time{}
-	policy.lastChange = time.Now()
 	rc.mu.Unlock()
 	rc.publish(policy, status)
 	return true, status, nil
 }
 
 func (rc *ServiceReconciler) finishExplicitOperation(policy *svcPolicy, status *procman.ServiceStatus, err error) {
+	now := rc.clock()
 	rc.mu.Lock()
 	if status != nil && status.Port > 0 {
 		policy.effectivePort = status.Port
 	}
 	if err != nil {
-		policy.state = svcFailed
+		rc.transitionLocked(policy, svcFailed, now)
 	} else if status != nil && status.Healthy {
-		policy.state = svcHealthy
+		rc.transitionLocked(policy, svcHealthy, now)
 		policy.ownership = ownershipManaged
 		policy.attempt = 0
 		policy.nextRetry = time.Time{}
 	} else {
-		policy.state = svcStarting
+		rc.transitionLocked(policy, svcStarting, now)
 		policy.ownership = ownershipManaged
 	}
 	rc.mu.Unlock()
@@ -781,6 +782,17 @@ func (rc *ServiceReconciler) clock() time.Time {
 	return time.Now()
 }
 
+// transitionLocked records a lifecycle transition exactly once. Callers must
+// hold rc.mu and pass rc.clock() so LastTransitionAt is deterministic in tests
+// and never advances while a service remains in the same state.
+func (rc *ServiceReconciler) transitionLocked(policy *svcPolicy, next string, at time.Time) {
+	if policy.state == next {
+		return
+	}
+	policy.state = next
+	policy.lastChange = at
+}
+
 func (rc *ServiceReconciler) cooldown() time.Duration {
 	if rc.opts.cooldown > 0 {
 		return rc.opts.cooldown
@@ -816,6 +828,8 @@ func (rc *ServiceReconciler) publish(policy *svcPolicy, status *procman.ServiceS
 	desired := policy.desired
 	ownership := policy.ownership
 	requestedPort := policy.service.RequestedPort
+	attempt := policy.attempt
+	lastTransitionAt := policy.lastChange
 	publisher := policy.service.PublishEffectivePort
 	rc.mu.Unlock()
 
@@ -831,19 +845,38 @@ func (rc *ServiceReconciler) publish(policy *svcPolicy, status *procman.ServiceS
 
 	pid := 0
 	errMessage := ""
+	observedAt := time.Time{}
 	if status != nil {
 		pid = status.PID
 		errMessage = status.Error
+		observedAt = rc.clock()
 	}
 	if stateValue != svcHealthy && errMessage == "" {
 		errMessage = "service state: " + stateValue
 	}
 	// Port/EffectivePort stay 0 until a real observation/adoption; only
-	// RequestedPort carries the durable configuration.
-	rc.rs.SetProcessLifecycle(state.ProcessInfo{
-		Name: policy.service.Name, PID: pid,
-		Port: effectivePort, RequestedPort: requestedPort, EffectivePort: effectivePort,
-		Healthy: stateValue == svcHealthy, State: stateValue,
-		DesiredState: desired, Ownership: ownership, LastError: errMessage,
-	})
+	// RequestedPort carries the durable configuration. Health timestamps are
+	// set only when ProcessManager supplied an observation, never merely because
+	// a desired state was declared.
+	next := state.ProcessInfo{
+		Name:             policy.service.Name,
+		PID:              pid,
+		Port:             effectivePort,
+		RequestedPort:    requestedPort,
+		EffectivePort:    effectivePort,
+		Healthy:          stateValue == svcHealthy,
+		State:            stateValue,
+		DesiredState:     desired,
+		Ownership:        ownership,
+		LastError:        errMessage,
+		Attempt:          attempt,
+		LastTransitionAt: lastTransitionAt,
+	}
+	if !observedAt.IsZero() {
+		next.LastHealthAt = observedAt
+		if status.Healthy {
+			next.LastHealthyAt = observedAt
+		}
+	}
+	rc.rs.SetProcessLifecycle(next)
 }

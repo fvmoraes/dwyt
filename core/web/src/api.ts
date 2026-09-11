@@ -1,3 +1,5 @@
+import type { StatusPayload } from './types'
+
 const API = 'http://localhost:2737/api'
 
 async function jsonOrThrow(r: Response) {
@@ -6,9 +8,20 @@ async function jsonOrThrow(r: Response) {
   return body
 }
 
-export async function getStatus() {
-  const r = await fetch(`${API}/status`)
-  return jsonOrThrow(r)
+// /status v2 keeps the legacy tools[] payload while adding components. The
+// selected project scopes only capability facts; managed-runtime facts stay
+// global to this local daemon.
+function statusQuery(projectPath?: string): string {
+  return projectPath ? `?path=${encodeURIComponent(projectPath)}` : ''
+}
+
+export async function getStatus(projectPath?: string): Promise<StatusPayload> {
+  const r = await fetch(`${API}/status${statusQuery(projectPath)}`)
+  return jsonOrThrow(r) as Promise<StatusPayload>
+}
+
+export function statusEventsURL(projectPath?: string): string {
+  return `${API}/events${statusQuery(projectPath)}`
 }
 
 export async function getMetrics() {

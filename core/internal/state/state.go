@@ -25,12 +25,17 @@ type ProcessInfo struct {
 	// State is the reconciler's observed lifecycle state. DesiredState is the
 	// operator/startup intent and Ownership determines whether DWYT may stop the
 	// process (managed) or must leave a pre-existing instance alone (adopted).
-	State        string `json:"state,omitempty"`
-	DesiredState string `json:"desired_state,omitempty"`
-	Ownership    string `json:"ownership,omitempty"`
-	Identity     string `json:"identity,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
-	Uptime       int64  `json:"uptime_secs,omitempty"`
+	State            string    `json:"state,omitempty"`
+	DesiredState     string    `json:"desired_state,omitempty"`
+	Ownership        string    `json:"ownership,omitempty"`
+	Identity         string    `json:"identity,omitempty"`
+	LastError        string    `json:"last_error,omitempty"`
+	Uptime           int64     `json:"uptime_secs,omitempty"`
+	LastActivityAt   time.Time `json:"last_activity_at,omitempty,omitzero"`
+	LastHealthAt     time.Time `json:"last_health_at,omitempty,omitzero"`
+	LastHealthyAt    time.Time `json:"last_healthy_at,omitempty,omitzero"`
+	LastTransitionAt time.Time `json:"last_transition_at,omitempty,omitzero"`
+	Attempt          int       `json:"attempt,omitempty"`
 }
 
 // RuntimeState holds the live operational state of DWYT.
@@ -176,11 +181,10 @@ func (s *RuntimeState) RegisterProcess(name string, pid, port int) {
 // SetProcessState records the reconciler's lifecycle state for a managed
 // process (starting/healthy/degraded/failed/stopped). Unlike
 // SetProcessHealthy it also applies when no process is registered (e.g. a
-// service that failed to spawn).
+// service that failed to spawn). Lifecycle updates flow through
+// SetProcessLifecycle so transition timestamps stay consistent.
 func (s *RuntimeState) SetProcessState(name, state, errMsg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	p, ok := s.Processes[name]
+	p, ok := s.GetProcess(name)
 	if !ok {
 		p = ProcessInfo{Name: name}
 	}
@@ -190,26 +194,28 @@ func (s *RuntimeState) SetProcessState(name, state, errMsg string) {
 	} else if state == "healthy" {
 		p.LastError = ""
 	}
-	s.Processes[name] = p
-	s.maybeSave()
+	s.SetProcessLifecycle(p)
 }
 
-// SetProcessHealthy updates the health status of a process.
+// SetProcessHealthy updates the health status of an already tracked process.
+// It delegates to SetProcessLifecycle so every health observation gets the
+// same timestamp and error-clearing behavior as reconciler publications.
 func (s *RuntimeState) SetProcessHealthy(name string, healthy bool, errMsg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if p, ok := s.Processes[name]; ok {
-		p.Healthy = healthy
-		if !healthy {
-			p.LastError = errMsg
-			s.ToolErrors[name] = errMsg
-		} else {
-			p.LastError = ""
-			delete(s.ToolErrors, name)
-		}
-		s.Processes[name] = p
+	p, ok := s.GetProcess(name)
+	if !ok {
+		return
 	}
-	s.maybeSave()
+	p.Healthy = healthy
+	if healthy {
+		p.LastError = ""
+	} else {
+		p.LastError = errMsg
+	}
+	p.LastHealthAt = time.Now()
+	if healthy {
+		p.LastHealthyAt = p.LastHealthAt
+	}
+	s.SetProcessLifecycle(p)
 }
 
 // RemoveProcess removes a process from tracking.

@@ -278,6 +278,10 @@ func (ds *DashboardServer) apiMCPUsage(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "server is required"})
 		return
 	}
+	// This request crossed a DWYT-controlled proxy/API path, so it is valid
+	// evidence of activity. Client-owned stdio traffic that bypasses DWYT still
+	// remains unknown rather than being inferred from configuration.
+	ds.noteMCPActivity(body.Server)
 	ds.recordMCPCall(body.Server, body.Tool)
 	c.JSON(200, gin.H{"status": "ok"})
 }

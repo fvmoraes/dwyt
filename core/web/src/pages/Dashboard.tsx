@@ -14,7 +14,7 @@ import CardSession from '../components/CardSession'
 import VaultMigrationCard from '../components/VaultMigrationCard'
 import { logColor } from '../utils'
 import { useLang } from '../LangContext'
-import type { ToolInfo, ToolDetail, Details, ToolState, MCPRegistry, ProjectContext, BadgeText } from '../types'
+import type { ToolDetail, Details, ToolState, ComponentStatus, MCPRegistry, ProjectContext, BadgeText } from '../types'
 
 const RELOAD_OPTIONS = [
   { label: 'Off', value: 0 },
@@ -42,25 +42,6 @@ function fmtUptimeFromDet(det: ToolDetail | undefined): string {
   if (det.uptime_secs === 0 && det.uptime_label) return det.uptime_label
   if (det.uptime_secs === 0) return '\u2014'
   return fmtUptime(det.uptime_secs) || '\u2014'
-}
-
-// toolState derives the display state from BOTH the probe result and the
-// reconciler's lifecycle state. The runtime_state (starting/healthy/
-// degraded/failed) is authoritative when present: a service that is warming
-// up must show "Starting", never a red "Offline" (Cross-Platform §2/§17).
-function toolState(tool: ToolInfo | undefined, det: ToolDetail | undefined): ToolState {
-  const runtime = tool?.runtime_state
-  if (runtime === 'starting') return 'starting'
-  if (runtime === 'degraded') return 'degraded'
-  if (runtime === 'failed') return 'failed'
-  if (runtime === 'healthy') return 'active'
-  if (runtime === 'stopped') return 'unknown'
-  const raw = tool?.status || tool?.state
-  if (raw === 'not_installed' || raw === 'error') return 'not_installed'
-  if (raw === 'online' || raw === 'installed') return 'active'
-  if (!det || det.uptime_secs === -1) return 'not_installed'
-  if (tool?.healthy || tool?.running) return 'active'
-  return 'inactive'
 }
 
 function badge(s: ToolState, t: Record<string, string>): BadgeText {
@@ -98,7 +79,7 @@ export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { t } = useLang()
 
-  const [tools, setTools] = useState<ToolInfo[]>([])
+  const [components, setComponents] = useState<Record<string, ComponentStatus>>({})
   const [details, setDetails] = useState<Details>({})
   const [logs, setLogs] = useState<Record<string, string>>({})
   const [showLogs, setShowLogs] = useState(searchParams.get('logs') === '1')
@@ -132,6 +113,16 @@ export default function Dashboard() {
   const reloadSecs = parseInt(searchParams.get('reload') || '10', 10)
   const savingsWindow = searchParams.get('window') || '6h'
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Keep the latest selection outside async closures. A request started for A
+  // must never apply after the dashboard has moved to B.
+  const selectedProjectRef = useRef(indexPath)
+  const selectProject = useCallback((path: string) => {
+    if (selectedProjectRef.current === path) return
+    selectedProjectRef.current = path
+    setComponents({})
+    setDetails({})
+    setIndexPath(path)
+  }, [])
 
   const setReload = useCallback((secs: number) => {
     const p = new URLSearchParams(searchParams)
@@ -153,8 +144,23 @@ export default function Dashboard() {
   }, [showLogs, searchParams, setSearchParams])
 
   const pollAll = useCallback(async () => {
-    try { setTools((await api.getStatus()).tools || []) } catch { /* */ }
-    try { setDetails(await api.getToolDetails(indexPath || undefined, savingsWindow) || {}) } catch { /* */ }
+    const requestedProject = indexPath
+    const isCurrentProject = () => selectedProjectRef.current === requestedProject
+    try {
+      const payload = await api.getStatus(requestedProject || undefined)
+      if (!isCurrentProject()) return
+      const responseProject = payload.project_path || ''
+      if (responseProject === requestedProject) {
+        setComponents(payload.components || {})
+      }
+    } catch {
+      if (!isCurrentProject()) return
+      // Keep the last known component projection for a current-project error.
+    }
+    try {
+      const nextDetails = await api.getToolDetails(requestedProject || undefined, savingsWindow)
+      if (isCurrentProject()) setDetails(nextDetails || {})
+    } catch { /* keep the current project's previous details */ }
     try { setLogs((await fetch('http://localhost:2737/api/logs').then(r => r.json())).logs || {}) } catch { /* */ }
     try {
       const ms = await api.getBrainStatus()
@@ -171,9 +177,9 @@ export default function Dashboard() {
     api.getContext().then(c => {
       setProjectCtx(c)
       if (c.projects) setSidebarPjs(c.projects || [])
-      if (!searchParams.get('project') && c.active_project) setIndexPath(c.active_project)
+      if (!searchParams.get('project') && c.active_project) selectProject(c.active_project)
     }).catch(() => {})
-  }, [searchParams])
+  }, [searchParams, selectProject])
 
   useEffect(() => {
     let active = true
@@ -184,28 +190,38 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    const evtSource = new EventSource('http://localhost:2737/api/events')
+    const subscriptionProject = indexPath
+    const evtSource = new EventSource(api.statusEventsURL(subscriptionProject || undefined))
     evtSource.addEventListener('status', (e) => {
       try {
         const data = JSON.parse(e.data)
+        // A queued callback can outlive EventSource.close(). It belongs to the
+        // captured subscription only when both its payload and the live
+        // selection still match that exact (possibly empty) project path.
+        if (data.components && typeof data.components === 'object') {
+          const responseProject = data.project_path || ''
+          if (selectedProjectRef.current !== subscriptionProject || responseProject !== subscriptionProject) return
+          setComponents(data.components as Record<string, ComponentStatus>)
+          return
+        }
         if (data.event === 'project_switch' && data.message) {
-          if (data.message !== indexPath) {
-            setTools([])
-            setDetails({})
+          // project_switch is intentionally global, but a queued event from a
+          // closed subscription must not redirect a newer dashboard selection.
+          if (selectedProjectRef.current !== subscriptionProject) return
+          if (data.message !== subscriptionProject) {
             setObsidianStats(null)
             setSearchResult('')
             setIndexError('')
-            setIndexPath(data.message)
+            selectProject(data.message)
             const p = new URLSearchParams(searchParams)
             p.set('project', data.message)
             setSearchParams(p)
-            setTimeout(pollAll, 100)
           }
         }
       } catch { /* */ }
     })
     return () => { evtSource.close() }
-  }, [indexPath, searchParams, setSearchParams, pollAll])
+  }, [indexPath, searchParams, setSearchParams, selectProject])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void pollAll() }, [indexPath, pollAll])
@@ -216,7 +232,6 @@ export default function Dashboard() {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [reloadSecs, pollAll])
 
-  const getTool = (n: string) => tools.find(t => t.name === n)
   const getDetail = (n: string) => details[n] as ToolDetail | undefined
 
   // ── actions ──────────────────────────────────────────────────────────────
@@ -318,10 +333,12 @@ export default function Dashboard() {
   }
 
   // ── totals ───────────────────────────────────────────────────────────────
-  const cbmcp = getTool('codebase-memory-mcp')
-  const rtkTool = getTool('rtk')
-  const hrTool = getTool('headroom')
-  const msTool = getTool('obsidian')
+  // Components is the server-derived status-v2 contract. Capability can vary
+  // with project selection while the runtime dimension stays daemon-global.
+  const codebaseComponent = components.codebase
+  const rtkComponent = components.rtk
+  const headroomComponent = components.headroom
+  const obsidianComponent = components.obsidian
 
   const totals = calculateGlobalTokenSavings(details)
   const totalSaved = totals.tokensSaved
@@ -438,7 +455,7 @@ export default function Dashboard() {
           <div style={{ display: 'grid', gap: 1, background: 'var(--border)' }}>
             {projectCtx.projects.map((p) => (
               <button key={p.id || p.path} onClick={() => {
-                setIndexPath(p.path)
+                selectProject(p.path)
                 const params = new URLSearchParams(searchParams)
                 params.set('project', p.path)
                 setSearchParams(params)
@@ -584,25 +601,24 @@ export default function Dashboard() {
           isIndexed={isIndexed} indexing={indexing} openingGraph={openingGraph}
           configuringMCP={configuringMCP} mcpRegistry={mcpRegistry} indexError={indexError}
           configureFeedback={configureFeedback}
-          t={t} cbmcp={cbmcp}
-          getDetail={getDetail} toolState={toolState} badge={s => badge(s, t)}
+          t={t} component={codebaseComponent}
+          getDetail={getDetail} badge={s => badge(s, t)}
           fmtN={fmtN}
-          setIndexPath={setIndexPath} onIndex={handleIndex}
+          setIndexPath={selectProject} onIndex={handleIndex}
           onOpenGraph={handleOpenGraph}
           onConfigure={() => handleConfigureMCP('codebase')}
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
         <CardRTK
           indexPath={indexPath} repoName={repoName}
-          t={t} rtkTool={rtkTool}
-          getDetail={getDetail} toolState={toolState} badge={s => badge(s, t)}
+          t={t} component={rtkComponent}
+          getDetail={getDetail} badge={s => badge(s, t)}
           fmtUptimeFromDet={fmtUptimeFromDet} fmtN={fmtN}
         />
         <CardHeadroom
           det={getDetail('headroom')}
-          tool={hrTool}
-          state={toolState(hrTool, getDetail('headroom'))}
-          badgeText={badge(toolState(hrTool, getDetail('headroom')), t)}
+          component={headroomComponent}
+          badge={s => badge(s, t)}
           repoName={repoName} indexPath={indexPath} t={t} fmtN={fmtN}
           onStart={async () => { await api.headroomStart(); setTimeout(pollAll, 2000) }}
           onStop={async () => { await api.headroomStop(); setTimeout(pollAll, 1000) }}
@@ -614,8 +630,8 @@ export default function Dashboard() {
         />
         <CardObsidian
           det={getDetail('obsidian')}
-          state={toolState(msTool, getDetail('obsidian'))}
-          badgeText={badge(toolState(msTool, getDetail('obsidian')), t)}
+          component={obsidianComponent}
+          badge={s => badge(s, t)}
           repoName={repoName} indexPath={indexPath} obsidianCount={obsidianCount}
           savingBrain={savingBrain} openingBrain={openingBrain} openingDir={openingDir}
           summarizing={summarizing} configuringMCP={configuringMCP}

@@ -90,6 +90,7 @@ type DashboardServer struct {
 	headroomMu            sync.RWMutex
 	projectMu             sync.RWMutex
 	sseClients            map[chan string]bool
+	sseProjectPaths       map[chan string]string
 	sseMu                 sync.Mutex
 	installMu             sync.Mutex
 	installStatus         map[string]string

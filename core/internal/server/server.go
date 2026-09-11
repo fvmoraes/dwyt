@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"mime"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -477,18 +478,32 @@ func staticContentType(name string) string {
 }
 
 func (ds *DashboardServer) apiSSE(c *gin.Context) {
+	project, err := ds.statusProjectPath(c.Query("path"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "path": c.Query("path")})
+		return
+	}
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
 	ch := make(chan string, 10)
 	ds.sseMu.Lock()
+	if ds.sseClients == nil {
+		ds.sseClients = make(map[chan string]bool)
+	}
+	if ds.sseProjectPaths == nil {
+		ds.sseProjectPaths = make(map[chan string]string)
+	}
 	ds.sseClients[ch] = true
+	ds.sseProjectPaths[ch] = project
 	ds.sseMu.Unlock()
 
 	defer func() {
 		ds.sseMu.Lock()
 		delete(ds.sseClients, ch)
+		delete(ds.sseProjectPaths, ch)
 		ds.sseMu.Unlock()
 	}()
 
@@ -511,16 +526,45 @@ func (ds *DashboardServer) broadcastLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s := status.PollAll(ds.DwytBin, ds.projectObsidian() != nil)
-			data, _ := json.Marshal(s)
-			ds.sseMu.Lock()
-			for ch := range ds.sseClients {
-				select {
-				case ch <- string(data):
-				default:
-				}
-			}
-			ds.sseMu.Unlock()
+			// REST and SSE deliberately share pollSystemStatus: both honor the
+			// selected external/local tool paths before adding status-v2 fields.
+			ds.broadcastStatusSnapshot(ds.pollSystemStatus())
+		}
+	}
+}
+
+// broadcastStatusSnapshot reuses a single global probe result while deriving a
+// separate capability projection for every subscribed dashboard project.
+func (ds *DashboardServer) broadcastStatusSnapshot(all *status.SystemStatus) {
+	ds.sseMu.Lock()
+	projects := make(map[string]struct{}, len(ds.sseClients))
+	for ch := range ds.sseClients {
+		projects[ds.sseProjectPaths[ch]] = struct{}{}
+	}
+	ds.sseMu.Unlock()
+	if len(projects) == 0 {
+		return
+	}
+
+	payloads := make(map[string]string, len(projects))
+	for project := range projects {
+		data, err := json.Marshal(ds.statusProjectionForProject(all, project))
+		if err != nil {
+			continue
+		}
+		payloads[project] = string(data)
+	}
+
+	ds.sseMu.Lock()
+	defer ds.sseMu.Unlock()
+	for ch := range ds.sseClients {
+		data, ok := payloads[ds.sseProjectPaths[ch]]
+		if !ok {
+			continue
+		}
+		select {
+		case ch <- data:
+		default:
 		}
 	}
 }

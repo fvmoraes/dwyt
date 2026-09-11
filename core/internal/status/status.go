@@ -54,8 +54,15 @@ type ToolStatus struct {
 }
 
 type SystemStatus struct {
-	Timestamp time.Time    `json:"timestamp"`
-	Tools     []ToolStatus `json:"tools"`
+	// Timestamp and Tools are the legacy status contract. Components, Status,
+	// and ToolErrors are additive v2 fields; existing consumers can continue
+	// reading tools[] unchanged.
+	Timestamp   time.Time                  `json:"timestamp"`
+	Tools       []ToolStatus               `json:"tools"`
+	Status      string                     `json:"status,omitempty"`
+	ToolErrors  map[string]string          `json:"tool_errors,omitempty"`
+	Components  map[string]ComponentStatus `json:"components,omitempty"`
+	ProjectPath string                     `json:"project_path,omitempty"`
 }
 
 type RTKMetrics struct {

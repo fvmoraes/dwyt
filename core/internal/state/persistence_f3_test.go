@@ -107,13 +107,17 @@ func TestRuntimeStateRegisterProcessPreservesLifecycleAndConfig(t *testing.T) {
 		Uptime:        41,
 	}
 	state.SetProcessLifecycle(initial)
+	initialPublished, ok := state.GetProcess("codebase")
+	if !ok {
+		t.Fatal("initial lifecycle process not found")
+	}
 
 	state.RegisterProcess("codebase", 4242, 9751)
 	samePID, ok := state.GetProcess("codebase")
 	if !ok {
 		t.Fatal("registered process not found")
 	}
-	wantSamePID := initial
+	wantSamePID := initialPublished
 	wantSamePID.Port = 9751
 	wantSamePID.EffectivePort = 9751
 	if !reflect.DeepEqual(samePID, wantSamePID) {
