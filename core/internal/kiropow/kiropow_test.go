@@ -255,9 +255,27 @@ func TestGenerateMCPJSON_ObsidianUsesCanonicalCommand(t *testing.T) {
 // v5 moves the per-tool detail to manual inclusion: only the small, stable
 // context contract is loaded on every turn (spec §4). Everything else is
 // fetched on demand from the Optimizer or by explicitly referencing the file.
-func TestSteeringUsesValidKiroInclusionModes(t *testing.T) {
-	if !strings.Contains(steeringContext(), "inclusion: always") {
-		t.Fatalf("context steering must stay always-included, got:\n%s", steeringContext())
+func TestSteeringUsesStageScopedGuidance(t *testing.T) {
+	context := steeringContext()
+	if !strings.Contains(context, "inclusion: always") {
+		t.Fatalf("context steering must stay always-included, got:\n%s", context)
+	}
+	for _, want := range []string{
+		"## Stage-Scoped Collaboration",
+		"There is no universal order of tools.",
+		"`dwyt_context_plan`",
+		"canonical project knowledge",
+		"current code-structure questions",
+		"When a shell operation is needed, prefix it with `rtk`.",
+		"`dwyt_compact_tool_output`",
+		"Headroom only as a compatible transport proxy",
+	} {
+		if !strings.Contains(context, want) {
+			t.Errorf("context steering is missing stage-scoped guidance %q", want)
+		}
+	}
+	if strings.Contains(context, "## Order of Operations") {
+		t.Fatalf("context steering still presents a global tool order:\n%s", context)
 	}
 	for name, content := range map[string]string{
 		"obsidian": steeringObsidian("/tmp/project"),
@@ -271,7 +289,7 @@ func TestSteeringUsesValidKiroInclusionModes(t *testing.T) {
 	}
 	// Size guard on the always-included file: it is injected into every turn.
 	const maxAlwaysBytes = 1600
-	if got := len(steeringContext()); got > maxAlwaysBytes {
+	if got := len(context); got > maxAlwaysBytes {
 		t.Fatalf("always-included steering grew to %d bytes (max %d); "+
 			"detailed policy belongs in the DWYT MCP", got, maxAlwaysBytes)
 	}

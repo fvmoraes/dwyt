@@ -11,6 +11,8 @@ on:
       - ".golangci.yml"
       - ".github/workflows/**"
       - "plan/**"
+      - "docs/**"
+      - "readme.md"
   pull_request:
     branches: [ main ]
     paths:
@@ -21,6 +23,8 @@ on:
       - ".golangci.yml"
       - ".github/workflows/**"
       - "plan/**"
+      - "docs/**"
+      - "readme.md"
 
 permissions:
   contents: read
@@ -123,6 +127,22 @@ jobs:
           if ($parseErrors.Count -gt 0) {
             throw ($parseErrors | Out-String)
           }
+
+  docs:
+    name: Documentation consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Validate documentation contracts and links
+        working-directory: core
+        run: go test ./internal/integrate -run '^(TestDocumentation|TestActiveDocumentation)' -count=1
 
   race:
     # Data races are undefined behavior; run the detector on the two fastest

@@ -381,16 +381,20 @@ Three MCPs: **dwyt_optimizer** (context optimizer), **dwyt_obsidian**
 (project memory), **dwyt_codebase** (code structure). RTK compresses terminal
 output and is not an MCP.
 
-## Order of Operations
+## Stage-Scoped Collaboration
 
-1. Call ` + "`dwyt_context_plan`" + ` before broad repository or memory retrieval.
-   Stay inside the returned budget, retrieval level and exclusions.
-2. Load canonical memory from Obsidian before old session notes.
-3. Retrieve code from Codebase progressively: project map → module → symbol →
-   range. A full file is exceptional and needs a reason.
-4. Compact large tool output with ` + "`dwyt_compact_tool_output`" + `; resolve the
-   full bytes with ` + "`dwyt_get_raw`" + ` only when the summary is insufficient.
-5. Prefix shell commands with ` + "`rtk`" + `.
+There is no universal order of tools. Select the capability for the current task stage:
+
+- Before broad repository or memory retrieval, call ` + "`dwyt_context_plan`" + `; stay inside
+  its budget, retrieval level, and exclusions.
+- For canonical project knowledge, decisions, or handoff, use Obsidian before old
+  session notes.
+- For current code-structure questions, use Codebase progressively: project map →
+  module → symbol → range. A full file needs a reason.
+- When a shell operation is needed, prefix it with ` + "`rtk`" + `.
+- Compact large tool output with ` + "`dwyt_compact_tool_output`" + `; use ` + "`dwyt_get_raw`" + ` only
+  when the summary is insufficient.
+- Use Headroom only as a compatible transport proxy, never as a source of truth.
 
 ## Stop Rules
 

@@ -15,3 +15,8 @@ Atualizado em 2026-09-11. Este scorecard separa evidência determinística de us
 ## Regra de aceitação
 
 Uma linha só pode afirmar economia de produto quando houver comparação compatível, qualidade sem regressão e telemetria observada para custo/latência. Até lá, este scorecard preserva a decisão e a proveniência sem converter ausência em zero.
+## Fase 10 — migração documental
+
+| Fase | Cenário | Baseline | Pós-migração | Decisão e evidência |
+|---|---|---|---|---|
+| 10 | Estrutura e fontes canônicas de documentação | `01-how-it-works.md`: 1.187 linhas / 52.372 bytes; `rules/rules.md`: 643 linhas / 18.180 bytes | Compatibilidade de how-it-works: 15 linhas / 777 bytes; archive de rules: 23 linhas / 1.163 bytes; arquitetura, leis, métricas, operação e integração em caminhos focados | Aceito como consolidação de documentação, não claim de produto. O crawler de links e as verificações de 3 MCPs, lei canônica, ausência de ordem global e ausência de duas leis ativas rodam em `core/internal/integrate` e no job Ubuntu de documentação. |

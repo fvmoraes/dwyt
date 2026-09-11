@@ -561,20 +561,24 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 
 ## Documentation
 
+The [documentation index](docs/readme.md) is the canonical entry point. It groups
+focused documents by architecture, laws, metrics, operations, integrations, and
+platforms.
+
 | Document | Contents |
 |---|---|
-| [How It Works](docs/01-how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
-| [Startup Lifecycle & Service Status](docs/02-startup-lifecycle.md) | Dashboard-first boot, service reconciler, lifecycle states, honest status rules |
-| [Architecture v5](docs/03-architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
-| [Optimizer Law](docs/04-optimizer-law.md) | Context budget, Token ROI, reuse, compression and output invariants |
-| [Codebase Law](docs/05-codebase-law.md) | Mandatory code-graph workflow for agents |
-| [Obsidian Law](docs/06-obsidian-law.md) | Mandatory memory workflow for agents |
-| [Tokens Saved](docs/07-tokens-saved.md) | Where the savings numbers come from; sessions and windows |
-| [Kiro Power](docs/08-kiro-power.md) | Kiro Power paths, frontmatter, MCP behavior |
-| [Release Process](docs/09-release-process.md) | Automatic releases, semver conventions (scopes, `!`, BREAKING CHANGE) |
-| [Changelog](docs/10-changelog.md) | Notable changes per release |
+| [Architecture overview](docs/architecture/overview.md) | Ownership of the three first-party MCPs and daemon boundaries |
+| [Runtime and lifecycle](docs/architecture/runtime.md) | Dashboard-first startup, reconciler, status model, effective ports, diagnostics |
+| [Context optimization](docs/architecture/context-optimization.md) | Budgets, Token ROI, reuse, compression, cache, raw recovery, provenance |
+| [Optimizer Law](docs/laws/optimizer-law.md) | Context budget, Token ROI, reuse, compression, and output invariants |
+| [Codebase Law](docs/laws/codebase-law.md) | Mandatory structural retrieval workflow |
+| [Obsidian Law](docs/laws/obsidian-law.md) | Durable memory and task-handoff workflow |
+| [Tokens saved and provenance](docs/metrics/tokens-saved.md) | Observed, estimated, counterfactual, and unsupported measurements |
+| [Benchmarks](docs/metrics/benchmarks.md) | Harness limits, startup tax, serial measurement, and evidence policy |
+| [Kiro Power](docs/integrations/kiro-power.md) | Power paths, MCP behavior, and stage-scoped guidance |
+| [Release process](docs/operations/release-process.md) | Automated releases and SemVer conventions |
+| [Changelog](docs/CHANGELOG.md) | Notable changes per release |
 | [Windows docs](docs/windows/readme.md) | Installation, update, troubleshooting, PowerShell/Terminal notes |
-| [Agent rules](docs/rules/rules.md) | Repo conventions for agents working on DWYT itself |
 
 ---
 

@@ -103,7 +103,8 @@ func TestLawsAreNotPastedIntoClientInstructions(t *testing.T) {
 // exactly one canonical Optimizer Law, linked from the docs index, and the
 // three laws present (Fine-Tuning §13.6 consistency checks).
 func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
-	law, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "04-optimizer-law.md"))
+	lawsDir := filepath.Join("..", "..", "..", "docs", "laws")
+	law, err := os.ReadFile(filepath.Join(lawsDir, "optimizer-law.md"))
 	if err != nil {
 		t.Fatalf("canonical optimizer law missing: %v", err)
 	}
@@ -117,13 +118,13 @@ func TestOptimizerLawIsCanonicalAndLinked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("docs index missing: %v", err)
 	}
-	if !strings.Contains(string(index), "optimizer-law.md") {
+	if !strings.Contains(string(index), "laws/optimizer-law.md") {
 		t.Fatal("docs index does not link the optimizer law")
 	}
 
-	for _, lawFile := range []string{"04-optimizer-law.md", "05-codebase-law.md", "06-obsidian-law.md"} {
-		if _, err := os.Stat(filepath.Join("..", "..", "..", "docs", lawFile)); err != nil {
-			t.Errorf("law file %s missing", lawFile)
+	for _, lawFile := range []string{"optimizer-law.md", "codebase-law.md", "obsidian-law.md"} {
+		if _, err := os.Stat(filepath.Join(lawsDir, lawFile)); err != nil {
+			t.Errorf("law file %s missing: %v", lawFile, err)
 		}
 	}
 }
