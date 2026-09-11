@@ -804,7 +804,8 @@ func TestLifecycleFakeFailureInjectionModes(t *testing.T) {
 		never := newLifecycleFakeManager()
 		never.healthMode = lifecycleHealthNever
 		start(t, never)
-		if never.Status("codebase").Healthy || never.Status("codebase").Healthy {
+		neverFirst, neverSecond := never.Status("codebase").Healthy, never.Status("codebase").Healthy
+		if neverFirst || neverSecond {
 			t.Fatal("never-healthy service reported healthy")
 		}
 

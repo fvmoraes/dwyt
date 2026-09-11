@@ -32,31 +32,26 @@ func Project(projectPath, clients, _ string) {
 
 	if containsClient(clientList, "cursor") {
 		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
-		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, cursorRuleTemplate())
 	}
 
 	if containsClient(clientList, "kiro") {
 		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, kiroSteeringTemplate())
 	}
 
 	if containsClient(clientList, "copilot") {
 		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
 	}
 
 	if containsClient(clientList, "windsurf") {
 		cp := filepath.Join(projectPath, ".windsurf", "rules", "dwyt.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, windsurfRuleTemplate())
 	}
 
 	if containsClient(clientList, "continue") {
 		cp := filepath.Join(projectPath, ".continue", "rules", "dwyt.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
 		writeOrUpdateInstructionFile(cp, continueRuleTemplate())
 	}
 
@@ -135,18 +130,15 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
 		case "copilot":
 			cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
+			_ = appendMarkedBlock(cp, block)
 			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
 		case "kiro":
 			cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
+			_ = appendMarkedBlock(cp, block)
 			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
 		case "cursor":
 			cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
+			_ = appendMarkedBlock(cp, block)
 			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
 		}
 	}

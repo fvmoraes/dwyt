@@ -127,8 +127,10 @@ func writeSorted(h interface{ Write([]byte) (int, error) }, values []string) {
 	copy(sorted, values)
 	sort.Strings(sorted)
 	for _, v := range sorted {
-		h.Write([]byte(v))
-		h.Write([]byte{0})
+		// hash.Hash.Write is documented to never fail; retain the explicit
+		// discard so the generic writer contract remains visible to callers.
+		_, _ = h.Write([]byte(v))
+		_, _ = h.Write([]byte{0})
 	}
 }
 

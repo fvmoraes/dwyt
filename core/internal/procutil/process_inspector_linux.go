@@ -71,7 +71,7 @@ func linuxExecutableIdentity(pid int) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("stat executable for pid %d: unsupported file identity", pid)
 	}
-	return fmt.Sprintf("%x:%x", uint64(stat.Dev), uint64(stat.Ino)), nil
+	return fmt.Sprintf("%x:%x", stat.Dev, stat.Ino), nil
 }
 
 func linuxProcessStartToken(pid int) (string, error) {

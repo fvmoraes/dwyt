@@ -34,7 +34,7 @@ func TestLinuxProcessIdentityUsesBootAndExecutableFileIdentity(t *testing.T) {
 	if !ok {
 		t.Fatal("executable stat does not expose Linux file identity")
 	}
-	wantExecutable := fmt.Sprintf("%x:%x", uint64(stat.Dev), uint64(stat.Ino))
+	wantExecutable := fmt.Sprintf("%x:%x", stat.Dev, stat.Ino)
 	if identity.ExecutableIdentity != wantExecutable {
 		t.Fatalf("executable identity = %q, want %q", identity.ExecutableIdentity, wantExecutable)
 	}

@@ -27,13 +27,6 @@ var statusComponentSpecs = []statusComponentSpec{
 	{key: "obsidian", toolName: "obsidian", process: "obsidian"},
 }
 
-// buildComponentStatuses is the active-project compatibility wrapper for the
-// v2 status assembler. Callers rendering another dashboard project use the
-// explicit-project variant below.
-func (ds *DashboardServer) buildComponentStatuses(all *status.SystemStatus) map[string]status.ComponentStatus {
-	return ds.buildComponentStatusesForProject(all, ds.defaultStatusProject())
-}
-
 // buildComponentStatusesForProject deliberately keeps lifecycle/global facts
 // separate from capability/project facts so selecting a different project
 // cannot make a healthy local service look unhealthy.

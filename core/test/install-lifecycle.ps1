@@ -22,11 +22,11 @@ try {
   $externalConfig = Join-Path $home "config\unmanaged.txt"
 
   $null = New-Item -ItemType Directory -Force -Path (Split-Path $sourceBinary -Parent)
-  $env:HOME = $home
-  $env:USERPROFILE = $home
-  $env:APPDATA = $appData
-  $env:DWYT_HOME = $dwytHome
 
+  # Build with the runner's real profile. On Windows, overriding HOME and
+  # USERPROFILE before Go starts can redirect its cache/config discovery into
+  # the uninitialized sandbox profile. The installer and launched binary below
+  # remain hermetic after these environment variables are scoped to the test.
   Push-Location (Join-Path $RepositoryRoot "core")
   try {
     & go build -o $sourceBinary .
@@ -35,6 +35,11 @@ try {
   finally {
     Pop-Location
   }
+
+  $env:HOME = $home
+  $env:USERPROFILE = $home
+  $env:APPDATA = $appData
+  $env:DWYT_HOME = $dwytHome
 
   $installer = Join-Path $RepositoryRoot "install.ps1"
   & $installer -SkipDeps -DwytHome $dwytHome -BinaryPath $sourceBinary -NoPath

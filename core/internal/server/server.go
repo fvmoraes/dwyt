@@ -19,7 +19,6 @@ import (
 	"github.com/fvmoraes/dwyt/internal/codexauth"
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/dwytconfig"
-	dwytenv "github.com/fvmoraes/dwyt/internal/env"
 	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/optimizer"
@@ -308,21 +307,6 @@ func (ds *DashboardServer) setHeadroomPort(port int) {
 	ds.HeadroomPort = port
 	ds.headroomMu.Unlock()
 	status.SetHeadroomPort(port)
-}
-
-// setHeadroomRequestedPort is reserved for an explicit configuration change.
-// Unlike effective-port publication, it is intentionally durable.
-func (ds *DashboardServer) setHeadroomRequestedPort(port int) {
-	if port <= 0 {
-		return
-	}
-	ds.headroomMu.Lock()
-	ds.HeadroomRequestedPort = port
-	ds.headroomMu.Unlock()
-	if err := dwytenv.SetHeadroomPort(ds.DwytHome, port); err != nil {
-		log.Warn("failed to persist requested Headroom port", log.Fields{"port": port, "error": err.Error()})
-	}
-	_ = os.Setenv("DWYT_HEADROOM_PORT", strconv.Itoa(port))
 }
 
 // Codebase startup is owned exclusively by ServiceReconciler. Keeping the

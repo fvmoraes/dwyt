@@ -248,7 +248,7 @@ func TestStatusDoesNotHoldStateMutexDuringProbe(t *testing.T) {
 	acquired := make(chan struct{})
 	go func() {
 		mp.mu.Lock()
-		mp.mu.Unlock()
+		defer mp.mu.Unlock()
 		close(acquired)
 	}()
 	select {

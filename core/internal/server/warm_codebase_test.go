@@ -97,10 +97,7 @@ func TestCodebaseLifecycleAdoptsOnlyValidatedService(t *testing.T) {
 	// runs before tryAdopt commits the healthy state, so wait for the state to
 	// settle rather than racing the reconcile goroutine.
 	deadline := time.After(time.Second)
-	for {
-		if controller.stateOf("codebase") == svcHealthy {
-			break
-		}
+	for controller.stateOf("codebase") != svcHealthy {
 		select {
 		case <-deadline:
 			t.Fatalf("validated service state = %s, want healthy", controller.stateOf("codebase"))

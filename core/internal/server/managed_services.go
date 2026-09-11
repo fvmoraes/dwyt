@@ -189,7 +189,7 @@ func validateHTTPServiceIdentity(expected string) func(context.Context, string) 
 		if err != nil {
 			return false, nil
 		}
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		if response.StatusCode != http.StatusOK {
 			return false, nil
 		}

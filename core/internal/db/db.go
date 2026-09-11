@@ -30,7 +30,9 @@ type Store struct {
 
 func New(path string) (*Store, error) {
 	dir := filepath.Dir(path)
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("sqlite create directory: %w", err)
+	}
 
 	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
@@ -341,7 +343,7 @@ func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]
 // SumMetricsByToolBetween is SumMetricsByTool with an explicit upper bound, so
 // a session (or any historical span) can be summed without bleeding in events
 // that happened after it.
-func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int64) (map[string]map[string]int64, error) {
+func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int64) (out map[string]map[string]int64, err error) {
 	rows, err := s.db.Query(
 		`SELECT tool, metric, COALESCE(SUM(delta), 0)
 		 FROM metric_events WHERE project_id = ? AND ts >= ? AND ts <= ? GROUP BY tool, metric`,
@@ -350,9 +352,13 @@ func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
-	out := make(map[string]map[string]int64)
+	out = make(map[string]map[string]int64)
 	for rows.Next() {
 		var tool, metric string
 		var sum int64
@@ -364,7 +370,7 @@ func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int
 		}
 		out[tool][metric] = sum
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // MCPActivityTS returns the (distinct, ascending) timestamps at which MCP usage

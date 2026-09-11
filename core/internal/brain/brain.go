@@ -732,8 +732,12 @@ func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string
 	writeMarkdownList(f, "Errors", snapshot.Errors)
 	writeMarkdownList(f, "Next Steps", snapshot.NextSteps)
 	if len(snapshot.Metadata) > 0 {
-		fmt.Fprintln(f, "## Metadata")
-		fmt.Fprintln(f)
+		if _, err := fmt.Fprintln(f, "## Metadata"); err != nil {
+			return "", fmt.Errorf("obsidian context save metadata heading: %w", err)
+		}
+		if _, err := fmt.Fprintln(f); err != nil {
+			return "", fmt.Errorf("obsidian context save metadata spacing: %w", err)
+		}
 		keys := make([]string, 0, len(snapshot.Metadata))
 		for k := range snapshot.Metadata {
 			keys = append(keys, k)
@@ -831,7 +835,7 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	var results []BrainEntry
 	query = strings.ToLower(query)
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
@@ -852,7 +856,9 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 			})
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil
+	}
 
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].CreatedAt.After(results[j].CreatedAt)
@@ -896,7 +902,7 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	var parts []string
 	typeCount := map[string]int{}
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
@@ -909,7 +915,9 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 			parts = append(parts, title)
 		}
 		return nil
-	})
+	}); err != nil {
+		return pb.Summary
+	}
 
 	summary := fmt.Sprintf("# %s — Project Brain\n\n", pb.ProjectName)
 	summary += fmt.Sprintf("**Last updated:** %s\n\n", time.Now().Format(time.RFC3339))
@@ -1031,7 +1039,9 @@ func (pb *ProjectObsidian) RegisterObsidianVault() error {
 
 	config := map[string]interface{}{}
 	if data, err := os.ReadFile(configPath); err == nil && len(data) > 0 {
-		json.Unmarshal(data, &config)
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("obsidian: decode vault registry: %w", err)
+		}
 	}
 
 	vaults, _ := config["vaults"].(map[string]interface{})
@@ -1127,13 +1137,15 @@ func CountVaultFiles(dwytHome, projectPath string) (int, bool) {
 			continue
 		}
 		count := 0
-		filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
+		if err := filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
 			if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 				return nil
 			}
 			count++
 			return nil
-		})
+		}); err != nil {
+			continue
+		}
 		return count, true
 	}
 	return 0, false

@@ -321,7 +321,12 @@ func (pm *ProcessManager) startReaper(mp *ManagedProcess, cmd *exec.Cmd, name st
 // holds no state mutex while blocking.
 func (pm *ProcessManager) terminateAndReap(cmd *exec.Cmd, done <-chan struct{}) {
 	if cmd != nil && cmd.Process != nil {
-		procutil.TerminateTree(cmd.Process.Pid)
+		if err := procutil.TerminateTree(cmd.Process.Pid); err != nil {
+			log.Warn("failed to terminate process tree during aborted start", log.Fields{
+				"pid":   cmd.Process.Pid,
+				"error": err.Error(),
+			})
+		}
 	}
 	if done != nil {
 		<-done

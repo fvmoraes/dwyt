@@ -68,7 +68,7 @@ func atomicWriteFile(path string, data []byte, defaultMode os.FileMode) (retErr 
 	return nil
 }
 
-func syncDirectory(path string) error {
+func syncDirectory(path string) (retErr error) {
 	// Windows cannot flush directory handles. Rename is still atomic there, so
 	// retain the same complete-file guarantee without failing all note writes.
 	if runtime.GOOS == "windows" {
@@ -78,6 +78,10 @@ func syncDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
+	defer func() {
+		if closeErr := directory.Close(); retErr == nil && closeErr != nil {
+			retErr = closeErr
+		}
+	}()
 	return directory.Sync()
 }

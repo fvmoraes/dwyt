@@ -22,8 +22,8 @@ import (
 //     probe after the TTL issues a fresh GET
 type probeCoalescer struct {
 	ttl   time.Duration
-	now   func() time.Time                                          // injectable clock for deterministic tests
-	doGet func(ctx context.Context, url string) (bool, error)      // injectable probe for tests
+	now   func() time.Time                                    // injectable clock for deterministic tests
+	doGet func(ctx context.Context, url string) (bool, error) // injectable probe for tests
 	mu    sync.Mutex
 	cache map[string]probeCacheEntry
 	calls map[string]*probeCall

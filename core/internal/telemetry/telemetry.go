@@ -103,7 +103,7 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Keep an explicit migration ledger. CREATE TABLE IF NOT EXISTS alone does
 	// not evolve databases created by a prior DWYT version, so version 2 below
@@ -197,7 +197,7 @@ func ensureRequestEventColumn(tx *sql.Tx, column, definition string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -244,7 +244,7 @@ func (s *Store) RecordRequest(e RequestEvent) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
 		INSERT OR REPLACE INTO llm_request_events (
