@@ -27,6 +27,13 @@ locate_binary() {
 # file (clone or release zip). SCRIPT_DIR is populated by install.sh's
 # bootstrap; staying empty means we're piped via curl|bash.
 resolve_local_bin() {
+  # DWYT_LOCAL_BINARY is an explicit hermetic-test override. It is resolved
+  # before the adjacent-release binary and prevents all network fallbacks.
+  if [[ -n "${DWYT_LOCAL_BINARY:-}" ]]; then
+    LOCAL_BIN="${DWYT_LOCAL_BINARY}"
+    return 0
+  fi
+  [[ -n "${LOCAL_BIN:-}" ]] && return 0
   [[ -n "${SCRIPT_DIR:-}" ]] || return 0
   LOCAL_BIN="${SCRIPT_DIR}/${RELEASE_BINARY}"
 }

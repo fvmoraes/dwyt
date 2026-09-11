@@ -10,10 +10,14 @@ set -euo pipefail
 
 # Globals shared with sourced lib files.
 SKIP_DEPS=0
+# Explicit environment overrides keep installer E2E hermetic: CI can supply a
+# local binary and a temporary destination without changing the normal release
+# download or touching a user's shell configuration.
+NO_PATH="${DWYT_NO_PATH:-0}"
 GOOS=""; GOARCH=""
-INSTALL_DIR=""; DEST=""
+INSTALL_DIR="${DWYT_INSTALL_DIR:-}"; DEST=""
 RELEASE_ARCHIVE=""; RELEASE_BINARY=""
-DOWNLOADER=""; LOCAL_BIN=""; SHELL_RC=""
+DOWNLOADER=""; LOCAL_BIN="${DWYT_LOCAL_BINARY:-}"; SHELL_RC=""
 SCRIPT_DIR=""  # set by bootstrap_lib when running from a real file
 BOOTSTRAP_LIB_DIR=""  # set by load_lib_from_remote; cleaned up via EXIT trap
 
@@ -96,6 +100,10 @@ Usage: install.sh [--skip-deps]
 
   --skip-deps   Install only the dwyt binary; skip cbmcp/rtk/headroom/obsidian.
                 Run `dwyt install` later to bootstrap the deps.
+
+For hermetic CI or local integration tests, set DWYT_INSTALL_DIR,
+DWYT_LOCAL_BINARY, and DWYT_NO_PATH=1. These overrides are opt-in and leave
+the default release download and PATH behavior unchanged.
 USAGE
         exit 0 ;;
     esac

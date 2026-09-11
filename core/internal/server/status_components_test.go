@@ -198,3 +198,116 @@ func TestMCPUsageRecordsObservedActivityWithoutUsageStore(t *testing.T) {
 		t.Fatalf("observed MCP activity was not persisted: %+v, exists=%v", info, ok)
 	}
 }
+
+// TestStatusCorrectnessMatrix keeps the v2 status contract together so a
+// cross-platform regression cannot be hidden among otherwise independent card
+// assertions. The test exercises lifecycle facts, configuration facts, and
+// observed MCP activity as deliberately separate dimensions.
+func TestStatusCorrectnessMatrix(t *testing.T) {
+	cases := []struct {
+		name      string
+		configure func(*DashboardServer)
+		tool      status.ToolStatus
+		assert    func(*testing.T, status.ComponentStatus, *status.SystemStatus)
+	}{
+		{
+			name: "spawn without health remains starting",
+			configure: func(ds *DashboardServer) {
+				ds.RuntimeState.SetClients([]string{"kiro"})
+				ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{Name: "codebase", State: "starting"})
+			},
+			tool: status.ToolStatus{Name: "codebase-memory-mcp", Status: status.StatePortOpenNoHealth},
+			assert: func(t *testing.T, component status.ComponentStatus, _ *status.SystemStatus) {
+				t.Helper()
+				if component.RuntimeState != status.ComponentRuntimeStarting || component.DisplayState != status.ComponentDisplayStarting {
+					t.Fatalf("starting component = %+v", component)
+				}
+			},
+		},
+		{
+			name: "HTTP failure and active MCP remain distinct",
+			configure: func(ds *DashboardServer) {
+				ds.RuntimeState.SetClients([]string{"kiro"})
+				ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{Name: "codebase", State: "degraded", LastError: "health probe failed"})
+				ds.RuntimeState.RecordMCPActivityAt("codebase", time.Now())
+			},
+			tool: status.ToolStatus{Name: "codebase-memory-mcp", Status: status.StatePortOpenNoHealth},
+			assert: func(t *testing.T, component status.ComponentStatus, _ *status.SystemStatus) {
+				t.Helper()
+				if component.RuntimeState != status.ComponentRuntimeDegraded || component.MCPActivity != status.ComponentMCPActive {
+					t.Fatalf("degraded/active dimensions collapsed: %+v", component)
+				}
+			},
+		},
+		{
+			name: "configured client without observed session is configured",
+			configure: func(ds *DashboardServer) {
+				ds.RuntimeState.SetClients([]string{"kiro"})
+				ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{Name: "codebase", State: "healthy", Healthy: true})
+			},
+			tool: status.ToolStatus{Name: "codebase-memory-mcp", Status: status.StateOnline},
+			assert: func(t *testing.T, component status.ComponentStatus, _ *status.SystemStatus) {
+				t.Helper()
+				if component.ConfigState != status.ComponentConfigConfigured || component.MCPActivity != status.ComponentMCPConfigured {
+					t.Fatalf("configured-but-idle MCP = %+v", component)
+				}
+			},
+		},
+		{
+			name: "effective fallback port preserves healthy state",
+			configure: func(ds *DashboardServer) {
+				ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{
+					Name: "codebase", State: "healthy", Healthy: true, PID: 1234,
+					RequestedPort: 9749, EffectivePort: 9750, Port: 9750,
+				})
+			},
+			tool: status.ToolStatus{Name: "codebase-memory-mcp", Status: status.StateOnline, Port: 9749},
+			assert: func(t *testing.T, component status.ComponentStatus, all *status.SystemStatus) {
+				t.Helper()
+				if component.RuntimeState != status.ComponentRuntimeHealthy || component.Port != 9750 || all.Tools[0].Port != 9750 {
+					t.Fatalf("effective-port health projection = component=%+v tool=%+v", component, all.Tools[0])
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := componentStatusServer(t)
+			tc.configure(ds)
+			all := ds.enrichSystemStatus(componentStatusPayload(tc.tool))
+			tc.assert(t, all.Components["codebase"], all)
+		})
+	}
+
+	t.Run("recovery changes degraded to healthy with timestamps", func(t *testing.T) {
+		ds := componentStatusServer(t)
+		ds.RuntimeState.SetClients([]string{"kiro"})
+		ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{Name: "headroom", State: "degraded", LastError: "timeout"})
+		if got := ds.enrichSystemStatus(componentStatusPayload(status.ToolStatus{Name: "headroom", Status: status.StateOffline})).Components["headroom"].RuntimeState; got != status.ComponentRuntimeDegraded {
+			t.Fatalf("pre-recovery runtime = %q, want degraded", got)
+		}
+		ds.RuntimeState.SetProcessLifecycle(state.ProcessInfo{Name: "headroom", State: "healthy", Healthy: true, Port: 8787, EffectivePort: 8787})
+		component := ds.enrichSystemStatus(componentStatusPayload(status.ToolStatus{Name: "headroom", Status: status.StateOnline, Port: 8787})).Components["headroom"]
+		if component.RuntimeState != status.ComponentRuntimeHealthy || component.LastHealthyAt.IsZero() || component.LastTransitionAt.IsZero() {
+			t.Fatalf("recovery projection = %+v", component)
+		}
+	})
+
+	t.Run("stale PID and port are invalidated before observation", func(t *testing.T) {
+		home := t.TempDir()
+		persisted := state.Init(home)
+		persisted.SetProcessLifecycle(state.ProcessInfo{
+			Name: "codebase", PID: 999999, Port: 9750, RequestedPort: 9749, EffectivePort: 9750,
+			Healthy: true, State: "healthy", DesiredState: desiredStopped, Ownership: ownershipManaged,
+		})
+		reloaded := state.Init(home)
+		fake := newLifecycleFakeManager()
+		close(fake.startRelease)
+		_ = newServiceReconciler(fake, reloaded, reconcilerOptions{services: []ManagedService{{Name: "codebase", AutoStart: true, RequestedPort: 9749}}})
+		process, ok := reloaded.GetProcess("codebase")
+		if !ok || process.PID != 0 || process.Port != 0 || process.EffectivePort != 0 || process.State != svcUnknown {
+			t.Fatalf("stale persisted process survived reconciliation bootstrap: %+v", process)
+		}
+	})
+}

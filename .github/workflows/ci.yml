@@ -128,6 +128,61 @@ jobs:
             throw ($parseErrors | Out-String)
           }
 
+  darwin-build:
+    name: Darwin CLI build (${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Build Darwin CLI artifact
+        working-directory: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          GOOS=darwin GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 \
+            go build -trimpath -o "dist/dwyt_darwin_${{ matrix.goarch }}" .
+          test -s "dist/dwyt_darwin_${{ matrix.goarch }}"
+          file "dist/dwyt_darwin_${{ matrix.goarch }}"
+
+  installer-e2e:
+    name: Sandboxed installer lifecycle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Verify POSIX install, reinstall, and uninstall preservation
+        if: runner.os != 'Windows'
+        working-directory: core
+        shell: bash
+        run: bash test/install-lifecycle.sh "$GITHUB_WORKSPACE"
+
+      - name: Verify Windows install, reinstall, and uninstall preservation
+        if: runner.os == 'Windows'
+        working-directory: core
+        shell: pwsh
+        run: .\test\install-lifecycle.ps1 -RepositoryRoot $env:GITHUB_WORKSPACE
+
   docs:
     name: Documentation consistency
     runs-on: ubuntu-latest

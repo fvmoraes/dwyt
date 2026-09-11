@@ -13,9 +13,13 @@ print_done() {
 # In an interactive terminal, offer to launch DWYT immediately. Non-interactive
 # (piped, CI) just prints the resume command and exits cleanly.
 prompt_run_now() {
-  if [[ ! -t 0 ]]; then
+  if [[ "$NO_PATH" == "1" ]] || [[ ! -t 0 ]]; then
     echo -e "  Restart your terminal or run:"
-    echo -e "    ${BOLD}source ${SHELL_RC} && dwyt .${RESET}\n"
+    if [[ "$NO_PATH" == "1" ]]; then
+      echo -e "    ${BOLD}${DEST} .${RESET}\n"
+    else
+      echo -e "    ${BOLD}source ${SHELL_RC} && dwyt .${RESET}\n"
+    fi
     return
   fi
   printf "  %bRun DWYT now? [Y/n]%b " "$YELLOW" "$RESET"

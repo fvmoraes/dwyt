@@ -212,6 +212,12 @@ var uninstallCmd = &cobra.Command{
 	Short: "Remove DWYT tools and config while preserving Obsidian vaults",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := detect.Detect()
+		sandbox, _ := cmd.Flags().GetBool("sandbox")
+		if sandbox {
+			sandboxRoot, _ := cmd.Flags().GetString("sandbox-root")
+			installDir, _ := cmd.Flags().GetString("install-dir")
+			return sandboxUninstall(e, sandboxRoot, installDir)
+		}
 		home, _ := os.UserHomeDir()
 		fmt.Printf("\n  \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n")
 		fmt.Printf("  \u2551  DWYT \u2014 Uninstall                   \u2551\n")
@@ -234,6 +240,12 @@ var uninstallCmd = &cobra.Command{
 		fmt.Printf("  \u2139  Restart your terminal to apply shell changes.\n\n")
 		return nil
 	},
+}
+
+func init() {
+	uninstallCmd.Flags().Bool("sandbox", false, "restrict cleanup to an explicit test sandbox")
+	uninstallCmd.Flags().String("sandbox-root", "", "parent directory allowed for sandbox cleanup")
+	uninstallCmd.Flags().String("install-dir", "", "sandboxed launcher directory to remove")
 }
 
 func stopAllProcesses() {

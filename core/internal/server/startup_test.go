@@ -446,3 +446,139 @@ func TestDashboardHTTPShutdownDrainsBeforeStartReturns(t *testing.T) {
 		t.Fatal("Start returned before neither shutdown completion nor deadline")
 	}
 }
+
+// TestCoreAvailabilityMatrix consolidates the Core Availability Law in one
+// state-driven suite: optional services and post-bind work may fail, but the
+// dashboard listener must remain available. Every fake is released through a
+// channel; deadlines below are only diagnostic bounds, never synchronization.
+func TestCoreAvailabilityMatrix(t *testing.T) {
+	startDashboard := func(t *testing.T, ds *DashboardServer) <-chan error {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- ds.Start() }()
+		if err := waitForDashboard(t, ds.Port, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := ds.Shutdown(ctx); err != nil {
+				t.Errorf("dashboard cleanup: %v", err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("Start() after cleanup: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("dashboard Start did not return after cleanup")
+			}
+		})
+		return done
+	}
+
+	newNeverHealthyController := func(t *testing.T, ds *DashboardServer, services []ManagedService) (*lifecycleFakeManager, *ServiceReconciler) {
+		t.Helper()
+		fake := newLifecycleFakeManager()
+		fake.healthMode = lifecycleHealthNever
+		close(fake.startRelease)
+		controller := newServiceReconciler(fake, ds.RuntimeState, reconcilerOptions{services: services})
+		ds.SvcCtl = controller
+		return fake, controller
+	}
+
+	t.Run("Codebase never healthy", func(t *testing.T) {
+		ds := New(freeTCPPort(t), t.TempDir(), t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{}
+		fake, controller := newNeverHealthyController(t, ds, []ManagedService{{Name: "codebase", AutoStart: true}})
+		startDashboard(t, ds)
+		select {
+		case <-fake.startCompleted:
+		case <-time.After(time.Second):
+			t.Fatal("Codebase failure injection never completed its first start")
+		}
+		if got := controller.stateOf("codebase"); got != svcStarting {
+			t.Fatalf("never-healthy Codebase state = %q, want starting", got)
+		}
+	})
+
+	t.Run("Headroom never healthy", func(t *testing.T) {
+		binDir := t.TempDir()
+		headroomBin := toolsource.ManagedPath(binDir, toolsource.ToolHeadroom)
+		if err := os.MkdirAll(filepath.Dir(headroomBin), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(headroomBin, []byte("test launcher"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ds := New(freeTCPPort(t), binDir, t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{}
+		fake, controller := newNeverHealthyController(t, ds, []ManagedService{{Name: "headroom", AutoStart: false}})
+		startDashboard(t, ds)
+		select {
+		case <-fake.startCompleted:
+		case <-time.After(time.Second):
+			t.Fatal("Headroom failure injection never completed its first start")
+		}
+		if got := controller.stateOf("headroom"); got != svcStarting {
+			t.Fatalf("never-healthy Headroom state = %q, want starting", got)
+		}
+	})
+
+	t.Run("both optional services unhealthy", func(t *testing.T) {
+		binDir := t.TempDir()
+		headroomBin := toolsource.ManagedPath(binDir, toolsource.ToolHeadroom)
+		if err := os.MkdirAll(filepath.Dir(headroomBin), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(headroomBin, []byte("test launcher"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ds := New(freeTCPPort(t), binDir, t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{}
+		fake, controller := newNeverHealthyController(t, ds, []ManagedService{
+			{Name: "codebase", AutoStart: true},
+			{Name: "headroom", AutoStart: false},
+		})
+		startDashboard(t, ds)
+		select {
+		case <-fake.startCompleted:
+		case <-time.After(time.Second):
+			t.Fatal("combined failure injection never reached the lifecycle fake")
+		}
+		if controller.stateOf("codebase") != svcStarting && controller.stateOf("headroom") != svcStarting {
+			t.Fatalf("neither optional service entered starting: codebase=%q headroom=%q", controller.stateOf("codebase"), controller.stateOf("headroom"))
+		}
+	})
+
+	t.Run("Optimizer and Obsidian without configured client", func(t *testing.T) {
+		ds := New(freeTCPPort(t), t.TempDir(), t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{}
+		startDashboard(t, ds)
+		if clients := ds.RuntimeState.ClientsSnapshot(); len(clients) != 0 {
+			t.Fatalf("unexpected configured clients: %v", clients)
+		}
+		if ds.Optimizer == nil {
+			t.Fatal("dashboard lost its optimizer when no MCP client was configured")
+		}
+	})
+
+	t.Run("Housekeeper and non-critical migration fail after bind", func(t *testing.T) {
+		ds := New(freeTCPPort(t), t.TempDir(), t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{
+			{name: "vault_reconciliation", run: func(context.Context) error { return fmt.Errorf("migration unavailable") }},
+			{name: "housekeeper_start", run: func(context.Context) error { return fmt.Errorf("housekeeper unavailable") }},
+		}
+		startDashboard(t, ds)
+		select {
+		case <-ds.startupDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("failing optional startup tasks did not finish")
+		}
+		snapshot := ds.RuntimeState.Snapshot()
+		errors, ok := snapshot["tool_errors"].(map[string]string)
+		if !ok || errors["startup_vault_reconciliation"] != "migration unavailable" || errors["startup_housekeeper_start"] != "housekeeper unavailable" {
+			t.Fatalf("optional failures were not published: %#v", snapshot["tool_errors"])
+		}
+	})
+}

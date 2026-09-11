@@ -572,39 +572,107 @@ func TestReconcilerPublishesEffectivePort(t *testing.T) {
 	}
 }
 
+// lifecycleHealthMode provides state-driven, OS-independent process health
+// transitions for every lifecycle matrix. No fake mode relies on wall-clock
+// sleeps: tests advance it by observing Status or releasing an explicit gate.
+type lifecycleHealthMode uint8
+
+const (
+	lifecycleHealthHealthy lifecycleHealthMode = iota
+	lifecycleHealthDelayed
+	lifecycleHealthNever
+	lifecycleHealthFlap
+)
+
+// lifecycleFakeManager is the shared deterministic failure-injection executor
+// for Core, Status, and duplicate-runtime coverage. It models successful and
+// failed spawns, delayed/never/flapping health, early process exit, effective
+// port changes, cancellation races, and a deliberately delayed stop.
 type lifecycleFakeManager struct {
-	mu           sync.Mutex
-	status       map[string]*procman.ServiceStatus
-	starts       map[string]int
-	stops        map[string]int
-	restarts     map[string]int
-	startPort    int
-	startErr     error
-	startEntered chan struct{}
-	startRelease chan struct{}
-	enteredOnce  sync.Once
+	mu                     sync.Mutex
+	status                 map[string]*procman.ServiceStatus
+	starts                 map[string]int
+	stops                  map[string]int
+	restarts               map[string]int
+	statusChecks           map[string]int
+	startPort              int
+	startErr               error
+	healthMode             lifecycleHealthMode
+	healthDelayChecks      int
+	exitAfterStatusChecks  int
+	portAfterStatusChecks  int
+	changedPort            int
+	startPublishesOnCancel bool
+	blockStop              bool
+
+	startEntered   chan struct{}
+	startCompleted chan struct{}
+	startCanceled  chan struct{}
+	startRelease   chan struct{}
+	stopEntered    chan struct{}
+	stopRelease    chan struct{}
+	restartEntered chan struct{}
+	enteredOnce    sync.Once
+	completedOnce  sync.Once
+	canceledOnce   sync.Once
+	stopOnce       sync.Once
+	restartOnce    sync.Once
 }
 
 func newLifecycleFakeManager() *lifecycleFakeManager {
 	return &lifecycleFakeManager{
-		status:       map[string]*procman.ServiceStatus{},
-		starts:       map[string]int{},
-		stops:        map[string]int{},
-		restarts:     map[string]int{},
-		startPort:    9749,
-		startEntered: make(chan struct{}),
-		startRelease: make(chan struct{}),
+		status:         map[string]*procman.ServiceStatus{},
+		starts:         map[string]int{},
+		stops:          map[string]int{},
+		restarts:       map[string]int{},
+		statusChecks:   map[string]int{},
+		startPort:      9749,
+		startEntered:   make(chan struct{}),
+		startCompleted: make(chan struct{}),
+		startCanceled:  make(chan struct{}),
+		startRelease:   make(chan struct{}),
+		stopEntered:    make(chan struct{}),
+		stopRelease:    make(chan struct{}),
+		restartEntered: make(chan struct{}),
 	}
 }
 
 func (f *lifecycleFakeManager) Status(name string) *procman.ServiceStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.observedStatusLocked(name)
+}
+
+func (f *lifecycleFakeManager) observedStatusLocked(name string) *procman.ServiceStatus {
 	st := f.status[name]
 	if st == nil {
 		return &procman.ServiceStatus{Name: name}
 	}
 	cp := *st
+	if !cp.Running {
+		return &cp
+	}
+
+	f.statusChecks[name]++
+	checks := f.statusChecks[name]
+	if f.exitAfterStatusChecks > 0 && checks >= f.exitAfterStatusChecks {
+		cp.Running = false
+		cp.Healthy = false
+		f.status[name] = &cp
+		return &cp
+	}
+	if f.portAfterStatusChecks > 0 && checks >= f.portAfterStatusChecks && f.changedPort > 0 {
+		cp.Port = f.changedPort
+		f.status[name] = &cp
+	}
+	switch f.healthMode {
+	case lifecycleHealthDelayed:
+		cp.Healthy = checks > f.healthDelayChecks
+	case lifecycleHealthNever:
+		cp.Healthy = false
+	case lifecycleHealthFlap:
+		cp.Healthy = checks%2 == 0
+	}
 	return &cp
 }
 
@@ -617,26 +685,55 @@ func (f *lifecycleFakeManager) StartContext(ctx context.Context, name string) (*
 	f.starts[name]++
 	f.mu.Unlock()
 	f.enteredOnce.Do(func() { close(f.startEntered) })
+	defer f.completedOnce.Do(func() { close(f.startCompleted) })
+
 	select {
 	case <-f.startRelease:
 	case <-ctx.Done():
+		if f.startPublishesOnCancel {
+			f.mu.Lock()
+			st := f.startedStatusLocked(name)
+			f.status[name] = st
+			cp := *st
+			f.mu.Unlock()
+			f.canceledOnce.Do(func() { close(f.startCanceled) })
+			return &cp, ctx.Err()
+		}
 		return &procman.ServiceStatus{Name: name, Error: ctx.Err().Error()}, ctx.Err()
 	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.startErr != nil {
 		return &procman.ServiceStatus{Name: name, Error: f.startErr.Error(), Port: f.startPort}, f.startErr
 	}
-	st := &procman.ServiceStatus{Name: name, Running: true, Healthy: true, PID: 4242, Port: f.startPort}
+	st := f.startedStatusLocked(name)
 	f.status[name] = st
 	cp := *st
 	return &cp, nil
 }
 
-func (f *lifecycleFakeManager) StopContext(_ context.Context, name string) (*procman.ServiceStatus, error) {
+func (f *lifecycleFakeManager) startedStatusLocked(name string) *procman.ServiceStatus {
+	return &procman.ServiceStatus{
+		Name: name, Running: true, Healthy: f.healthMode == lifecycleHealthHealthy,
+		PID: 4242, Port: f.startPort,
+	}
+}
+
+func (f *lifecycleFakeManager) StopContext(ctx context.Context, name string) (*procman.ServiceStatus, error) {
+	f.mu.Lock()
+	f.stops[name]++
+	f.mu.Unlock()
+	f.stopOnce.Do(func() { close(f.stopEntered) })
+	if f.blockStop {
+		select {
+		case <-f.stopRelease:
+		case <-ctx.Done():
+			return &procman.ServiceStatus{Name: name, Error: ctx.Err().Error()}, ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.stops[name]++
 	st := &procman.ServiceStatus{Name: name, Running: false, Healthy: false, Port: f.startPort}
 	f.status[name] = st
 	cp := *st
@@ -644,6 +741,7 @@ func (f *lifecycleFakeManager) StopContext(_ context.Context, name string) (*pro
 }
 
 func (f *lifecycleFakeManager) RestartContext(ctx context.Context, name string) (*procman.ServiceStatus, error) {
+	f.restartOnce.Do(func() { close(f.restartEntered) })
 	f.mu.Lock()
 	f.restarts[name]++
 	f.mu.Unlock()
@@ -663,6 +761,265 @@ func (f *lifecycleFakeManager) stopCount(name string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stops[name]
+}
+
+func (f *lifecycleFakeManager) restartCount(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.restarts[name]
+}
+
+func (f *lifecycleFakeManager) statusSnapshot(name string) *procman.ServiceStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := f.status[name]
+	if st == nil {
+		return &procman.ServiceStatus{Name: name}
+	}
+	cp := *st
+	return &cp
+}
+
+func TestLifecycleFakeFailureInjectionModes(t *testing.T) {
+	start := func(t *testing.T, fake *lifecycleFakeManager) {
+		t.Helper()
+		close(fake.startRelease)
+		if _, err := fake.StartContext(context.Background(), "codebase"); err != nil {
+			t.Fatalf("StartContext() error = %v", err)
+		}
+	}
+
+	t.Run("delayed never and flapping health", func(t *testing.T) {
+		delayed := newLifecycleFakeManager()
+		delayed.healthMode = lifecycleHealthDelayed
+		delayed.healthDelayChecks = 1
+		start(t, delayed)
+		if delayed.Status("codebase").Healthy {
+			t.Fatal("delayed health became ready before its explicit observation budget")
+		}
+		if !delayed.Status("codebase").Healthy {
+			t.Fatal("delayed health did not become ready after its observation budget")
+		}
+
+		never := newLifecycleFakeManager()
+		never.healthMode = lifecycleHealthNever
+		start(t, never)
+		if never.Status("codebase").Healthy || never.Status("codebase").Healthy {
+			t.Fatal("never-healthy service reported healthy")
+		}
+
+		flap := newLifecycleFakeManager()
+		flap.healthMode = lifecycleHealthFlap
+		start(t, flap)
+		first, second := flap.Status("codebase").Healthy, flap.Status("codebase").Healthy
+		if first == second {
+			t.Fatal("flapping health did not alternate across observations")
+		}
+	})
+
+	t.Run("process exit and mutable port", func(t *testing.T) {
+		exited := newLifecycleFakeManager()
+		exited.exitAfterStatusChecks = 1
+		start(t, exited)
+		if got := exited.Status("codebase"); got.Running {
+			t.Fatalf("process exit injection still reported running: %+v", got)
+		}
+
+		moved := newLifecycleFakeManager()
+		moved.portAfterStatusChecks = 1
+		moved.changedPort = 9750
+		start(t, moved)
+		if got := moved.Status("codebase").Port; got != 9750 {
+			t.Fatalf("mutable port = %d, want 9750", got)
+		}
+	})
+
+	t.Run("delayed stop", func(t *testing.T) {
+		fake := newLifecycleFakeManager()
+		fake.blockStop = true
+		start(t, fake)
+		done := make(chan error, 1)
+		go func() {
+			_, err := fake.StopContext(context.Background(), "codebase")
+			done <- err
+		}()
+		select {
+		case <-fake.stopEntered:
+		case <-time.After(time.Second):
+			t.Fatal("delayed stop did not enter")
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("delayed stop completed before release: %v", err)
+		default:
+		}
+		close(fake.stopRelease)
+		if err := <-done; err != nil {
+			t.Fatalf("delayed stop error = %v", err)
+		}
+		if got := fake.statusSnapshot("codebase"); got.Running {
+			t.Fatalf("stopped fake still reported running: %+v", got)
+		}
+	})
+}
+
+func TestDuplicateRuntimeMatrix(t *testing.T) {
+	t.Run("IDE first DWYT adopts without spawn", func(t *testing.T) {
+		srv := httptestHealthOK(t)
+		defer srv.Close()
+
+		fake := newLifecycleFakeManager()
+		close(fake.startRelease)
+		rs := state.Init(t.TempDir())
+		rc := newServiceReconciler(fake, rs, reconcilerOptions{services: []ManagedService{{
+			Name: "codebase", AutoStart: true, RequestedPort: 9749,
+			HealthURL:        func() string { return srv.URL + "/health" },
+			ValidateIdentity: func(context.Context, string) (bool, error) { return true, nil },
+		}}})
+		if _, err := rc.StartService(context.Background(), "codebase"); err != nil {
+			t.Fatalf("StartService() error = %v", err)
+		}
+		if got := fake.startCount("codebase"); got != 0 {
+			t.Fatalf("IDE-first service was spawned %d times, want 0", got)
+		}
+		if proc, ok := rs.GetProcess("codebase"); !ok || proc.Ownership != ownershipAdopted {
+			t.Fatalf("IDE-first ownership = %+v, want adopted", proc)
+		}
+	})
+
+	t.Run("DWYT first stays single managed runtime", func(t *testing.T) {
+		fake := newLifecycleFakeManager()
+		close(fake.startRelease)
+		rs := state.Init(t.TempDir())
+		rc := newServiceReconciler(fake, rs, reconcilerOptions{services: []ManagedService{{Name: "codebase", AutoStart: true}}})
+		if _, err := rc.StartService(context.Background(), "codebase"); err != nil {
+			t.Fatalf("StartService() error = %v", err)
+		}
+		rc.once(context.Background())
+		if got := fake.startCount("codebase"); got != 1 {
+			t.Fatalf("DWYT-first runtime spawned %d times, want 1", got)
+		}
+		if proc, ok := rs.GetProcess("codebase"); !ok || proc.Ownership != ownershipManaged {
+			t.Fatalf("DWYT-first ownership = %+v, want managed", proc)
+		}
+	})
+
+	t.Run("concurrent starts coalesce", func(t *testing.T) {
+		fake := newLifecycleFakeManager()
+		rs := state.Init(t.TempDir())
+		rc := newServiceReconciler(fake, rs, reconcilerOptions{services: []ManagedService{{Name: "codebase", AutoStart: true}}})
+		results := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, err := rc.StartService(context.Background(), "codebase")
+				results <- err
+			}()
+		}
+		select {
+		case <-fake.startEntered:
+		case <-time.After(time.Second):
+			t.Fatal("concurrent starts did not reach the fake")
+		}
+		close(fake.startRelease)
+		for range 2 {
+			if err := <-results; err != nil {
+				t.Fatalf("StartService() error = %v", err)
+			}
+		}
+		if got := fake.startCount("codebase"); got != 1 {
+			t.Fatalf("concurrent starts spawned %d processes, want 1", got)
+		}
+	})
+
+	t.Run("restart waits for a blocked start", func(t *testing.T) {
+		fake := newLifecycleFakeManager()
+		rs := state.Init(t.TempDir())
+		rc := newServiceReconciler(fake, rs, reconcilerOptions{services: []ManagedService{{Name: "codebase", AutoStart: true}}})
+		startDone := make(chan error, 1)
+		go func() {
+			_, err := rc.StartService(context.Background(), "codebase")
+			startDone <- err
+		}()
+		select {
+		case <-fake.startEntered:
+		case <-time.After(time.Second):
+			t.Fatal("initial start did not reach the fake")
+		}
+
+		restartRequested := make(chan struct{})
+		restartDone := make(chan error, 1)
+		go func() {
+			close(restartRequested)
+			_, err := rc.RestartService(context.Background(), "codebase")
+			restartDone <- err
+		}()
+		<-restartRequested
+		if got := fake.restartCount("codebase"); got != 0 {
+			t.Fatalf("restart crossed the lifecycle lock before start completed: restarts=%d", got)
+		}
+
+		close(fake.startRelease)
+		if err := <-startDone; err != nil {
+			t.Fatalf("initial StartService() error = %v", err)
+		}
+		if err := <-restartDone; err != nil {
+			t.Fatalf("RestartService() error = %v", err)
+		}
+		if got := fake.startCount("codebase"); got != 2 {
+			t.Fatalf("start count after serialized restart = %d, want 2", got)
+		}
+		if got := fake.restartCount("codebase"); got != 1 {
+			t.Fatalf("restart count = %d, want 1", got)
+		}
+		if got := fake.stopCount("codebase"); got != 1 {
+			t.Fatalf("stop count during restart = %d, want 1", got)
+		}
+	})
+
+	t.Run("shutdown drains start that publishes during cancellation", func(t *testing.T) {
+		fake := newLifecycleFakeManager()
+		fake.startPublishesOnCancel = true
+		ds := New(freeTCPPort(t), t.TempDir(), t.TempDir(), "test")
+		ds.startupTasksOverride = []startupTask{}
+		ds.SvcCtl = newServiceReconciler(fake, ds.RuntimeState, reconcilerOptions{
+			services: []ManagedService{{Name: "codebase", AutoStart: true}},
+		})
+		serverDone := make(chan error, 1)
+		go func() { serverDone <- ds.Start() }()
+		if err := waitForDashboard(t, ds.Port, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-fake.startEntered:
+		case <-time.After(time.Second):
+			t.Fatal("dashboard reconciler did not start the managed service")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ds.Shutdown(ctx); err != nil {
+			t.Fatalf("Shutdown() error = %v", err)
+		}
+		select {
+		case <-fake.startCanceled:
+		case <-time.After(time.Second):
+			t.Fatal("blocked start did not observe dashboard cancellation")
+		}
+		select {
+		case err := <-serverDone:
+			if err != nil {
+				t.Fatalf("Start() after shutdown error = %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("dashboard Start did not return after shutdown")
+		}
+		if got := fake.stopCount("codebase"); got != 1 {
+			t.Fatalf("shutdown left a start-race child undrained: stops=%d, want 1", got)
+		}
+		if got := fake.statusSnapshot("codebase"); got.Running {
+			t.Fatalf("shutdown left an orphaned child running: %+v", got)
+		}
+	})
 }
 
 // TestStopManagedChildrenStopsOnlyOwnedProcesses pins the shutdown-drain

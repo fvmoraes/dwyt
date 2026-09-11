@@ -23,6 +23,64 @@ func cleanDWYTHome(e *detect.Env) {
 	fmt.Println("  ✓ DWYT home cleaned (Obsidian vaults preserved)")
 }
 
+// sandboxUninstall is the deliberately narrow lifecycle used by hermetic
+// installer tests. It only touches paths proved to be below sandboxRoot:
+// DWYT-managed state (while retaining protected vaults) and, when supplied,
+// the test launcher. It never terminates processes, edits profiles/PATH, runs
+// package managers, or reaches globally installed tools.
+func sandboxUninstall(e *detect.Env, sandboxRoot, installDir string) error {
+	if e == nil || e.DwytHome == "" {
+		return fmt.Errorf("sandbox uninstall requires a DWYT home")
+	}
+	root, err := filepath.Abs(sandboxRoot)
+	if err != nil || sandboxRoot == "" {
+		return fmt.Errorf("sandbox uninstall requires an absolute-safe root")
+	}
+	home, err := filepath.Abs(e.DwytHome)
+	if err != nil {
+		return fmt.Errorf("resolve DWYT home: %w", err)
+	}
+	if !pathWithin(root, home) {
+		return fmt.Errorf("DWYT home is outside sandbox root: %s", e.DwytHome)
+	}
+	if installDir != "" {
+		bin, err := filepath.Abs(installDir)
+		if err != nil {
+			return fmt.Errorf("resolve sandbox install dir: %w", err)
+		}
+		if !pathWithin(root, bin) {
+			return fmt.Errorf("install directory is outside sandbox root: %s", installDir)
+		}
+	}
+	if !security.IsSafeHome(e.DwytHome) {
+		return fmt.Errorf("unsafe DWYT home path: %s", e.DwytHome)
+	}
+
+	cleanDWYTHome(e)
+	if installDir == "" {
+		return nil
+	}
+	launcher := platform.DWYTLauncherPath(installDir, "dwyt")
+	if err := os.Remove(launcher); err != nil && !os.IsNotExist(err) {
+		// Windows cannot remove the executable currently running this command.
+		// The protected-data contract still holds because CleanHome ran inside
+		// the explicit sandbox; the CI scenario asserts that managed state is
+		// gone and the user-owned vault/config remain intact.
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("remove sandbox launcher: %w", err)
+		}
+	}
+	return nil
+}
+
+func pathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+	return !filepath.IsAbs(rel)
+}
+
 func removeSymlinks(home string) {
 	if runtime.GOOS == "windows" {
 		return

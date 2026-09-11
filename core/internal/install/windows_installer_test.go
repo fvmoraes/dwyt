@@ -31,6 +31,11 @@ func TestWindowsInstallerStopsDaemonTreeBeforeReplacement(t *testing.T) {
 		"& taskkill.exe /F /T /PID $daemonPid",
 		"Stop-DwytDaemon -DaemonPath $dest -DwytHome $dwytHome",
 		"Copy-Item -Path $exe.FullName -Destination $dest -Force",
+		"[string]$DwytHome",
+		"[string]$BinaryPath",
+		"[switch]$NoPath",
+		"if ($BinaryPath)",
+		"if (-not $NoPath)",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("Windows installer is missing required safe-upgrade behavior: %q", want)

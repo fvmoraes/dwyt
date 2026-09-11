@@ -3,6 +3,10 @@
 
 configure_path() {
   header "Configuring PATH..."
+  if [[ "$NO_PATH" == "1" ]]; then
+    info "Skipping PATH configuration (DWYT_NO_PATH=1)"
+    return
+  fi
   detect_shell_rc
   if echo "$PATH" | grep -q "${INSTALL_DIR}"; then
     success "~/.local/bin already in PATH"

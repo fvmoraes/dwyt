@@ -124,7 +124,12 @@ func (ds *DashboardServer) enrichSystemStatusForProject(all *status.SystemStatus
 				if info.State != "" {
 					t.RuntimeState = info.State
 				}
-				if t.Port == 0 && info.Port > 0 {
+				// RuntimeState holds the reconciler's observed effective port. It
+				// must override a probe's requested/stale value so legacy tools
+				// and v2 components describe the same endpoint after a fallback.
+				if info.EffectivePort > 0 {
+					t.Port = info.EffectivePort
+				} else if info.Port > 0 {
 					t.Port = info.Port
 				}
 				if t.Error == "" && info.LastError != "" && info.State != "" && info.State != "healthy" {
