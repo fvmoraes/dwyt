@@ -71,6 +71,6 @@ offline, never a fabricated savings claim.
 
 A supplier supplies. The Optimizer decides.
 
-See also: [codebase-law.md](codebase-law.md) and
-[obsidian-law.md](obsidian-law.md) for the retrieval and memory workflows
+See also: [codebase-law.md](05-codebase-law.md) and
+[obsidian-law.md](06-obsidian-law.md) for the retrieval and memory workflows
 the Optimizer governs.

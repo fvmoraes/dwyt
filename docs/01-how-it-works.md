@@ -117,7 +117,7 @@ dwyt .
 
 `New()` does only the work the Core needs to bind :2737 — everything else
 runs as ordered background tasks after the dashboard is already serving
-(**dashboard-first startup**; see [startup-lifecycle.md](startup-lifecycle.md)).
+(**dashboard-first startup**; see [startup-lifecycle.md](02-startup-lifecycle.md)).
 
 ```
 dwyt daemon
@@ -853,7 +853,7 @@ Shared instruction files such as `AGENTS.md`, `.cursor/rules/dwyt.mdc`,
 4. Headroom     → compatible proxy/cache optimization only
 ```
 
-All generated instruction files also enforce the Codebase Law and Obsidian Law, require append-only safe DWYT blocks, and preserve user content outside managed sections. See [codebase-law.md](codebase-law.md) and [obsidian-law.md](obsidian-law.md).
+All generated instruction files also enforce the Codebase Law and Obsidian Law, require append-only safe DWYT blocks, and preserve user content outside managed sections. See [codebase-law.md](05-codebase-law.md) and [obsidian-law.md](06-obsidian-law.md).
 
 ---
 
@@ -877,7 +877,7 @@ cp dwyt ~/.local/bin/dwyt
 
 ### Automated Releases
 
-DWYT uses **automatic releases on every commit** to `main`. See [release-process.md](release-process.md) for details.
+DWYT uses **automatic releases on every commit** to `main`. See [release-process.md](09-release-process.md) for details.
 
 **Quick Summary:**
 - Every push to `main` triggers a release

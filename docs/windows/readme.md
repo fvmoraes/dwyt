@@ -6,11 +6,11 @@ SHA-256 verification. **Git Bash / WSL are not required.**
 
 ## Pages
 
-- [Installation](./installation.md)
-- [Updating](./update.md)
-- [Troubleshooting](./troubleshooting.md)
-- [Windows Terminal integration](./windows-terminal.md)
-- [PowerShell integration](./powershell.md)
+- [Installation](./01-installation.md)
+- [Updating](./02-update.md)
+- [Troubleshooting](./05-troubleshooting.md)
+- [Windows Terminal integration](./04-windows-terminal.md)
+- [PowerShell integration](./03-powershell.md)
 
 ## Quick start
 
@@ -30,5 +30,5 @@ dwyt .
 | Codebase Memory MCP             | ✅ native binary + checksum |
 | Obsidian MCP + vault            | ✅ native |
 | Headroom proxy                  | ✅ native (needs Python) |
-| RTK terminal compression        | ⚠️ no upstream Windows binary ([details](./troubleshooting.md#rtk)) |
+| RTK terminal compression        | ⚠️ no upstream Windows binary ([details](./05-troubleshooting.md#rtk)) |
 | Obsidian desktop app            | manual download (vault works without it) |

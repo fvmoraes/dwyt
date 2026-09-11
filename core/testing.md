@@ -11,7 +11,7 @@ When finished, save the full context — request, summary, files, decisions,
 actions, commands, errors, outcome, next steps — so future agents inherit
 the state.
 
-See also [`docs/obsidian-law.md`](../docs/obsidian-law.md).
+See also [`../docs/06-obsidian-law.md`](../docs/06-obsidian-law.md).
 
 ## 📋 Test Types
 

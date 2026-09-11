@@ -6,7 +6,7 @@ retrieval, lifecycle, output, cache and cost.
 
 This document is the answer to "which component owns what". If you are looking
 for the HTTP surface, package map and startup flow, read
-[HOW-IT-WORKS](how-it-works.md) instead.
+[HOW-IT-WORKS](01-how-it-works.md) instead.
 
 ---
 
@@ -240,7 +240,7 @@ HTTP equivalents live under `/api/optimizer/*`, `/api/housekeeper/*` and
 
 ### `dwyt_obsidian` and `dwyt_codebase`
 
-See [Obsidian Law](obsidian-law.md) and [Codebase Law](codebase-law.md).
+See [Obsidian Law](06-obsidian-law.md) and [Codebase Law](05-codebase-law.md).
 
 ---
 
@@ -248,7 +248,7 @@ See [Obsidian Law](obsidian-law.md) and [Codebase Law](codebase-law.md).
 
 There is no global tool priority order. Tools act in the stage that calls
 for them, and the Optimizer decides how much context each stage may spend
-(see [Optimizer Law](optimizer-law.md)):
+(see [Optimizer Law](04-optimizer-law.md)):
 
 ```
 PLAN      dwyt_optimizer    budget, output contract, retrieval envelope

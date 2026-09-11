@@ -110,7 +110,7 @@ dwyt .
 ## The Tools
 
 There is no global priority order. Tools are used in the stage that calls
-for them (see the [Optimizer Law](docs/optimizer-law.md)):
+for them (see the [Optimizer Law](docs/04-optimizer-law.md)):
 
 1. **PLAN** — `dwyt_optimizer` establishes the context budget, output contract and retrieval envelope before broad retrieval.
 2. **RETRIEVE** — `dwyt_codebase` supplies current code structure; `dwyt_obsidian` supplies memory, decisions, tasks and handoff context.
@@ -142,7 +142,7 @@ Managed by the internal **ProcessManager**:
 - Dynamic port (9749, falls back to alternatives if occupied)
 - **View Logs** button for real diagnostics on failure
 
-The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/codebase-law.md) and [Tokens Saved](docs/tokens-saved.md).
+The Codebase card shows a local `Tokens Saved` estimate when an index exists, and the global dashboard total includes that estimate. See [Codebase Law](docs/05-codebase-law.md) and [Tokens Saved](docs/07-tokens-saved.md).
 
 ### Obsidian — mandatory memory
 
@@ -186,7 +186,7 @@ Each project gets an **Obsidian vault** at `~/.dwyt/projects/<id>_<project-name>
 | `POST /api/obsidian/summarize` | Rebuild the vault summary |
 | `POST /api/obsidian/context` | Save complete task/session context |
 
-The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/obsidian-law.md) and [Tokens Saved](docs/tokens-saved.md).
+The Obsidian card shows a local `Tokens Saved` estimate based on markdown vault size. See [Obsidian Law](docs/06-obsidian-law.md) and [Tokens Saved](docs/07-tokens-saved.md).
 
 ### Context Optimizer — `dwyt_optimizer`
 
@@ -242,7 +242,7 @@ A proxy/cache optimization for compatible AI clients. DWYT owns the proxy throug
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Each card** shows the tool name, a one-line description, and its real state — lifecycle states come from the service reconciler, so a warming service shows **🟡 Starting** (never a red offline), two consecutive failed probes show 🟡 Degraded, and a state DWYT cannot observe renders as ⚪ Unknown, not offline. Cards fill their grid cell, so each pair aligns perfectly. The savings window defaults to **6h** and auto-refresh to **10s** — a value the backend could not measure renders as "—", never as a fake zero. See [Startup Lifecycle & Service Status](docs/startup-lifecycle.md).
+**Each card** shows the tool name, a one-line description, and its real state — lifecycle states come from the service reconciler, so a warming service shows **🟡 Starting** (never a red offline), two consecutive failed probes show 🟡 Degraded, and a state DWYT cannot observe renders as ⚪ Unknown, not offline. Cards fill their grid cell, so each pair aligns perfectly. The savings window defaults to **6h** and auto-refresh to **10s** — a value the backend could not measure renders as "—", never as a fake zero. See [Startup Lifecycle & Service Status](docs/02-startup-lifecycle.md).
 
 ---
 
@@ -357,9 +357,9 @@ Setup creates or updates these files in the project directory. Local configs wit
 3. **EXECUTE** — RTK prefix for shell commands
 4. **REDUCE** — tool-output compaction, cache guidance, output contracts
 
-The generated instructions enforce the [Optimizer Law](docs/optimizer-law.md), the [Codebase Law](docs/codebase-law.md) and the [Obsidian Law](docs/obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
+The generated instructions enforce the [Optimizer Law](docs/04-optimizer-law.md), the [Codebase Law](docs/05-codebase-law.md) and the [Obsidian Law](docs/06-obsidian-law.md). DWYT updates only its managed blocks and preserves user content outside those blocks.
 
-For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/architecture-v5.md).
+For which component owns what — Optimizer, Brain, Code Intelligence, Housekeeper, Memory Compiler — read [Architecture v5](docs/03-architecture-v5.md).
 
 ---
 
@@ -462,7 +462,7 @@ GET  /api/kiro/power/status
 POST /api/kiro/power/refresh
 ```
 
-See [Kiro Power](docs/kiro-power.md).
+See [Kiro Power](docs/08-kiro-power.md).
 
 ---
 
@@ -555,7 +555,7 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 ### Platform notes
 
 - **Linux / macOS / Windows** all run the dashboard, API, SQLite, MCP servers, Headroom proxy, and the cross-platform process manager natively.
-- **RTK** terminal compression has **no upstream Windows binary**. On Windows, DWYT uses a pre-installed `rtk.exe` if found and otherwise skips it with a clear message — every other feature works normally. See the [Windows troubleshooting guide](docs/windows/troubleshooting.md#rtk).
+- **RTK** terminal compression has **no upstream Windows binary**. On Windows, DWYT uses a pre-installed `rtk.exe` if found and otherwise skips it with a clear message — every other feature works normally. See the [Windows troubleshooting guide](docs/windows/05-troubleshooting.md#rtk).
 
 ---
 
@@ -563,16 +563,16 @@ The `dwyt` binary itself has no dependencies — it's a static Go executable wit
 
 | Document | Contents |
 |---|---|
-| [How It Works](docs/how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
-| [Startup Lifecycle & Service Status](docs/startup-lifecycle.md) | Dashboard-first boot, service reconciler, lifecycle states, honest status rules |
-| [Architecture v5](docs/architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
-| [Optimizer Law](docs/optimizer-law.md) | Context budget, Token ROI, reuse, compression and output invariants |
-| [Codebase Law](docs/codebase-law.md) | Mandatory code-graph workflow for agents |
-| [Obsidian Law](docs/obsidian-law.md) | Mandatory memory workflow for agents |
-| [Tokens Saved](docs/tokens-saved.md) | Where the savings numbers come from; sessions and windows |
-| [Kiro Power](docs/kiro-power.md) | Kiro Power paths, frontmatter, MCP behavior |
-| [Release Process](docs/release-process.md) | Automatic releases, semver conventions (scopes, `!`, BREAKING CHANGE) |
-| [Changelog](docs/CHANGELOG.md) | Notable changes per release |
+| [How It Works](docs/01-how-it-works.md) | Architecture & internals: packages, startup flow, APIs, data layout, build/release |
+| [Startup Lifecycle & Service Status](docs/02-startup-lifecycle.md) | Dashboard-first boot, service reconciler, lifecycle states, honest status rules |
+| [Architecture v5](docs/03-architecture-v5.md) | Component roles and ownership (Optimizer, Brain, Code Intelligence), v5 rules |
+| [Optimizer Law](docs/04-optimizer-law.md) | Context budget, Token ROI, reuse, compression and output invariants |
+| [Codebase Law](docs/05-codebase-law.md) | Mandatory code-graph workflow for agents |
+| [Obsidian Law](docs/06-obsidian-law.md) | Mandatory memory workflow for agents |
+| [Tokens Saved](docs/07-tokens-saved.md) | Where the savings numbers come from; sessions and windows |
+| [Kiro Power](docs/08-kiro-power.md) | Kiro Power paths, frontmatter, MCP behavior |
+| [Release Process](docs/09-release-process.md) | Automatic releases, semver conventions (scopes, `!`, BREAKING CHANGE) |
+| [Changelog](docs/10-changelog.md) | Notable changes per release |
 | [Windows docs](docs/windows/readme.md) | Installation, update, troubleshooting, PowerShell/Terminal notes |
 | [Agent rules](docs/rules/rules.md) | Repo conventions for agents working on DWYT itself |
 

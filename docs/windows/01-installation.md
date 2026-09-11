@@ -72,4 +72,4 @@ servers and instruction files for the AI clients you enable.
 The RTK terminal-compression tool does not publish a Windows binary upstream.
 DWYT will use a pre-installed `rtk.exe` if present (e.g. via WSL or a manual
 build) and otherwise skips it with a clear message — **all other DWYT features
-work normally**. See [troubleshooting](./troubleshooting.md#rtk).
+work normally**. See [troubleshooting](./05-troubleshooting.md#rtk).
