@@ -16,6 +16,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/procman"
 	"github.com/fvmoraes/dwyt/internal/state"
+	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
@@ -253,9 +254,15 @@ func TestAPIServicesStartStopAllUpdatesRuntimeState(t *testing.T) {
 	codebasePort := reserveTestPort(t)
 	headroomPort := reserveTestPort(t)
 	helperArgs := []string{"-test.run=^TestHeadroomStatsProxyHelper$", "--", "--port", "{port}"}
-	pm.Register("codebase", os.Args[0], "/health", codebasePort, helperArgs...)
+	pm.Register("codebase", os.Args[0], codebaseHealthPath, codebasePort, helperArgs...)
 	pm.Register("headroom", os.Args[0], "/health", headroomPort, helperArgs...)
+	// Keep the reconciler away from the developer machine's real codebase
+	// service: adoption probes CodebasePort() and would otherwise adopt the
+	// live daemon on 9749 instead of exercising the spawned helper.
+	previousCodebasePort := status.CodebasePort()
+	status.SetCodebasePort(codebasePort)
 	t.Cleanup(func() {
+		status.SetCodebasePort(previousCodebasePort)
 		_, _ = pm.Stop("codebase")
 		_, _ = pm.Stop("headroom")
 	})

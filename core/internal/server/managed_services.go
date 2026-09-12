@@ -17,6 +17,11 @@ func isManagedService(name string) bool {
 	return name == "codebase" || name == "headroom"
 }
 
+// codebaseHealthPath is the liveness endpoint of codebase-memory-mcp. The CBM
+// HTTP surface has no /health route (it answers 404 there); its graph UI root
+// returns 200 and carries the identity marker in the document title.
+const codebaseHealthPath = "/"
+
 // managedServices is the single policy declaration used by production and by
 // lazily-constructed controllers in focused handler tests.
 func (ds *DashboardServer) managedServices() []ManagedService {
@@ -34,7 +39,7 @@ func (ds *DashboardServer) managedServices() []ManagedService {
 			AutoStart:     true,
 			RequestedPort: codebaseRequested,
 			HealthURL: func() string {
-				return fmt.Sprintf("http://127.0.0.1:%d/health", toolstatus.CodebasePort())
+				return fmt.Sprintf("http://127.0.0.1:%d%s", toolstatus.CodebasePort(), codebaseHealthPath)
 			},
 			ValidateIdentity:     validateHTTPServiceIdentity("codebase"),
 			PublishEffectivePort: toolstatus.SetCodebasePort,
@@ -200,6 +205,13 @@ func validateHTTPServiceIdentity(expected string) func(context.Context, string) 
 		if err != nil {
 			return false, err
 		}
+		// HTML services (codebase-memory-mcp graph UI) carry their marker in
+		// the document title instead of a header or a JSON field.
+		if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/html") {
+			if title := extractHTMLTitle(string(body)); strings.Contains(strings.ToLower(title), expected) {
+				return true, nil
+			}
+		}
 		var payload map[string]any
 		if json.Unmarshal(body, &payload) != nil {
 			return false, nil
@@ -212,4 +224,24 @@ func validateHTTPServiceIdentity(expected string) func(context.Context, string) 
 		}
 		return false, nil
 	}
+}
+
+// extractHTMLTitle returns the text of the first <title> element, or "" when
+// the document has none. Comparison stays case-insensitive at the call site.
+func extractHTMLTitle(body string) string {
+	lower := strings.ToLower(body)
+	start := strings.Index(lower, "<title")
+	if start < 0 {
+		return ""
+	}
+	if gt := strings.Index(lower[start:], ">"); gt >= 0 {
+		start += gt + 1
+	} else {
+		return ""
+	}
+	end := strings.Index(lower[start:], "</title>")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(body[start : start+end])
 }

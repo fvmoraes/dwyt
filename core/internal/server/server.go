@@ -171,7 +171,7 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 	procmanInstance := procman.New(dwytHome)
 	sources := rs.ToolSourcesSnapshot()
 	codebaseBin := toolPathFor(dwytBin, toolsource.ToolCodebase, sources)
-	procmanInstance.Register("codebase", codebaseBin, "/health", 9749, codebaseProcessArgs()...)
+	procmanInstance.Register("codebase", codebaseBin, codebaseHealthPath, 9749, codebaseProcessArgs()...)
 
 	// Obsidian MCP stdio validation moved to a background task
 	// (taskObsidianMCPValidation in startup.go).

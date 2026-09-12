@@ -195,7 +195,7 @@ func newServiceReconciler(pm serviceManager, rs *state.RuntimeState, opts reconc
 	services := opts.services
 	if len(services) == 0 {
 		services = []ManagedService{
-			{Name: "codebase", AutoStart: true, RequestedPort: 9749, HealthURL: func() string { return "http://127.0.0.1:9749/health" }},
+			{Name: "codebase", AutoStart: true, RequestedPort: 9749, HealthURL: func() string { return "http://127.0.0.1:9749" + codebaseHealthPath }},
 			{Name: "headroom", AutoStart: false, RequestedPort: 8787, HealthURL: func() string { return "http://127.0.0.1:8787/health" }},
 		}
 	}
