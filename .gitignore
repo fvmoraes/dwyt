@@ -14,6 +14,7 @@ CLAUDE.md
 plan/
 .agents/
 semantic-review/
+.codebase-memory/
 
 # dwyt start
 *mcp.json
