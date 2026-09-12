@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/fvmoraes/dwyt/internal/detect"
+	"github.com/fvmoraes/dwyt/internal/platform"
 )
 
 func TestSandboxUninstallPreservesVaultAndExternalConfig(t *testing.T) {
@@ -15,7 +16,7 @@ func TestSandboxUninstallPreservesVaultAndExternalConfig(t *testing.T) {
 	installDir := filepath.Join(home, ".local", "bin")
 	vault := filepath.Join(dwytHome, "projects", "project", "vault.md")
 	managed := filepath.Join(dwytHome, "cache", "managed.txt")
-	launcher := filepath.Join(installDir, "dwyt")
+	launcher := platform.DWYTLauncherPath(installDir, "dwyt")
 	externalConfig := filepath.Join(home, ".config", "keep.txt")
 
 	for path, content := range map[string]string{

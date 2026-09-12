@@ -90,7 +90,7 @@ func TestPIDRecordRoundTripAndAtomicReplace(t *testing.T) {
 		}
 	}
 
-	// Readers run while fresh inodes are repeatedly renamed over the target.
+	// Readers run while complete records are repeatedly replaced at the target.
 	// They must observe either complete version, never absence or partial JSON.
 	done := make(chan struct{})
 	readErr := make(chan error, 1)
@@ -104,7 +104,7 @@ func TestPIDRecordRoundTripAndAtomicReplace(t *testing.T) {
 				return
 			default:
 			}
-			data, err := os.ReadFile(path)
+			data, err := readPIDFile(path)
 			if err != nil {
 				readErr <- fmt.Errorf("concurrent read: %w", err)
 				return

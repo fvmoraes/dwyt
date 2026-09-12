@@ -246,7 +246,7 @@ func readPIDRecordFile(path string, requireRegular bool) (pidRecord, pidRecordFo
 		}
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readPIDFile(path)
 	if err != nil {
 		return pidRecord{}, 0, nil, err
 	}

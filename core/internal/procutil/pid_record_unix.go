@@ -36,6 +36,10 @@ func lockPIDRecord(dir, name string) (func() error, error) {
 	}, nil
 }
 
+func readPIDFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
 func replacePIDFile(source, target string) error {
 	return os.Rename(source, target)
 }
