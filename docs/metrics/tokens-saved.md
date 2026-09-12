@@ -52,7 +52,6 @@ labelled local fallback.
 ## Evidence and claims
 
 The deterministic harness, startup-tax baselines, and acceptance evidence are
-explained in [benchmarks](benchmarks.md). The current acceptance record is the
-[scorecard](../../plan/Melhorias_v5.0.x/baseline/scorecard.md). Neither a fixture
+explained in [benchmarks](benchmarks.md). Neither a fixture
 comparison nor a serial microbenchmark is a product savings claim without compatible
 quality, cost, latency, and real-use evidence.
