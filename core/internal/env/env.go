@@ -40,9 +40,12 @@ func Init(dwytHome, dwytBin, dwytData, shellRC, loginRC string) error {
 		errs = append(errs, err)
 	}
 
-	// Symlink/copy the binary so `dwyt` is immediately available. This remains
-	// best-effort because a running executable can be locked on Windows.
-	installBinaryOnPath(dwytBin)
+	// Symlink/copy the binary so `dwyt` is immediately available. A locked
+	// executable can make this incomplete, but startup remains nonfatal and the
+	// caller reports the failure.
+	if err := installBinaryOnPath(dwytBin); err != nil {
+		errs = append(errs, err)
+	}
 
 	if err := errors.Join(errs...); err != nil {
 		return err
@@ -395,14 +398,14 @@ func runCmd(name string, args ...string) ([]byte, error) {
 
 // ── PATH symlink (Unix) / copy (Windows) ─────────────────────────────────────
 
-func installBinaryOnPath(dwytBin string) {
+func installBinaryOnPath(dwytBin string) error {
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return fmt.Errorf("resolve running executable: %w", err)
 	}
 
 	// Resolve the real path — critical on macOS where os.Executable()
-	// may return the symlink itself, causing "too many levels of symbolic links"
+	// may return the symlink itself, causing "too many levels of symbolic links".
 	realExe, err := filepath.EvalSymlinks(exe)
 	if err != nil {
 		realExe = exe // fallback to original if resolution fails
@@ -411,16 +414,25 @@ func installBinaryOnPath(dwytBin string) {
 	if runtime.GOOS == "windows" {
 		dst := filepath.Join(dwytBin, "dwyt.exe")
 		if err := copyFile(realExe, dst); err != nil {
-			fmt.Printf("  ⚠ Não foi possível atualizar %s: %v\n", dst, err)
+			return fmt.Errorf("install Windows launcher %q: %w", dst, err)
 		}
-		return
+		return nil
 	}
 
-	// Unix: symlink into ~/.local/bin (usually already in PATH on modern distros)
-	home, _ := os.UserHomeDir()
+	// Unix: symlink into ~/.local/bin (usually already in PATH on modern distros).
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory for DWYT launcher: %w", err)
+	}
+	if home == "" {
+		return fmt.Errorf("resolve home directory for DWYT launcher: empty home directory")
+	}
 	localBin := filepath.Join(home, ".local", "bin")
-	os.MkdirAll(localBin, 0755)
+	if err := os.MkdirAll(localBin, 0755); err != nil {
+		return fmt.Errorf("create launcher directory %q: %w", localBin, err)
+	}
 
+	var errs []error
 	for _, link := range []string{
 		filepath.Join(localBin, "dwyt"),
 		filepath.Join(dwytBin, "dwyt"),
@@ -433,13 +445,19 @@ func installBinaryOnPath(dwytBin string) {
 		if sameFile(link, realExe) {
 			continue
 		}
-		// Skip if an existing symlink already points to the right place
+		// Skip if an existing symlink already points to the right place.
 		if existing, err := os.Readlink(link); err == nil && existing == realExe {
 			continue
 		}
-		os.Remove(link)
-		os.Symlink(realExe, link)
+		if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove existing launcher %q: %w", link, err))
+			continue
+		}
+		if err := os.Symlink(realExe, link); err != nil {
+			errs = append(errs, fmt.Errorf("create launcher %q -> %q: %w", link, realExe, err))
+		}
 	}
+	return errors.Join(errs...)
 }
 
 // sameFile reports whether two paths resolve to the same on-disk file. It
@@ -475,7 +493,7 @@ func normalizedFilePath(path string) string {
 // attempted. On Windows, a locked destination may reject the direct rename;
 // in that case we move it aside, install the replacement, and restore it if
 // the second rename fails.
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (retErr error) {
 	// This is essential when `dwyt` was launched from dwytBin already. Opening
 	// dst with os.Create would truncate the currently running executable (and
 	// its source handle) before any bytes could be copied.
@@ -486,7 +504,11 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		if closeErr := in.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close source executable %q: %w", src, closeErr))
+		}
+	}()
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
@@ -496,34 +518,53 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	tmpClosed := false
+	defer func() {
+		if !tmpClosed {
+			if closeErr := tmp.Close(); closeErr != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("close temporary executable %q: %w", tmpName, closeErr))
+			}
+		}
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) {
+			retErr = errors.Join(retErr, fmt.Errorf("remove temporary executable %q: %w", tmpName, removeErr))
+		}
+	}()
 
 	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		return err
+		return fmt.Errorf("copy executable %q to %q: %w", src, dst, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return fmt.Errorf("close temporary executable %q: %w", tmpName, err)
 	}
+	tmpClosed = true
 
 	// The normal path is atomic because the temporary lives alongside dst.
 	if err := os.Rename(tmpName, dst); err == nil {
 		return nil
 	} else if _, statErr := os.Stat(dst); statErr != nil {
-		return err
+		return fmt.Errorf("install replacement executable %q: %w", dst, err)
 	}
 
 	// Windows cannot replace a locked executable in one rename. Never delete
 	// the old binary first: move it aside and restore it on any failure.
 	backup := dst + ".old"
-	_ = os.Remove(backup)
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale executable backup %q: %w", backup, err)
+	}
 	if err := os.Rename(dst, backup); err != nil {
 		return fmt.Errorf("move existing executable aside: %w", err)
 	}
 	if err := os.Rename(tmpName, dst); err != nil {
-		_ = os.Rename(backup, dst)
+		if restoreErr := os.Rename(backup, dst); restoreErr != nil {
+			return errors.Join(
+				fmt.Errorf("install replacement executable: %w", err),
+				fmt.Errorf("restore existing executable: %w", restoreErr),
+			)
+		}
 		return fmt.Errorf("install replacement executable: %w", err)
 	}
-	_ = os.Remove(backup) // may still be locked; next update retries cleanup
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove replaced executable backup %q: %w", backup, err)
+	}
 	return nil
 }

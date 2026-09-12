@@ -99,6 +99,7 @@ func runDefault(projectPath string) error {
 
 	if err := env.Init(dwytHome, dwytBin, dwytData, e.ShellRC, e.LoginRC); err != nil {
 		log.Warn("environment setup incomplete; continuing startup", log.Fields{"error": err.Error()})
+		fmt.Printf("  ⚠ Ambiente configurado parcialmente: %v\n", err)
 	}
 
 	if err := integrate.EnsureGitignoreBlock(projectPath); err != nil {

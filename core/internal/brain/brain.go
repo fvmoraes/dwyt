@@ -1345,7 +1345,9 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	pb.Summary = summary
 	pb.UpdatedAt = time.Now()
 	contextFile := filepath.Join(pb.brainDir, "context.md")
-	os.WriteFile(contextFile, []byte(summary), 0644)
+	if err := atomicWriteFile(contextFile, []byte(summary), 0644); err != nil {
+		log.Warn("obsidian: failed to persist summary", log.Fields{"path": contextFile, "error": err.Error()})
+	}
 	return summary
 }
 

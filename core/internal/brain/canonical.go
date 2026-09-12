@@ -526,18 +526,15 @@ func bodyOf(content string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-// joinVault builds a path inside the vault from slash-separated parts, creating
-// the parent directory. Used by the compiler, which writes into the numbered
-// areas without going through UpsertCanonical.
+// joinVault builds a path inside the vault from slash-separated parts. Writers
+// create the parent directory at the point where they can return an I/O error.
 func joinVault(brainDir string, parts ...string) string {
 	segments := make([]string, 0, len(parts)+1)
 	segments = append(segments, brainDir)
 	for _, p := range parts {
 		segments = append(segments, filepath.FromSlash(p))
 	}
-	path := filepath.Join(segments...)
-	os.MkdirAll(filepath.Dir(path), 0755)
-	return path
+	return filepath.Join(segments...)
 }
 
 // readFileString reads a file, returning "" when it does not exist. Callers use
