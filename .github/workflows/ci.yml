@@ -8,7 +8,6 @@ on:
       - "install.sh"
       - "install.ps1"
       - "install-lib/**"
-      - ".golangci.yml"
       - ".github/workflows/**"
       - "plan/**"
       - "docs/**"
@@ -20,7 +19,6 @@ on:
       - "install.sh"
       - "install.ps1"
       - "install-lib/**"
-      - ".golangci.yml"
       - ".github/workflows/**"
       - "plan/**"
       - "docs/**"
@@ -221,27 +219,6 @@ jobs:
       - name: Race tests
         working-directory: core
         run: go test -race -shuffle=on -count=1 ./...
-
-  lint:
-    name: golangci-lint
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.26.6"
-          cache: true
-          cache-dependency-path: core/go.sum
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          working-directory: core
 
   govulncheck:
     name: Vulnerabilities

@@ -162,9 +162,9 @@ func TestAPIEndpoint(t *testing.T) {
 
 The CI matrix (`.github/workflows/ci.yml`) runs the full suite with
 `-shuffle=on` on Linux, macOS and Windows, plus a dedicated race-detector
-job and golangci-lint. Coverage is a gap finder, not a target: cover
-behavior, not lines. The packages with the strictest expectations are the
-concurrency-heavy ones (`procman`, `state`, `server`, `housekeeper`).
+job. Coverage is a gap finder, not a target: cover behavior, not lines.
+The packages with the strictest expectations are the concurrency-heavy ones
+(`procman`, `state`, `server`, `housekeeper`).
 
 ---
 
@@ -238,10 +238,9 @@ go tool pprof cpu.prof
 ## 📊 CI/CD Integration
 
 CI lives in `.github/workflows/ci.yml`: a three-OS test matrix
-(`fail-fast: false`), a race job on Linux/macOS, golangci-lint,
-govulncheck and frontend lint/build. Releases are handled by
-`release.yml` (scope-aware semver). Do not duplicate that logic in ad-hoc
-scripts; extend the workflows instead.
+(`fail-fast: false`), a race job on Linux/macOS, govulncheck and frontend
+lint/build. Releases are handled by `release.yml` (scope-aware semver). Do
+not duplicate that logic in ad-hoc scripts; extend the workflows instead.
 
 ---
 
