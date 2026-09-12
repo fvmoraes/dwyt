@@ -10,6 +10,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -316,10 +317,14 @@ func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map
 		if d == nil || d.UptimeSecs == -1 {
 			continue // tool not installed — skip
 		}
-		ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d))
+		if err := ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d)); err != nil {
+			log.Warn("status metric delta persistence failed", log.Fields{"project": projectPath, "tool": tool, "error": err.Error()})
+		}
 	}
 	// Keep the event log bounded: nothing is queried beyond 7 days.
-	ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix())
+	if err := ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix()); err != nil {
+		log.Warn("status metric event pruning failed", log.Fields{"project": projectPath, "error": err.Error()})
+	}
 }
 
 // applySavingsWindow rewrites every counter on each card to reflect only the
@@ -478,7 +483,7 @@ func isPortOpen(port int) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return true
 }
 
@@ -604,7 +609,7 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, err := client.Get(statsURL); err == nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
 			d.TokensSaved = headroomTokensSaved(stats)

@@ -187,7 +187,7 @@ func windowsEnvContent(dwytHome, dwytBin, dwytData string, headroomPort int) str
 }
 
 func windowsPathJoin(base, name string) string {
-	return strings.TrimRight(base, `\\/`) + `\` + name
+	return strings.TrimRight(base, `\/`) + `\` + name
 }
 
 func powerShellLiteral(value string) string {
@@ -282,10 +282,6 @@ func replaceEnvLine(content, prefix, replacement string) string {
 		content += lineEnding
 	}
 	return content + replacement + lineEnding
-}
-
-func getPowerShellProfile() string {
-	return getPowerShellProfiles()[0]
 }
 
 func getPowerShellProfiles() []string {

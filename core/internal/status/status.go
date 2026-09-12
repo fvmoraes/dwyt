@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -154,10 +155,6 @@ func PollAllWithPaths(codebaseBin, rtkBin, headroomBin string, hasObsidianVault 
 	return s
 }
 
-func pollCBMCP(dwytBin string) ToolStatus {
-	return pollCBMCPPath(platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp"))
-}
-
 func pollCBMCPPath(bin string) ToolStatus {
 	port := CodebasePort()
 	ts := ToolStatus{Name: "codebase-memory-mcp", Status: StateNotInstalled, State: StateNotInstalled}
@@ -201,10 +198,6 @@ func pollCBMCPPath(bin string) ToolStatus {
 	return ts
 }
 
-func pollRTK(dwytBin string) ToolStatus {
-	return pollRTKPath(platform.DWYTLauncherPath(dwytBin, "rtk"))
-}
-
 func pollRTKPath(bin string) ToolStatus {
 	ts := ToolStatus{Name: "rtk", Status: StateNotInstalled, State: StateNotInstalled}
 	if _, err := os.Stat(bin); err != nil {
@@ -223,10 +216,6 @@ func pollRTKPath(bin string) ToolStatus {
 		ts.Error = "binary is present but not responding"
 	}
 	return ts
-}
-
-func pollHeadroom(dwytBin string, port int) ToolStatus {
-	return pollHeadroomPath(platform.DWYTLauncherPath(dwytBin, "headroom"), port)
 }
 
 func pollHeadroomPath(bin string, port int) ToolStatus {
@@ -329,14 +318,18 @@ func GetRTKMetricsForBinary(bin string) *RTKMetrics {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Total commands:") {
-			fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands)
+			if n, _ := fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands); n != 1 {
+				continue
+			}
 		}
 		if strings.HasPrefix(line, "Tokens saved:") {
 			parts := strings.Split(line, "(")
 			val := strings.TrimPrefix(strings.TrimSpace(parts[0]), "Tokens saved:")
 			m.TokensSaved = parseTokenCount(strings.TrimSpace(val))
 			if len(parts) > 1 {
-				fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved)
+				if n, _ := fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved); n != 1 {
+					continue
+				}
 			}
 		}
 	}
@@ -358,7 +351,7 @@ func getHeadroomMetrics(port int, client *http.Client) *HeadroomMetrics {
 	if err != nil {
 		return m
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		m.Running = true
 		var data map[string]any
@@ -403,8 +396,10 @@ func parseTokenCount(s string) int64 {
 		mul = 1_000
 		s = s[:len(s)-1]
 	}
-	var v float64
-	fmt.Sscanf(s, "%f", &v)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
 	return int64(v * float64(mul))
 }
 
@@ -432,14 +427,18 @@ func GetRTKMetricsForPathBinary(bin, projectPath string) *RTKMetrics {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Total commands:") {
-			fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands)
+			if n, _ := fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands); n != 1 {
+				continue
+			}
 		}
 		if strings.HasPrefix(line, "Tokens saved:") {
 			parts := strings.Split(line, "(")
 			val := strings.TrimPrefix(strings.TrimSpace(parts[0]), "Tokens saved:")
 			m.TokensSaved = parseTokenCount(strings.TrimSpace(val))
 			if len(parts) > 1 {
-				fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved)
+				if n, _ := fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved); n != 1 {
+					continue
+				}
 			}
 		}
 	}

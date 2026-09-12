@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +34,9 @@ func (ds *DashboardServer) apiSetupSave(c *gin.Context) {
 
 	data, _ := json.Marshal(config)
 	if ds.Store != nil {
-		ds.Store.SetConfig("setup", string(data))
+		if err := ds.Store.SetConfig("setup", string(data)); err != nil {
+			log.Warn("setup configuration persistence failed after process handoff", log.Fields{"error": err.Error()})
+		}
 	}
 	if ds.RuntimeState != nil {
 		ds.RuntimeState.SetToolSources(config.ToolSources)
@@ -53,7 +56,9 @@ func (ds *DashboardServer) apiSetupLoad(c *gin.Context) {
 		return
 	}
 	var config Config
-	json.Unmarshal([]byte(raw), &config)
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		log.Warn("invalid persisted setup configuration; using defaults", log.Fields{"error": err.Error()})
+	}
 
 	normalizeSetupConfig(&config)
 

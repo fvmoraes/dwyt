@@ -153,12 +153,6 @@ type cacheCapabilityView struct {
 	Note  string `json:"note,omitempty"`
 }
 
-// cacheCapability resolves the active project's provider/model record. It is
-// retained for callers that do not have an explicit dashboard selection.
-func (ds *DashboardServer) cacheCapability() cacheCapabilityView {
-	return ds.cacheCapabilityForProject(ds.currentProjectID())
-}
-
 // cacheCapabilityForProject resolves the capability record for the provider/model
 // most recently seen in a selected project's telemetry, falling back to the
 // generic record when nothing has reported yet.

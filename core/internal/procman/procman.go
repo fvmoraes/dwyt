@@ -77,7 +77,9 @@ const defaultProbeCacheTTL = 1 * time.Second
 
 func New(dwytHome string) *ProcessManager {
 	logDir := filepath.Join(dwytHome, "logs")
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Warn("failed to create process log directory", log.Fields{"path": logDir, "error": err.Error()})
+	}
 	return &ProcessManager{
 		processes:            make(map[string]*ManagedProcess),
 		logDir:               logDir,
@@ -192,15 +194,28 @@ func (pm *ProcessManager) StartContext(ctx context.Context, name string) (*Servi
 	// For services with a healthURL (HTTP-based like codebase UI), we can close stdin.
 	// For stdio-based services, we keep stdin open indefinitely.
 	if mp.HealthURL != "" {
-		stdinPipe, _ := cmd.StdinPipe()
-		defer stdinPipe.Close()
+		stdinPipe, err := cmd.StdinPipe()
+		if err != nil {
+			return &ServiceStatus{
+				Name: name, Status: "error", State: "error",
+				RequestedPort: requestedPort, EffectivePort: effectivePort, Port: effectivePort,
+				Error: fmt.Sprintf("open stdin: %v", err),
+			}, err
+		}
+		defer func() { _ = stdinPipe.Close() }()
 	} else {
 		cmd.Stdin = os.Stdin
 	}
 
 	stdoutPath := filepath.Join(pm.logDir, name+"-stdout.log")
 	stderrPath := filepath.Join(pm.logDir, name+"-stderr.log")
-	os.MkdirAll(filepath.Dir(stdoutPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(stdoutPath), 0755); err != nil {
+		return &ServiceStatus{
+			Name: name, Status: "error", State: "error",
+			RequestedPort: requestedPort, EffectivePort: effectivePort, Port: effectivePort,
+			Error: fmt.Sprintf("create log directory: %v", err),
+		}, err
+	}
 
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -212,7 +227,7 @@ func (pm *ProcessManager) StartContext(ctx context.Context, name string) (*Servi
 	}
 	stderr, err := os.Create(stderrPath)
 	if err != nil {
-		stdout.Close()
+		_ = stdout.Close()
 		return &ServiceStatus{
 			Name: name, Status: "error", State: "error",
 			RequestedPort: requestedPort, EffectivePort: effectivePort, Port: effectivePort,
@@ -303,7 +318,9 @@ func (pm *ProcessManager) StartContext(ctx context.Context, name string) (*Servi
 // process already scrubbed from state.
 func (pm *ProcessManager) startReaper(mp *ManagedProcess, cmd *exec.Cmd, name string, done chan struct{}) {
 	go func() {
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			log.Debug("managed process exited with error", log.Fields{"service": name, "error": err.Error()})
+		}
 		mp.closeLogFiles()
 		mp.mu.Lock()
 		if mp.cmd == cmd {
@@ -341,7 +358,7 @@ func (mp *ManagedProcess) closeLogFiles() {
 	defer mp.logMu.Unlock()
 	for _, f := range mp.logFiles {
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 	}
 	mp.logFiles = nil
@@ -612,7 +629,7 @@ func probeHealthURLContext(ctx context.Context, url string, timeout time.Duratio
 	if err != nil {
 		return false, err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

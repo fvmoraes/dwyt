@@ -175,7 +175,9 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 
 	// Obsidian MCP stdio validation moved to a background task
 	// (taskObsidianMCPValidation in startup.go).
-	os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase"))
+	if err := os.Setenv("CBM_CACHE_DIR", filepath.Join(dwytHome, "codebase")); err != nil {
+		log.Warn("failed to configure codebase cache directory", log.Fields{"error": err.Error()})
+	}
 
 	security.Load(dwytHome)
 	security.InitObsidianConfig(dwytHome)
@@ -257,10 +259,14 @@ func New(port int, dwytBin, dwytHome, releaseVersion string) *DashboardServer {
 		// and it is what gates vault creation above.
 		if project != "" {
 			if _, err := store.GetActiveProject(db.HashPath(project)); err == nil {
-				store.TouchProject(project)
+				if err := store.TouchProject(project); err != nil {
+					log.Warn("failed to refresh active project metadata", log.Fields{"project": project, "error": err.Error()})
+				}
 			}
 		}
-		store.SetConfig("project_path", project)
+		if err := store.SetConfig("project_path", project); err != nil {
+			log.Warn("failed to persist active project path", log.Fields{"project": project, "error": err.Error()})
+		}
 	}
 
 	// Kiro Power reconciliation is optional and therefore starts from the
@@ -494,7 +500,10 @@ func (ds *DashboardServer) apiSSE(c *gin.Context) {
 	for {
 		select {
 		case msg := <-ch:
-			fmt.Fprintf(c.Writer, "event: status\ndata: %s\n\n", msg)
+			if _, err := fmt.Fprintf(c.Writer, "event: status\ndata: %s\n\n", msg); err != nil {
+				log.Debug("SSE client disconnected", log.Fields{"error": err.Error()})
+				return
+			}
 			c.Writer.Flush()
 		case <-c.Request.Context().Done():
 			return

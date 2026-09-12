@@ -402,7 +402,7 @@ func (s *Store) Summarize(projectID string, since time.Time, window string) (Sum
 	if err != nil {
 		return sum, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var input, uncached, cached, cacheWrite, output, reasoning, tool sql.NullInt64
@@ -550,7 +550,7 @@ func (s *Store) summarizeTasks(sum *Summary, projectID string, since time.Time) 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	succeededCost := 0.0
 	succeededTokens := 0
@@ -648,7 +648,7 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []RequestEvent
 	for rows.Next() {
@@ -772,7 +772,7 @@ func (s *Store) ActivityTS(projectID string, since time.Time) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []int64
 	for rows.Next() {
 		var ts int64
@@ -831,7 +831,7 @@ func (s *Store) SessionUsage(projectID string, start, end time.Time) ([]ModelUsa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []ModelUsage
 	for rows.Next() {

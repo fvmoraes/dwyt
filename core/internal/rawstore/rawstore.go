@@ -83,7 +83,7 @@ func New(dwytHome string) (*Store, error) {
 		return nil, fmt.Errorf("rawstore: create %s: %w", dir, err)
 	}
 	// Best-effort tightening of stores created before the permission change.
-	os.Chmod(dir, 0700)
+	_ = os.Chmod(dir, 0700)
 	return &Store{dir: dir}, nil
 }
 
@@ -429,11 +429,11 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmpName := tmp.Name()
 	defer func() {
 		if _, statErr := os.Stat(tmpName); statErr == nil {
-			os.Remove(tmpName)
+			_ = os.Remove(tmpName)
 		}
 	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

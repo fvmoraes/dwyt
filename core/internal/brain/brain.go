@@ -222,12 +222,21 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 	}
 
 	legacyInfo, legacyErr := os.Stat(legacyDir)
-	canonicalInfo, canonicalErr := os.Stat(canonicalDir)
 
-	// No legacy directory → just use the canonical path.
-	if legacyErr != nil || !legacyInfo.IsDir() {
+	// No legacy directory → just use the canonical path. A different stat
+	// failure is not evidence that no legacy data exists, so do not migrate
+	// based on an incomplete filesystem view.
+	if legacyErr != nil {
+		if os.IsNotExist(legacyErr) {
+			return canonicalDir, nil
+		}
+		return "", fmt.Errorf("vault: inspect legacy path %s: %w", legacyDir, legacyErr)
+	}
+	if !legacyInfo.IsDir() {
 		return canonicalDir, nil
 	}
+
+	canonicalInfo, canonicalErr := os.Stat(canonicalDir)
 
 	// Canonical path exists but is NOT a directory (a stray file with an
 	// unlucky name). Renaming onto it would fail on every platform, and
@@ -242,7 +251,7 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 
 	// Canonical directory already exists. Decide which one wins.
 	switch {
-	case canonicalErr != nil || !canonicalInfo.IsDir():
+	case os.IsNotExist(canonicalErr):
 		// Canonical doesn't exist yet → rename legacy into place.
 		if err := os.MkdirAll(projectsDir, 0755); err != nil {
 			return "", fmt.Errorf("vault: prepare projects dir: %w", err)
@@ -258,6 +267,8 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 			log.Warn("vault: obsidian registry update failed", log.Fields{"error": err.Error()})
 		}
 		return canonicalDir, nil
+	case canonicalErr != nil:
+		return "", fmt.Errorf("vault: inspect canonical path %s: %w", canonicalDir, canonicalErr)
 	default:
 		// Both exist. Keep the canonical (newer) directory untouched and
 		// log a warning so the user can decide how to merge.
@@ -1246,13 +1257,16 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	var results []BrainEntry
 	query = strings.ToLower(query)
 
-	if err := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+	walkErr := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("read vault note %s: %w", path, err)
 		}
 		content := string(data)
 		if strings.Contains(strings.ToLower(content), query) {
@@ -1267,8 +1281,9 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 			})
 		}
 		return nil
-	}); err != nil {
-		return nil
+	})
+	if walkErr != nil {
+		log.Warn("obsidian search incomplete", log.Fields{"path": pb.brainDir, "error": walkErr.Error()})
 	}
 
 	sort.Slice(results, func(i, j int) bool {
@@ -1314,19 +1329,26 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	typeCount := map[string]int{}
 
 	if err := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
 		entryType := detectType(pb.brainDir, path)
 		typeCount[entryType]++
 
-		data, _ := os.ReadFile(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read vault note %s: %w", path, err)
+		}
 		content := string(data)
 		if title := extractTitle(content); title != "" {
 			parts = append(parts, title)
 		}
 		return nil
 	}); err != nil {
+		log.Warn("obsidian summary rebuild incomplete", log.Fields{"path": pb.brainDir, "error": err.Error()})
 		return pb.Summary
 	}
 
@@ -1382,7 +1404,10 @@ func (pb *ProjectObsidian) StatsContext(ctx context.Context) (map[string]interfa
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
 		totalFiles++
@@ -1551,12 +1576,16 @@ func CountVaultFiles(dwytHome, projectPath string) (int, bool) {
 		}
 		count := 0
 		if err := filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+			if err != nil {
+				return fmt.Errorf("walk vault path %s: %w", path, err)
+			}
+			if fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 				return nil
 			}
 			count++
 			return nil
 		}); err != nil {
+			log.Warn("vault file count incomplete", log.Fields{"path": baseDir, "error": err.Error()})
 			continue
 		}
 		return count, true

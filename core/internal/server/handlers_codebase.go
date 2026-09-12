@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
@@ -25,7 +26,9 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 		return
 	}
 	if ds.Store != nil {
-		ds.Store.TouchProject(body.Path)
+		if err := ds.Store.TouchProject(body.Path); err != nil {
+			log.Warn("codebase project touch failed", log.Fields{"path": body.Path, "error": err.Error()})
+		}
 	}
 
 	ds.codebaseProgress.mu.Lock()
@@ -92,7 +95,9 @@ func (ds *DashboardServer) apiCodebaseIndex(c *gin.Context) {
 
 			if ds.Store != nil {
 				nodes, edges := countCodebaseGraph(ds.DwytHome, body.Path)
-				ds.Store.MarkIndexed(body.Path, nodes, edges)
+				if err := ds.Store.MarkIndexed(body.Path, nodes, edges); err != nil {
+					log.Warn("codebase index metadata update failed", log.Fields{"path": body.Path, "error": err.Error()})
+				}
 			}
 			ds.creditCodebaseUsage(body.Path)
 		}
@@ -218,7 +223,9 @@ func (ds *DashboardServer) apiCodebaseStatus(c *gin.Context) {
 func (ds *DashboardServer) apiCodebaseLogs(c *gin.Context) {
 	tail := 50
 	if t := c.Query("tail"); t != "" {
-		fmt.Sscanf(t, "%d", &tail)
+		if parsed, err := strconv.Atoi(t); err == nil {
+			tail = parsed
+		}
 	}
 	logs := ds.ProcMan.Logs("codebase", tail)
 	c.Data(200, "text/plain; charset=utf-8", []byte(logs))

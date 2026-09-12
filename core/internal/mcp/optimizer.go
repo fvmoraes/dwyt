@@ -43,7 +43,7 @@ func (gt *OptimizerTools) postJSON(path string, payload interface{}) (string, er
 	if err != nil {
 		return "", fmt.Errorf("%s failed: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return decodeOptimizerResponse(resp, path)
 }
 
@@ -56,7 +56,7 @@ func (gt *OptimizerTools) getJSON(path string, query url.Values) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("%s failed: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return decodeOptimizerResponse(resp, path)
 }
 
@@ -214,7 +214,7 @@ func (gt *OptimizerTools) HousekeeperRun(args map[string]interface{}) (string, e
 	if err != nil {
 		return "", fmt.Errorf("housekeeper run failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return decodeOptimizerResponse(resp, "/housekeeper/run")
 }
 

@@ -9,7 +9,7 @@ func TestComputeBudgetScalesWithComplexityAndPhase(t *testing.T) {
 	medium := ComputeBudget(BudgetProfile{Complexity: ComplexityMedium, Phase: PhaseFix})
 	complex := ComputeBudget(BudgetProfile{Complexity: ComplexityComplex, Phase: PhaseFix})
 
-	if !(trivial.Total < medium.Total && medium.Total < complex.Total) {
+	if trivial.Total >= medium.Total || medium.Total >= complex.Total {
 		t.Fatalf("budget must grow with complexity: %d %d %d", trivial.Total, medium.Total, complex.Total)
 	}
 	if medium.Total != DefaultBudget {

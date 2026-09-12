@@ -519,9 +519,9 @@ func (pb *ProjectObsidian) backfillLifecycle(ctx context.Context, report *V5Migr
 		}
 		if writeErr := os.WriteFile(path, []byte(updated), 0644); writeErr != nil {
 			report.Errors = append(report.Errors, rel+": "+writeErr.Error())
-			return nil
+		} else {
+			report.LifecycleBackfilled++
 		}
-		report.LifecycleBackfilled++
 		return nil
 	}); err != nil && err != filepath.SkipAll {
 		report.Errors = append(report.Errors, "lifecycle backfill walk: "+err.Error())

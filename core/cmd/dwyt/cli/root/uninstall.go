@@ -89,7 +89,10 @@ func removeSymlinks(home string) {
 	for _, name := range []string{"dwyt", "rtk", "headroom", "codebase-memory-mcp"} {
 		link := filepath.Join(localBin, name)
 		if _, err := os.Lstat(link); err == nil {
-			os.Remove(link)
+			if err := os.Remove(link); err != nil {
+				fmt.Printf("  ⚠ Failed to remove symlink %s: %v\n", link, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed symlink: %s\n", link)
 		}
 	}
@@ -104,7 +107,10 @@ func removeRTKData(home string) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
@@ -114,7 +120,10 @@ func removeRTKData(home string) {
 	}
 	for _, b := range bins {
 		if _, err := os.Lstat(b); err == nil {
-			os.Remove(b)
+			if err := os.Remove(b); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", b, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", b)
 		}
 	}
@@ -129,12 +138,15 @@ func removeHeadroomData(home string) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
-	exec.Command("pip", "uninstall", "-y", "headroom-ai").Run()
-	exec.Command("pip3", "uninstall", "-y", "headroom-ai").Run()
+	_ = exec.Command("pip", "uninstall", "-y", "headroom-ai").Run()
+	_ = exec.Command("pip3", "uninstall", "-y", "headroom-ai").Run()
 }
 
 func removeCodebaseData(home string, e *detect.Env) {
@@ -147,14 +159,20 @@ func removeCodebaseData(home string, e *detect.Env) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
 	cbmcpBin := platform.DWYTLauncherPath(e.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(cbmcpBin); err == nil {
-		exec.Command(cbmcpBin, "uninstall", "-y").Run()
-		fmt.Println("  ✓ Codebase agent configs removed")
+		if err := exec.Command(cbmcpBin, "uninstall", "-y").Run(); err != nil {
+			fmt.Printf("  ⚠ Failed to remove Codebase agent configs: %v\n", err)
+		} else {
+			fmt.Println("  ✓ Codebase agent configs removed")
+		}
 	}
 	bins := []string{
 		filepath.Join(home, ".local", "bin", "codebase-memory-mcp"),
@@ -162,7 +180,10 @@ func removeCodebaseData(home string, e *detect.Env) {
 	}
 	for _, b := range bins {
 		if _, err := os.Lstat(b); err == nil {
-			os.Remove(b)
+			if err := os.Remove(b); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", b, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", b)
 		}
 	}
@@ -218,7 +239,10 @@ func removeFromRC(rcFile string) bool {
 	if result == original {
 		return false
 	}
-	os.WriteFile(rcFile, []byte(result), 0644)
+	if err := os.WriteFile(rcFile, []byte(result), 0644); err != nil {
+		fmt.Printf("  ⚠ Failed to clean %s: %v\n", rcFile, err)
+		return false
+	}
 	return true
 }
 
@@ -248,5 +272,7 @@ func removeFromWindowsUserPath(dwytBin string) {
 		}
 	}
 	newPath := strings.Join(filtered, ";")
-	exec.Command("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f").Run()
+	if err := exec.Command("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f").Run(); err != nil {
+		fmt.Printf("  ⚠ Failed to update Windows PATH: %v\n", err)
+	}
 }

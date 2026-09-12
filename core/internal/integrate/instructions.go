@@ -27,13 +27,17 @@ var instructionMarkerPairs = []markerPair{
 	{legacyInstructionMarkerStart, legacyInstructionMarkerEnd},
 }
 
-func writeOrUpdateInstructionFile(path, content string) {
+func writeOrUpdateInstructionFile(path, content string) error {
 	managedBlock, fullBlock := dwytInstructionBlocks(content)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		os.MkdirAll(filepath.Dir(path), 0755)
-		os.WriteFile(path, []byte(fullBlock), 0644)
-		return
+		if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(fullBlock), 0644)
 	}
 
 	current := string(data)
@@ -42,9 +46,9 @@ func writeOrUpdateInstructionFile(path, content string) {
 	}
 	next := upsertManagedBlock(current, managedBlock, fullBlock)
 	if next == current {
-		return
+		return nil
 	}
-	os.WriteFile(path, []byte(next), 0644)
+	return os.WriteFile(path, []byte(next), 0644)
 }
 
 func hasNoManagedInstructionBlock(content string) bool {

@@ -392,7 +392,9 @@ func (ds *DashboardServer) currentContextMarkdown() string {
 	var setup Config
 	if ds.Store != nil {
 		if raw, err := ds.Store.GetConfig("setup"); err == nil {
-			json.Unmarshal([]byte(raw), &setup)
+			if err := json.Unmarshal([]byte(raw), &setup); err != nil {
+				log.Warn("invalid persisted setup in context snapshot", log.Fields{"error": err.Error()})
+			}
 		}
 	}
 	data, _ := json.MarshalIndent(statusPayload, "", "  ")

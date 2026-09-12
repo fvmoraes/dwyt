@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -72,7 +73,9 @@ func (ds *DashboardServer) apiHeadroomStatusPM(c *gin.Context) {
 func (ds *DashboardServer) apiHeadroomLogsPM(c *gin.Context) {
 	tail := 50
 	if t := c.Query("tail"); t != "" {
-		fmt.Sscanf(t, "%d", &tail)
+		if parsed, err := strconv.Atoi(t); err == nil {
+			tail = parsed
+		}
 	}
 	logs := ds.ProcMan.Logs("headroom", tail)
 	c.Data(200, "text/plain; charset=utf-8", []byte(logs))

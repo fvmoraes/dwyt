@@ -139,8 +139,12 @@ func ProbeURLContext(ctx context.Context, url string) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	statusCode := resp.StatusCode
+	if err := resp.Body.Close(); err != nil {
+		log.Warn("health URL probe response body close failed", log.Fields{"url": url, "error": err.Error()})
+		return false
+	}
+	return statusCode == http.StatusOK
 }
 
 func IsPortOccupied(port int) bool {

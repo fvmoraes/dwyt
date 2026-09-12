@@ -3,6 +3,7 @@ package mcpregistry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -747,22 +748,22 @@ func (r *Registry) codexTOMLTables(names []string) string {
 		if !ok {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("[mcp_servers.%s]\n", name))
-		b.WriteString(fmt.Sprintf("command = %q\n", entry.Command))
+		_, _ = fmt.Fprintf(&b, "[mcp_servers.%s]\n", name)
+		_, _ = fmt.Fprintf(&b, "command = %q\n", entry.Command)
 		b.WriteString("args = [")
 		for i, arg := range entry.Args {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(fmt.Sprintf("%q", arg))
+			_, _ = fmt.Fprintf(&b, "%q", arg)
 		}
 		b.WriteString("]\n")
 		b.WriteString("startup_timeout_sec = 20\n")
 		b.WriteString("tool_timeout_sec = 120\n\n")
 		if env := mcpServerEnv(name, entry); len(env) > 0 {
-			b.WriteString(fmt.Sprintf("[mcp_servers.%s.env]\n", name))
+			_, _ = fmt.Fprintf(&b, "[mcp_servers.%s.env]\n", name)
 			for key, value := range env {
-				b.WriteString(fmt.Sprintf("%s = %q\n", key, value))
+				_, _ = fmt.Fprintf(&b, "%s = %q\n", key, value)
 			}
 			b.WriteString("\n")
 		}
@@ -1033,10 +1034,6 @@ func writeMergedMCPJSON(path, serverKey string, managedServers map[string]interf
 	return writeJSONFile(path, config)
 }
 
-func removeLegacyServerKeys(servers map[string]interface{}) {
-	removeLegacyServerKeysFor(servers, nil)
-}
-
 func removeManagedBlock(content, start, end string) string {
 	for {
 		startIdx := strings.Index(content, start)
@@ -1139,13 +1136,16 @@ func (r *Registry) ConfigureMCPContext(ctx context.Context, projectPath string, 
 		backup[k] = v
 	}
 
-	errors := r.syncConfiguredTargetsContext(ctx, projectPath, clients, nil)
+	syncErrors := r.syncConfiguredTargetsContext(ctx, projectPath, clients, nil)
 
-	if len(errors) > 0 {
-		// Rollback: restore registry to pre-sync state
+	if len(syncErrors) > 0 {
+		// Rollback: restore registry to pre-sync state.
 		r.MCPServers = backup
-		r.Save()
-		return fmt.Errorf("sync errors (registry rolled back): %v", errors)
+		syncErr := fmt.Errorf("sync errors: %v", syncErrors)
+		if err := r.Save(); err != nil {
+			return fmt.Errorf("registry rollback persistence failed: %w", errors.Join(syncErr, err))
+		}
+		return fmt.Errorf("%w (registry rolled back)", syncErr)
 	}
 
 	log.Info("mcp configs synced", log.Fields{"project": projectPath})

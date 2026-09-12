@@ -159,10 +159,6 @@ func (r *Registry) syncOpenCodeProject(projectPath string, names []string) error
 	return writeJSONFile(path, config)
 }
 
-func (r *Registry) projectStdioServers(includeType bool) map[string]interface{} {
-	return r.projectStdioServersFor(nil, includeType)
-}
-
 func (r *Registry) projectStdioServersFor(names []string, includeType bool) map[string]interface{} {
 	servers := make(map[string]interface{})
 	for name, entry := range r.entriesForSync(names) {

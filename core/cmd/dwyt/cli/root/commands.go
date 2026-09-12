@@ -78,10 +78,10 @@ var stopCmd = &cobra.Command{
 		// predate PID files. Skipped on Windows (no pkill; PID files suffice).
 		if runtime.GOOS != "windows" {
 			exe, _ := os.Executable()
-			exec.Command("pkill", "-f", exe+" daemon").Run()
-			exec.Command("pkill", "-f", "dwyt.*daemon").Run()
-			exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
-			exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
+			_ = exec.Command("pkill", "-f", exe+" daemon").Run()
+			_ = exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+			_ = exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
+			_ = exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
 		}
 		log.Info("all services stopped")
 		fmt.Println("  \u2713 Servi\u00E7os parados")
@@ -259,11 +259,11 @@ func stopAllProcesses() {
 	// Unix best-effort fallback for pre-PID-file installs.
 	if runtime.GOOS != "windows" {
 		exe, _ := os.Executable()
-		exec.Command("pkill", "-f", exe+" daemon").Run()
-		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
-		exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
-		exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
-		exec.Command("pkill", "-f", filepath.Join(DwytBin, "rtk")).Run()
+		_ = exec.Command("pkill", "-f", exe+" daemon").Run()
+		_ = exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+		_ = exec.Command("pkill", "-f", filepath.Join(DwytBin, "codebase-memory-mcp")).Run()
+		_ = exec.Command("pkill", "-f", filepath.Join(DwytBin, "headroom")).Run()
+		_ = exec.Command("pkill", "-f", filepath.Join(DwytBin, "rtk")).Run()
 	}
 	time.Sleep(500 * time.Millisecond)
 	fmt.Println("  ✓ Processes stopped")

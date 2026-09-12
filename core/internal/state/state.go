@@ -70,7 +70,9 @@ var globalState *RuntimeState
 // Init creates or loads the global runtime state.
 func Init(dwytHome string) *RuntimeState {
 	p := filepath.Join(dwytHome, "state.json")
-	os.MkdirAll(filepath.Dir(p), 0755)
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		log.Warn("state: failed to create state directory", log.Fields{"path": filepath.Dir(p), "error": err.Error()})
+	}
 
 	s := &RuntimeState{
 		Version:     "dev",

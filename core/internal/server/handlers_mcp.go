@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/health"
@@ -121,7 +122,11 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 
 	integrate.Project(body.ProjectPath, clients, ds.DwytBin)
 	if strings.Contains(","+clients+",", ",kiro,") {
-		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath)
+		go func() {
+			if _, err := kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath); err != nil {
+				log.Warn("Kiro Power reconciliation failed", log.Fields{"project": body.ProjectPath, "error": err.Error()})
+			}
+		}()
 	}
 
 	// Report the entry that was actually configured. For the all-servers
@@ -167,7 +172,10 @@ func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
 	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
@@ -189,7 +197,10 @@ func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
 	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
@@ -211,7 +222,10 @@ func (ds *DashboardServer) apiMCPRestart(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
 	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
@@ -243,7 +257,9 @@ func (ds *DashboardServer) apiMCPLogs(c *gin.Context) {
 	name := c.Query("name")
 	tail := 50
 	if t := c.Query("tail"); t != "" {
-		fmt.Sscanf(t, "%d", &tail)
+		if parsed, err := strconv.Atoi(t); err == nil {
+			tail = parsed
+		}
 	}
 	if name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})

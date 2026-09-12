@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 )
@@ -90,7 +89,6 @@ type Server struct {
 	handlers map[string]ToolHandler
 	reader   *bufio.Reader
 	writer   io.Writer
-	logFile  string
 }
 
 func newSchemaServer(name, version string) *Server {
@@ -103,13 +101,6 @@ func newSchemaServer(name, version string) *Server {
 }
 
 func NewServer(name, version string) *Server {
-	logPath := os.Getenv("MCP_LOG")
-	if logPath == "" {
-		home, _ := os.UserHomeDir()
-		logPath = home + "/.dwyt/logs/mcp-" + name + ".log"
-	}
-	os.MkdirAll(filepath.Dir(logPath), 0755)
-
 	server := newSchemaServer(name, version)
 	server.reader = bufio.NewReader(os.Stdin)
 	server.writer = os.Stdout
@@ -252,6 +243,12 @@ func (s *Server) sendError(id interface{}, code int, message string) {
 }
 
 func (s *Server) writeResponse(resp JSONRPCResponse) {
-	data, _ := json.Marshal(resp)
-	fmt.Fprintf(s.writer, "%s\n", string(data))
+	data, err := json.Marshal(resp)
+	if err != nil {
+		log.Error("mcp response marshal failed", log.Fields{"error": err.Error()})
+		return
+	}
+	if _, err := fmt.Fprintf(s.writer, "%s\n", string(data)); err != nil {
+		log.Warn("mcp response write failed", log.Fields{"error": err.Error()})
+	}
 }
