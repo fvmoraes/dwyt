@@ -194,6 +194,7 @@ func dwytInstructions() string {
 		"",
 		"DWYT exposes three local MCPs. **Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.",
 		"Always report concise telemetry promptly with `dwyt_report_usage` after meaningful work so the UI remains accurate; mark `observed` only for provider-reported values.",
+		"Models used must always be informed and populated via `dwyt_report_usage`: model and variant, plus effort — never leave the models-used view empty when you ran requests.",
 		"",
 		"## 1. Optimizer first",
 		"`dwyt_optimizer` — context optimizer for context planning, token budget, output profile, routing, cache guidance, output compaction and raw-data retrieval.",

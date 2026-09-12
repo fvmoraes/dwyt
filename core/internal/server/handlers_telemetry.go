@@ -27,6 +27,8 @@ func (ds *DashboardServer) RecordUsage(u optimizer.Usage) error {
 		TaskID:                    u.TaskID,
 		Provider:                  u.Provider,
 		Model:                     u.Model,
+		Variant:                   u.Variant,
+		Effort:                    u.Effort,
 		Phase:                     u.Phase,
 		InputTokens:               u.InputTokens,
 		UncachedInputTokens:       u.UncachedInputTokens,

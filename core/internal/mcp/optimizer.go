@@ -163,7 +163,7 @@ func (gt *OptimizerTools) GetRaw(args map[string]interface{}) (string, error) {
 // ReportUsage implements dwyt_report_usage.
 func (gt *OptimizerTools) ReportUsage(args map[string]interface{}) (string, error) {
 	payload := map[string]interface{}{}
-	copyString(payload, args, "task_id", "provider", "model", "phase", "cache_key_hash", "prefix_hash")
+	copyString(payload, args, "task_id", "provider", "model", "variant", "effort", "phase", "cache_key_hash", "prefix_hash")
 	copyNumber(payload, args,
 		"input_tokens", "uncached_input_tokens", "cached_input_tokens",
 		"cache_write_tokens", "output_tokens", "reasoning_tokens", "tool_tokens",
@@ -330,6 +330,8 @@ func RegisterOptimizerTools(s *Server) {
 			"task_id":                     {Type: "string", Description: "Task id used with dwyt_context_plan"},
 			"provider":                    {Type: "string", Description: "Provider name"},
 			"model":                       {Type: "string", Description: "Model identifier"},
+			"variant":                     {Type: "string", Description: "Model variant, e.g. flash, mini, max"},
+			"effort":                      {Type: "string", Description: "Reasoning effort level of the request, e.g. low, medium, high"},
 			"phase":                       {Type: "string", Description: "Phase this request belonged to"},
 			"input_tokens":                {Type: "number", Description: "Total input tokens"},
 			"uncached_input_tokens":       {Type: "number", Description: "Input tokens billed as uncached"},

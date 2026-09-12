@@ -238,7 +238,7 @@ export default function SetupWizard() {
       title: t.tools,
       subtitle: `${tools.length} ${t.of} ${TOOLS.length} ${t.selected}`,
       content: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="setup-grid">
           {TOOLS.map(tool => {
             const source = toolSources[tool.id] || { mode: 'dwyt' as const }
             return <div key={tool.id} style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: 5 }}>
@@ -265,7 +265,7 @@ export default function SetupWizard() {
       title: t.clients,
       subtitle: `${ias.length} ${t.of} ${IAS.length} ${t.selected}`,
       content: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="setup-grid-clients">
           {IAS.map(ia => (
             <Toggle key={ia.id} label={ia.label} description={ia.desc}
               checked={ias.includes(ia.id)}
@@ -277,7 +277,7 @@ export default function SetupWizard() {
   ]
 
   return (
-    <div style={{ minHeight: '100vh', padding: '10px 14px', maxWidth: 600, margin: '0 auto' }}>
+    <div className="setup-page" style={{ minHeight: '100vh', padding: '10px 14px', margin: '0 auto' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>

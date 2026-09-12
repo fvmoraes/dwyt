@@ -34,7 +34,11 @@ type RequestEvent struct {
 	TaskID    string `json:"task_id,omitempty"`
 	Provider  string `json:"provider,omitempty"`
 	Model     string `json:"model,omitempty"`
-	Phase     string `json:"phase,omitempty"`
+	// Variant/Effort carry the model variant and reasoning-effort level the
+	// agent reported via dwyt_report_usage. Empty means not reported.
+	Variant string `json:"variant,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Phase   string `json:"phase,omitempty"`
 
 	InputTokens         *int `json:"input_tokens,omitempty"`
 	UncachedInputTokens *int `json:"uncached_input_tokens,omitempty"`
@@ -186,6 +190,15 @@ func (s *Store) migrate() error {
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO telemetry_schema_migrations(version, name, applied_at) VALUES (2, 'metric provenance and compression metadata', ?)`, now); err != nil {
 		return err
 	}
+	if err := ensureRequestEventColumn(tx, "variant", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureRequestEventColumn(tx, "effort", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO telemetry_schema_migrations(version, name, applied_at) VALUES (3, 'model variant and effort', ?)`, now); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -248,15 +261,15 @@ func (s *Store) RecordRequest(e RequestEvent) error {
 
 	_, err = tx.Exec(`
 		INSERT OR REPLACE INTO llm_request_events (
-			id, project_id, task_id, provider, model, phase,
+			id, project_id, task_id, provider, model, variant, effort, phase,
 			input_tokens, uncached_input_tokens, cached_input_tokens,
 			cache_write_tokens, output_tokens, reasoning_tokens, tool_tokens,
 			context_before, context_after, compression_metadata_tokens,
 			estimated_cost_usd, actual_cost_usd,
 			cache_key_hash, prefix_hash, latency_ms, observed, metric_provenance, ts
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.ID, e.ProjectID, nullString(e.TaskID), nullString(e.Provider),
-		nullString(e.Model), nullString(e.Phase),
+		nullString(e.Model), nullString(e.Variant), nullString(e.Effort), nullString(e.Phase),
 		nullInt(e.InputTokens), nullInt(e.UncachedInputTokens), nullInt(e.CachedInputTokens),
 		nullInt(e.CacheWriteTokens), nullInt(e.OutputTokens), nullInt(e.ReasoningTokens),
 		nullInt(e.ToolTokens), nullInt(e.ContextBefore), nullInt(e.ContextAfter),
@@ -636,7 +649,7 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 		limit = 20
 	}
 	rows, err := s.db.Query(`
-		SELECT id, task_id, provider, model, phase,
+		SELECT id, task_id, provider, model, variant, effort, phase,
 		       input_tokens, uncached_input_tokens, cached_input_tokens,
 		       cache_write_tokens, output_tokens, reasoning_tokens, tool_tokens,
 		       context_before, context_after, compression_metadata_tokens,
@@ -653,13 +666,13 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 	var out []RequestEvent
 	for rows.Next() {
 		var e RequestEvent
-		var taskID, provider, model, phase, cacheKeyHash, prefixHash, provenance sql.NullString
+		var taskID, provider, model, variant, effort, phase, cacheKeyHash, prefixHash, provenance sql.NullString
 		var input, uncached, cached, cacheWrite, output, reasoning, tool sql.NullInt64
 		var before, after, compressionMetadata, latency sql.NullInt64
 		var estimated, actual sql.NullFloat64
 		var observed int
 		var ts int64
-		if err := rows.Scan(&e.ID, &taskID, &provider, &model, &phase,
+		if err := rows.Scan(&e.ID, &taskID, &provider, &model, &variant, &effort, &phase,
 			&input, &uncached, &cached, &cacheWrite, &output, &reasoning, &tool,
 			&before, &after, &compressionMetadata, &estimated, &actual,
 			&cacheKeyHash, &prefixHash, &latency, &observed, &provenance, &ts); err != nil {
@@ -669,6 +682,8 @@ func (s *Store) RecentRequests(projectID string, limit int) ([]RequestEvent, err
 		e.TaskID = taskID.String
 		e.Provider = provider.String
 		e.Model = model.String
+		e.Variant = variant.String
+		e.Effort = effort.String
 		e.Phase = phase.String
 		e.CacheKeyHash = cacheKeyHash.String
 		e.PrefixHash = prefixHash.String
@@ -788,7 +803,13 @@ func (s *Store) ActivityTS(projectID string, since time.Time) ([]int64, error) {
 // sums skip events that did not report the field (NULL), so a model that never
 // reported reasoning tokens does not drag an imaginary 0 into the aggregate.
 type ModelUsage struct {
-	Model            string
+	Model string
+	// Variant/Effort identify the exact model configuration the requests ran
+	// with; the session view groups on the triple so different efforts stay
+	// distinct rows instead of blurring into one aggregate.
+	Variant string
+	Effort  string
+
 	Requests         int
 	ObservedRequests int
 	InputTokens      int
@@ -809,10 +830,13 @@ func (m ModelUsage) TotalTokens() int {
 	return m.InputTokens + m.OutputTokens + m.ReasoningTokens
 }
 
-// SessionUsage rolls the request ledger up per model inside [start, end].
+// SessionUsage rolls the request ledger up per model+variant+effort inside
+// [start, end].
 func (s *Store) SessionUsage(projectID string, start, end time.Time) ([]ModelUsage, error) {
 	rows, err := s.db.Query(`
 		SELECT COALESCE(model, ''),
+		       COALESCE(variant, ''),
+		       COALESCE(effort, ''),
 		       COUNT(*),
 		       COALESCE(SUM(observed), 0),
 		       COALESCE(SUM(input_tokens), 0),
@@ -824,7 +848,7 @@ func (s *Store) SessionUsage(projectID string, start, end time.Time) ([]ModelUsa
 		       MIN(ts), MAX(ts)
 		FROM llm_request_events
 		WHERE project_id = ? AND ts >= ? AND ts <= ?
-		GROUP BY model
+		GROUP BY model, variant, effort
 		ORDER BY MIN(ts)`,
 		projectID, start.Unix(), end.Unix(),
 	)
@@ -838,7 +862,7 @@ func (s *Store) SessionUsage(projectID string, start, end time.Time) ([]ModelUsa
 		var m ModelUsage
 		var estimated, actual sql.NullFloat64
 		if err := rows.Scan(
-			&m.Model, &m.Requests, &m.ObservedRequests,
+			&m.Model, &m.Variant, &m.Effort, &m.Requests, &m.ObservedRequests,
 			&m.InputTokens, &m.CachedTokens, &m.OutputTokens, &m.ReasoningTokens,
 			&estimated, &actual, &m.FirstTS, &m.LastTS,
 		); err != nil {

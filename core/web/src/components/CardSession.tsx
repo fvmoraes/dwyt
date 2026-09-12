@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { BadgeText, ToolState } from '../types'
 import { CardHeader, Row, Hr } from './CardParts'
+import { fmtKnown } from '../utils'
 import { getSessionSummary, type SessionSummary } from '../api'
 
 interface Props {
   t: Record<string, string>
   badge: (s: ToolState) => BadgeText
-  fmtN: (n: number | undefined) => string
   projectPath?: string
 }
 
@@ -17,7 +17,7 @@ interface Props {
 // Honesty rules are the dashboard's own: a figure the backend could not measure
 // renders as "—", never as 0. Usage numbers are observed only (providers report
 // them); savings inside the session come from the activity ledger.
-export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
+export default function CardSession({ t, badge, projectPath }: Props) {
   const [session, setSession] = useState<SessionSummary | null>(null)
 
   useEffect(() => {
@@ -53,9 +53,11 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
       : null
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.sessionTitle} color="var(--yellow)" state={state} badgeText={b} />
-      <Hr />
+    <details className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <summary className="card-summary">
+        <CardHeader label={t.sessionTitle} color="var(--yellow)" state={state} badgeText={b} />
+        <Row label={t.sessionSaved} value={fmtKnown(savings?.tokens_saved)} />
+      </summary>
       {!session?.available ? (
         <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
           {session?.reason || t.sessionNone}
@@ -70,11 +72,7 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
             label={t.sessionDuration}
             value={session.session ? fmtDuration(session.session.duration_secs) : '\u2014'}
           />
-          <Row label={t.sessionSaved} value={fmtN(savings?.tokens_saved)} />
-          <Row
-            label={t.sessionMcpCalls}
-            value={fmtN(session.mcp?.calls)}
-          />
+          <Row label={t.sessionMcpCalls} value={fmtKnown(session.mcp?.calls)} />
           <Hr />
           <Row
             label={t.sessionTps}
@@ -98,12 +96,14 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
                 {t.sessionModels}
               </div>
               {llm.models.map(m => (
-                <div key={m.model} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '1px 0' }}>
+                <div key={`${m.model}|${m.variant || ''}|${m.effort || ''}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '1px 0' }}>
                   <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.model || 'unknown'}
+                    {m.variant ? ` · ${m.variant}` : ''}
+                    {m.effort ? ` · ${m.effort}` : ''}
                   </span>
                   <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted)', flexShrink: 0 }}>
-                    {fmtN(m.tokens_total)}
+                    {fmtKnown(m.tokens_total)}
                     {m.share_pct > 0 ? ` \u00B7 ${m.share_pct.toFixed(0)}%` : ''}
                     {m.tokens_per_sec > 0 ? ` \u00B7 ${m.tokens_per_sec.toFixed(1)} t/s` : ''}
                   </span>
@@ -127,7 +127,7 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
                     {fmtWhen(s.started_at)}{' \u00B7 '}{fmtDuration(s.duration_secs)}
                   </span>
                   <span style={{ fontSize: 11, fontFamily: 'monospace', color: s.tokens_saved > 0 ? 'var(--yellow)' : 'var(--muted)' }}>
-                    {s.tokens_saved > 0 ? `\u2193 ${fmtN(s.tokens_saved)}` : '\u2014'}
+                    {s.tokens_saved > 0 ? `\u2193 ${fmtKnown(s.tokens_saved)}` : '\u2014'}
                   </span>
                 </div>
               ))}
@@ -135,7 +135,7 @@ export default function CardSession({ t, badge, fmtN, projectPath }: Props) {
           )}
         </>
       )}
-    </div>
+    </details>
   )
 }
 
@@ -153,7 +153,7 @@ function fmtWhen(iso: string): string {
   if (Number.isNaN(then)) return '\u2014'
   const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000))
   if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 3600) return `${Math.floor(seconds / 3600)}h`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
   return `${Math.floor(seconds / 86400)}d`
 }

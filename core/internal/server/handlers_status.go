@@ -318,6 +318,14 @@ func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map
 		if d == nil || d.UptimeSecs == -1 {
 			continue // tool not installed — skip
 		}
+		// Global-scope details (RTK without .rtk, the shared headroom proxy)
+		// describe lifetime aggregates that are not this project's usage — and
+		// a first poll would record the whole counter as one delta. Recording
+		// them here would let global data resurface through windowed and
+		// session sums, so the per-project ledger stays strictly project-scoped.
+		if d.Scope == "global" {
+			continue
+		}
 		if err := ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d)); err != nil {
 			log.Warn("status metric delta persistence failed", log.Fields{"project": projectPath, "tool": tool, "error": err.Error()})
 		}
@@ -357,6 +365,9 @@ func (ds *DashboardServer) applySavingsWindow(projectPath string, details map[st
 		d.WithoutDWYTTokens = without
 		d.WithDWYTTokens = with
 		d.TokensUsed = with
+		// Every rewritten counter is now a per-project ledger delta, so the
+		// card must never render these values as a global fallback.
+		d.Scope = "project"
 		d.TotalCommands = m["commands"]
 		d.Requests = m["requests"]
 		d.IndexedNodes = m["nodes"]

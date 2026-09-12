@@ -765,7 +765,13 @@ type Usage struct {
 	TaskID   string `json:"task_id,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
-	Phase    string `json:"phase,omitempty"`
+	// Variant distinguishes model variants (e.g. a flash/mini edition) and
+	// Effort the reasoning-effort level the request ran with. Both are
+	// optional: the models-used view groups on model+variant+effort so two
+	// efforts never blur into one row.
+	Variant string `json:"variant,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Phase   string `json:"phase,omitempty"`
 
 	InputTokens         *int `json:"input_tokens,omitempty"`
 	UncachedInputTokens *int `json:"uncached_input_tokens,omitempty"`

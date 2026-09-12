@@ -6,8 +6,8 @@
       "name": "dwyt_optimizer",
       "availability": "measured",
       "tools": 12,
-      "tools_list_result_bytes": 9808,
-      "estimated_tokens": 2452
+      "tools_list_result_bytes": 9994,
+      "estimated_tokens": 2499
     },
     {
       "name": "dwyt_codebase",
@@ -25,7 +25,7 @@
     }
   ],
   "managed_instruction": {
-    "bytes": 3272,
-    "estimated_tokens": 818
+    "bytes": 3444,
+    "estimated_tokens": 861
   }
 }

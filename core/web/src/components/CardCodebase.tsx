@@ -1,5 +1,6 @@
 import type { ComponentStatus, ToolDetail, MCPRegistry, BadgeText, ToolState } from '../types'
 import { CardHeader, ComponentStatusRows, Row, Hr, RepoRow } from './CardParts'
+import { fmtKnown } from '../utils'
 import Button from './Button'
 import MCPFeedbackBanner from './MCPFeedbackBanner'
 
@@ -17,7 +18,6 @@ interface Props {
   component?: ComponentStatus
   getDetail: (n: string) => ToolDetail | undefined
   badge: (s: ToolState) => BadgeText
-  fmtN: (n: number | undefined) => string
   setIndexPath: (v: string) => void
   onIndex: () => void
   onOpenGraph: () => Promise<void>
@@ -25,8 +25,11 @@ interface Props {
   onDismissFeedback?: () => void
 }
 
+// Cards collapse like the dashboard Diagnostics section (native <details>):
+// the summary keeps the identity, live status badge and the first metric
+// (Tokens Saved) visible even while closed.
 export default function CardCodebase(props: Props) {
-  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, component, getDetail, badge, fmtN, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
+  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, component, getDetail, badge, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
   const det = getDetail('codebase-memory-mcp')
   const state = component?.display_state || 'unknown'
   const b = badge(state)
@@ -38,12 +41,12 @@ export default function CardCodebase(props: Props) {
   const configureDisabled = configuringMCP !== ''
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.codeMap} color="var(--green)" state={state} badgeText={b} />
-      <Hr />
-      <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
-      <Row label={t.uptime} value={det?.uptime_label || '—'} />
-      <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
+    <details className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <summary className="card-summary">
+        <CardHeader label={t.codeMap} color="var(--green)" state={state} badgeText={b} />
+        <Row label={t.tokensSavedLabel} value={fmtKnown(det?.tokens_saved)} title={det?.savings_basis} />
+        <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
+      </summary>
       <ComponentStatusRows component={component} t={t} />
       <RepoRow projectName={props.repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
@@ -77,6 +80,6 @@ export default function CardCodebase(props: Props) {
             onClick={onConfigure} />
         </>
       )}
-    </div>
+    </details>
   )
 }

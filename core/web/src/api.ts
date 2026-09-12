@@ -540,6 +540,8 @@ export async function getNetSavings(window = '6h', projectPath?: string): Promis
 
 export interface SessionModel {
   model: string
+  variant?: string
+  effort?: string
   requests: number
   observed_requests: number
   tokens_total: number
