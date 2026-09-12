@@ -46,7 +46,7 @@ func TestSearchV2DefaultsToSmallTopK(t *testing.T) {
 			"Note about caching "+string(rune('a'+i)),
 			"prompt caching details")
 	}
-	results := pb.SearchV2(SearchOptions{Query: "caching"})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "caching"})
 	if len(results) != DefaultSearchLimit {
 		t.Fatalf("expected the default top-k of %d, got %d", DefaultSearchLimit, len(results))
 	}
@@ -58,7 +58,7 @@ func TestSearchV2ExcludesRawByDefault(t *testing.T) {
 	writeNote(t, pb, "debug/inv.md", "type: debug\ndwyt_managed: true\n", "Debug dump", "unique-token everywhere")
 	writeNote(t, pb, "20-decisions/adr.md", "type: decision\ndwyt_managed: true\n", "ADR", "unique-token everywhere")
 
-	results := pb.SearchV2(SearchOptions{Query: "unique-token"})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "unique-token"})
 	for _, r := range results {
 		if r.Type == "log" || r.Type == "debug" {
 			t.Fatalf("raw note %s leaked into the default search", r.ID)
@@ -69,7 +69,7 @@ func TestSearchV2ExcludesRawByDefault(t *testing.T) {
 	}
 
 	// Explicit opt-in must bring them back.
-	withRaw := pb.SearchV2(SearchOptions{Query: "unique-token", IncludeRaw: true})
+	withRaw := mustSearchV2(t, pb, SearchOptions{Query: "unique-token", IncludeRaw: true})
 	if len(withRaw) <= len(results) {
 		t.Fatalf("IncludeRaw should widen the result set: %d vs %d", len(withRaw), len(results))
 	}
@@ -81,7 +81,7 @@ func TestSearchV2ExcludesStaleAndResolvedByDefault(t *testing.T) {
 	writeNote(t, pb, "40-knowledge/resolved.md", "type: knowledge\nstate: resolved\ndwyt_managed: true\n", "Resolved", "widget behaviour")
 	writeNote(t, pb, "40-knowledge/live.md", "type: knowledge\nstate: active\ndwyt_managed: true\n", "Live", "widget behaviour")
 
-	results := pb.SearchV2(SearchOptions{Query: "widget behaviour"})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "widget behaviour"})
 	if len(results) != 1 {
 		t.Fatalf("expected only the active note, got %d: %+v", len(results), titlesOf(results))
 	}
@@ -90,7 +90,7 @@ func TestSearchV2ExcludesStaleAndResolvedByDefault(t *testing.T) {
 	}
 
 	// An explicit empty exclusion set means "give me everything".
-	all := pb.SearchV2(SearchOptions{Query: "widget behaviour", ExcludeState: []string{}})
+	all := mustSearchV2(t, pb, SearchOptions{Query: "widget behaviour", ExcludeState: []string{}})
 	if len(all) != 3 {
 		t.Fatalf("an empty exclusion set should return all three, got %d", len(all))
 	}
@@ -104,13 +104,13 @@ func TestSearchV2ExcludesExpiredByDefault(t *testing.T) {
 		"Expired context", "orphan marker")
 	writeNote(t, pb, "40-knowledge/new.md", "type: knowledge\ndwyt_managed: true\n", "Live", "orphan marker")
 
-	results := pb.SearchV2(SearchOptions{Query: "orphan marker"})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "orphan marker"})
 	for _, r := range results {
 		if r.Title == "Expired context" {
 			t.Fatal("an expired note must not appear in the default search")
 		}
 	}
-	if got := pb.SearchV2(SearchOptions{Query: "orphan marker", IncludeExpired: true}); len(got) <= len(results) {
+	if got := mustSearchV2(t, pb, SearchOptions{Query: "orphan marker", IncludeExpired: true}); len(got) <= len(results) {
 		t.Fatalf("IncludeExpired should widen the set: %d vs %d", len(got), len(results))
 	}
 }
@@ -126,7 +126,7 @@ func TestSearchV2RanksTitleAboveBodyAndCanonicalAboveHistory(t *testing.T) {
 		"prompt cache",
 		"we decided to preserve the stable prefix")
 
-	results := pb.SearchV2(SearchOptions{Query: "prompt cache", PreferCurrent: true})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "prompt cache", PreferCurrent: true})
 	if len(results) == 0 {
 		t.Fatal("no results")
 	}
@@ -145,7 +145,7 @@ func TestSearchV2FiltersByType(t *testing.T) {
 	writeNote(t, pb, "20-decisions/adr.md", "type: decision\ndwyt_managed: true\n", "Alpha", "shared term")
 	writeNote(t, pb, "40-knowledge/k.md", "type: knowledge\ndwyt_managed: true\n", "Beta", "shared term")
 
-	results := pb.SearchV2(SearchOptions{Query: "shared term", Types: []string{"decision"}})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "shared term", Types: []string{"decision"}})
 	if len(results) != 1 || results[0].Type != "decision" {
 		t.Fatalf("type filter ignored: %+v", titlesOf(results))
 	}
@@ -157,7 +157,7 @@ func TestSearchV2RespectsStrictTokenBudget(t *testing.T) {
 	writeNote(t, pb, "40-knowledge/big.md", "type: knowledge\ndwyt_managed: true\n", "needle", big)
 	writeNote(t, pb, "40-knowledge/big2.md", "type: knowledge\ndwyt_managed: true\n", "also needle", big)
 
-	results := pb.SearchV2(SearchOptions{Query: "needle", MaxTokens: 10})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "needle", MaxTokens: 10})
 	if len(results) != 0 {
 		t.Fatalf("a strict budget must not admit an oversized top hit, got %d", len(results))
 	}
@@ -169,7 +169,7 @@ func TestSearchV2NeverExceedsTokenBudgetAndAllowsExplicitZeroCap(t *testing.T) {
 	writeNote(t, pb, "40-knowledge/one.md", "type: knowledge\ndwyt_managed: true\n", "Budget one", body)
 	writeNote(t, pb, "40-knowledge/two.md", "type: knowledge\ndwyt_managed: true\n", "Budget two", body)
 
-	results := pb.SearchV2(SearchOptions{Query: "budget marker", MaxTokens: 100, MaxTokensSet: true})
+	results := mustSearchV2(t, pb, SearchOptions{Query: "budget marker", MaxTokens: 100, MaxTokensSet: true})
 	if len(results) == 0 {
 		t.Fatal("a result that fits the budget should be returned")
 	}
@@ -181,7 +181,7 @@ func TestSearchV2NeverExceedsTokenBudgetAndAllowsExplicitZeroCap(t *testing.T) {
 		t.Fatalf("returned %d tokens with a 100-token cap", spent)
 	}
 
-	if got := pb.SearchV2(SearchOptions{Query: "budget marker", MaxTokens: 0, MaxTokensSet: true}); len(got) != 0 {
+	if got := mustSearchV2(t, pb, SearchOptions{Query: "budget marker", MaxTokens: 0, MaxTokensSet: true}); len(got) != 0 {
 		t.Fatalf("an explicit zero cap must return no results, got %d", len(got))
 	}
 }
@@ -194,9 +194,9 @@ func TestSearchV2IsDeterministic(t *testing.T) {
 			"type: knowledge\ndwyt_managed: true\n",
 			"Note", "identical body about determinism")
 	}
-	first := titlesOf(pb.SearchV2(SearchOptions{Query: "determinism"}))
+	first := titlesOf(mustSearchV2(t, pb, SearchOptions{Query: "determinism"}))
 	for i := 0; i < 3; i++ {
-		got := titlesOf(pb.SearchV2(SearchOptions{Query: "determinism"}))
+		got := titlesOf(mustSearchV2(t, pb, SearchOptions{Query: "determinism"}))
 		if strings.Join(got, "|") != strings.Join(first, "|") {
 			t.Fatalf("ranking is not reproducible:\n%v\n%v", first, got)
 		}
@@ -208,13 +208,13 @@ func TestSearchV2CountsAccessOnlyWhenAsked(t *testing.T) {
 	path := writeNote(t, pb, "40-knowledge/k.md",
 		"type: knowledge\ndwyt_managed: true\n", "Counted", "access marker")
 
-	pb.SearchV2(SearchOptions{Query: "access marker"})
+	mustSearchV2(t, pb, SearchOptions{Query: "access marker"})
 	data, _ := os.ReadFile(path)
 	if ParseLifecycle(string(data)).AccessCount != 0 {
 		t.Fatal("a background search must not inflate access counts")
 	}
 
-	pb.SearchV2(SearchOptions{Query: "access marker", CountAccess: true})
+	mustSearchV2(t, pb, SearchOptions{Query: "access marker", CountAccess: true})
 	data, _ = os.ReadFile(path)
 	if ParseLifecycle(string(data)).AccessCount != 1 {
 		t.Fatal("an agent-facing search should record the access")
@@ -222,9 +222,18 @@ func TestSearchV2CountsAccessOnlyWhenAsked(t *testing.T) {
 }
 
 func TestSearchV2EmptyQueryReturnsNothing(t *testing.T) {
-	if got := testVault(t).SearchV2(SearchOptions{Query: "   "}); len(got) != 0 {
+	if got := mustSearchV2(t, testVault(t), SearchOptions{Query: "   "}); len(got) != 0 {
 		t.Fatalf("an empty query must not return the whole vault, got %d", len(got))
 	}
+}
+
+func mustSearchV2(t *testing.T, pb *ProjectObsidian, opts SearchOptions) []SearchResult {
+	t.Helper()
+	results, err := pb.SearchV2(opts)
+	if err != nil {
+		t.Fatalf("SearchV2(%q): %v", opts.Query, err)
+	}
+	return results
 }
 
 func titlesOf(results []SearchResult) []string {

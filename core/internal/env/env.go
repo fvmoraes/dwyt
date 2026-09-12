@@ -1,6 +1,7 @@
 package env
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,33 +14,60 @@ import (
 
 const defaultHeadroomPort = 8787
 
-func Init(dwytHome, dwytBin, dwytData, shellRC, loginRC string) {
-	os.MkdirAll(dwytHome, 0755)
-	os.MkdirAll(dwytBin, 0755)
-	os.MkdirAll(dwytData, 0755)
-
-	if runtime.GOOS == "windows" {
-		initWindows(dwytHome, dwytBin, dwytData)
-	} else {
-		initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC)
+// Init writes DWYT's managed environment files. It attempts every independent
+// configuration step and returns all configuration failures so callers can warn
+// without aborting startup.
+func Init(dwytHome, dwytBin, dwytData, shellRC, loginRC string) error {
+	var errs []error
+	for _, dir := range []struct {
+		name string
+		path string
+	}{
+		{name: "home", path: dwytHome},
+		{name: "bin", path: dwytBin},
+		{name: "data", path: dwytData},
+	} {
+		if err := os.MkdirAll(dir.path, 0755); err != nil {
+			errs = append(errs, fmt.Errorf("create DWYT %s directory %q: %w", dir.name, dir.path, err))
+		}
 	}
 
-	// Symlink/copy the binary so `dwyt` is immediately available
+	if runtime.GOOS == "windows" {
+		if err := initWindows(dwytHome, dwytBin, dwytData); err != nil {
+			errs = append(errs, err)
+		}
+	} else if err := initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Symlink/copy the binary so `dwyt` is immediately available. This remains
+	// best-effort because a running executable can be locked on Windows.
 	installBinaryOnPath(dwytBin)
 
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
 	fmt.Printf("  ✓ Ambiente configurado\n")
+	return nil
 }
 
 // ── Unix (Linux + macOS) ──────────────────────────────────────────────────────
 
-func initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC string) {
+func initUnix(dwytHome, dwytBin, dwytData, shellRC, loginRC string) error {
 	envFile := filepath.Join(dwytHome, "env.sh")
-	os.WriteFile(envFile, []byte(unixEnvContent(dwytHome, dwytBin, dwytData, defaultHeadroomPort)), 0644)
-
-	injectUnixRC(envFile, shellRC)
-	if loginRC != "" {
-		injectUnixRC(envFile, loginRC)
+	var errs []error
+	if err := os.WriteFile(envFile, []byte(unixEnvContent(dwytHome, dwytBin, dwytData, defaultHeadroomPort)), 0644); err != nil {
+		errs = append(errs, fmt.Errorf("write managed shell environment %q: %w", envFile, err))
 	}
+	if err := injectUnixRC(envFile, shellRC); err != nil {
+		errs = append(errs, err)
+	}
+	if loginRC != "" {
+		if err := injectUnixRC(envFile, loginRC); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func unixEnvContent(dwytHome, dwytBin, dwytData string, headroomPort int) string {
@@ -65,25 +93,37 @@ func posixShellLiteral(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func injectUnixRC(envFile, rcFile string) {
+func injectUnixRC(envFile, rcFile string) error {
 	if rcFile == "" {
-		return
+		return nil
 	}
 	marker := "# dwyt:source"
 	sourceLine := unixSourceLine(envFile)
 
 	data, err := os.ReadFile(rcFile)
 	if err != nil && !os.IsNotExist(err) {
-		return
+		return fmt.Errorf("read shell profile %q: %w", rcFile, err)
 	}
 	if strings.Contains(string(data), marker) {
-		return
+		return nil
 	}
-	f, _ := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		defer f.Close()
-		fmt.Fprintf(f, "\n%s\n%s\n", marker, sourceLine)
+	f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open shell profile %q: %w", rcFile, err)
 	}
+	if _, err := fmt.Fprintf(f, "\n%s\n%s\n", marker, sourceLine); err != nil {
+		if closeErr := f.Close(); closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("write shell profile %q: %w", rcFile, err),
+				fmt.Errorf("close shell profile %q: %w", rcFile, closeErr),
+			)
+		}
+		return fmt.Errorf("write shell profile %q: %w", rcFile, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close shell profile %q: %w", rcFile, err)
+	}
+	return nil
 }
 
 func unixSourceLine(envFile string) string {
@@ -92,21 +132,31 @@ func unixSourceLine(envFile string) string {
 
 // ── Windows ───────────────────────────────────────────────────────────────────
 
-func initWindows(dwytHome, dwytBin, dwytData string) {
+func initWindows(dwytHome, dwytBin, dwytData string) error {
+	var errs []error
 	// 1. Write a PowerShell env file
 	envFile := filepath.Join(dwytHome, "env.ps1")
-	os.WriteFile(envFile, []byte(windowsEnvContent(dwytHome, dwytBin, dwytData, defaultHeadroomPort)), 0644)
+	if err := os.WriteFile(envFile, []byte(windowsEnvContent(dwytHome, dwytBin, dwytData, defaultHeadroomPort)), 0644); err != nil {
+		errs = append(errs, fmt.Errorf("write managed PowerShell environment %q: %w", envFile, err))
+	}
 
 	// 2. Inject into both supported PowerShell profile locations: Windows
 	// PowerShell 5.1 uses Documents/WindowsPowerShell while PowerShell 7+
 	// uses Documents/PowerShell.
 	for _, profile := range getPowerShellProfiles() {
-		os.MkdirAll(filepath.Dir(profile), 0755)
-		injectPowerShellProfileAt(profile, envFile)
+		if err := os.MkdirAll(filepath.Dir(profile), 0755); err != nil {
+			errs = append(errs, fmt.Errorf("create PowerShell profile directory %q: %w", filepath.Dir(profile), err))
+		}
+		if err := injectPowerShellProfileAt(profile, envFile); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	// 3. Add dwytBin to the user PATH via registry (best practice on Windows)
-	addToWindowsUserPath(dwytBin)
+	if err := addToWindowsUserPath(dwytBin); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 // windowsEnvContent is intentionally rendered with PowerShell single-quoted
@@ -247,23 +297,34 @@ func powerShellProfilesForHome(home string) []string {
 	}
 }
 
-func injectPowerShellProfile(envFile string) {
-	injectPowerShellProfileAt(getPowerShellProfile(), envFile)
-}
-
-func injectPowerShellProfileAt(profile, envFile string) {
+func injectPowerShellProfileAt(profile, envFile string) error {
 	marker := "# dwyt:source"
 	line := powerShellProfileSourceLine(envFile)
 
-	data, _ := os.ReadFile(profile)
+	data, err := os.ReadFile(profile)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read PowerShell profile %q: %w", profile, err)
+	}
 	if strings.Contains(string(data), marker) {
-		return
+		return nil
 	}
-	f, _ := os.OpenFile(profile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		defer f.Close()
-		fmt.Fprintf(f, "\r\n%s\r\n%s\r\n", marker, line)
+	f, err := os.OpenFile(profile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open PowerShell profile %q: %w", profile, err)
 	}
+	if _, err := fmt.Fprintf(f, "\r\n%s\r\n%s\r\n", marker, line); err != nil {
+		if closeErr := f.Close(); closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("write PowerShell profile %q: %w", profile, err),
+				fmt.Errorf("close PowerShell profile %q: %w", profile, closeErr),
+			)
+		}
+		return fmt.Errorf("write PowerShell profile %q: %w", profile, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close PowerShell profile %q: %w", profile, err)
+	}
+	return nil
 }
 
 func powerShellProfileSourceLine(envFile string) string {
@@ -272,8 +333,8 @@ func powerShellProfileSourceLine(envFile string) string {
 
 // addToWindowsUserPath adds dir to HKCU\Environment\PATH via reg.exe.
 // This is the standard Windows way — no admin required, persists across sessions.
-func addToWindowsUserPath(dir string) {
-	// Read current user PATH from registry
+func addToWindowsUserPath(dir string) error {
+	// Read current user PATH from registry.
 	out, err := runCmd("reg", "query", `HKCU\Environment`, "/v", "PATH")
 	currentPath := ""
 	if err == nil {
@@ -283,7 +344,7 @@ func addToWindowsUserPath(dir string) {
 	// Already in PATH? Compare semicolon-delimited entries. A substring check
 	// incorrectly treats C:\\dwyt\\binary as if C:\\dwyt\\bin were present.
 	if windowsPathContains(currentPath, dir) {
-		return
+		return nil
 	}
 
 	newPath := dir
@@ -291,7 +352,10 @@ func addToWindowsUserPath(dir string) {
 		newPath = dir + ";" + currentPath
 	}
 
-	runCmd("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f")
+	if _, err := runCmd("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f"); err != nil {
+		return fmt.Errorf("add %q to Windows user PATH: %w", dir, err)
+	}
+	return nil
 }
 
 func windowsPathContains(pathValue, dir string) bool {

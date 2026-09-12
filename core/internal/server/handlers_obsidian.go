@@ -103,7 +103,11 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		opts.ExcludeState = states
 	}
 
-	results := pb.SearchV2(opts)
+	results, err := pb.SearchV2(opts)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "obsidian search: " + err.Error()})
+		return
+	}
 	ds.creditObsidianUsage()
 	c.JSON(200, gin.H{
 		"results":              results,

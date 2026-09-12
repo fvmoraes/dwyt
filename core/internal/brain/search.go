@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -124,10 +125,10 @@ type SearchResult struct {
 }
 
 // SearchV2 runs a selective, deterministic vault search.
-func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
+func (pb *ProjectObsidian) SearchV2(opts SearchOptions) ([]SearchResult, error) {
 	query := strings.ToLower(strings.TrimSpace(opts.Query))
 	if query == "" {
-		return nil
+		return nil, nil
 	}
 	terms := strings.Fields(query)
 
@@ -143,8 +144,11 @@ func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
 	now := time.Now()
 
 	var candidates []SearchResult
-	filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+	if err := filepath.Walk(brainDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
@@ -152,7 +156,7 @@ func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return fmt.Errorf("read vault note %q: %w", path, readErr)
 		}
 		content := string(data)
 		lower := strings.ToLower(content)
@@ -203,7 +207,9 @@ func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
 			State:     state,
 		})
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("obsidian: search vault: %w", err)
+	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Score != candidates[j].Score {
@@ -219,7 +225,7 @@ func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
 	limit := opts.limit()
 	budget := opts.maxTokens()
 	if budget == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]SearchResult, 0, limit)
 	spent := 0
@@ -239,7 +245,7 @@ func (pb *ProjectObsidian) SearchV2(opts SearchOptions) []SearchResult {
 			TouchAccess(r.FilePath, now)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // scoreNote computes the deterministic relevance score. The ranking order from

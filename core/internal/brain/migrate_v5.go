@@ -461,19 +461,22 @@ func legacySnapshotFromNote(content string) CompactSnapshot {
 // housekeeper, which must be a deliberate choice.
 func (pb *ProjectObsidian) backfillLifecycle(ctx context.Context, report *V5MigrationReport, opts V5MigrationOptions) {
 	dir := pb.GetBrainDir()
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
 		if ctx.Err() != nil {
 			return filepath.SkipAll
 		}
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
 			return nil
 		}
-		rel, relErr := filepath.Rel(dir, path)
-		if relErr != nil {
-			return nil
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return fmt.Errorf("relative lifecycle path %q: %w", path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		// Structural notes are excluded: they must never expire, and giving them
@@ -485,7 +488,11 @@ func (pb *ProjectObsidian) backfillLifecycle(ctx context.Context, report *V5Migr
 			return nil
 		}
 
-		content := readFileString(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read lifecycle note %q: %w", rel, err)
+		}
+		content := string(data)
 		if ParseLifecycle(content).Managed {
 			return nil
 		}
@@ -516,7 +523,9 @@ func (pb *ProjectObsidian) backfillLifecycle(ctx context.Context, report *V5Migr
 		}
 		report.LifecycleBackfilled++
 		return nil
-	})
+	}); err != nil && err != filepath.SkipAll {
+		report.Errors = append(report.Errors, "lifecycle backfill walk: "+err.Error())
+	}
 }
 
 // injectFrontmatter adds lifecycle lines to a note's frontmatter, or creates a

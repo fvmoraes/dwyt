@@ -181,7 +181,9 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		pb.RebuildSummary()
 	}
 
-	ensureBrainJSON(baseDir, projectPath)
+	if err := ensureBrainJSON(baseDir, projectPath); err != nil {
+		return nil, err
+	}
 	// vault.json is the durable identity of the vault (project_hash +
 	// project_name + directory_name). It is what allows a future migration to
 	// recover the project name when the registry or runtime state is gone.
@@ -1727,7 +1729,7 @@ type ProjectMeta struct {
 	ObsidianFiles int       `json:"obsidian_files"`
 }
 
-func ensureBrainJSON(baseDir, projectPath string) {
+func ensureBrainJSON(baseDir, projectPath string) error {
 	projFile := filepath.Join(baseDir, "project.json")
 	meta := ProjectMeta{
 		Name:      filepath.Base(projectPath),
@@ -1736,10 +1738,20 @@ func ensureBrainJSON(baseDir, projectPath string) {
 		LastOpen:  time.Now(),
 	}
 	if data, err := os.ReadFile(projFile); err == nil {
-		json.Unmarshal(data, &meta)
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return fmt.Errorf("obsidian: decode project metadata %q: %w", projFile, err)
+		}
 		meta.LastOpen = time.Now()
 		meta.Path = projectPath
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("obsidian: read project metadata %q: %w", projFile, err)
 	}
-	data, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(projFile, data, 0644)
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("obsidian: encode project metadata %q: %w", projFile, err)
+	}
+	if err := os.WriteFile(projFile, data, 0644); err != nil {
+		return fmt.Errorf("obsidian: write project metadata %q: %w", projFile, err)
+	}
+	return nil
 }

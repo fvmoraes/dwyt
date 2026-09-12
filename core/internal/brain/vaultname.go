@@ -2,6 +2,7 @@ package brain
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -267,9 +268,14 @@ func WriteVaultMeta(vaultDir string, meta VaultMeta) error {
 			os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("vault: write temp metadata: %w", err)
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("vault: write temp metadata: %w", errors.Join(
+				writeErr,
+				fmt.Errorf("close temp metadata: %w", closeErr),
+			))
+		}
+		return fmt.Errorf("vault: write temp metadata: %w", writeErr)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("vault: close temp metadata: %w", err)

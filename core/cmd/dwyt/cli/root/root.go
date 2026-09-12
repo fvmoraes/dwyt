@@ -97,7 +97,9 @@ func runDefault(projectPath string) error {
 	banner()
 	fmt.Printf("  Project: %s\n", projectPath)
 
-	env.Init(dwytHome, dwytBin, dwytData, e.ShellRC, e.LoginRC)
+	if err := env.Init(dwytHome, dwytBin, dwytData, e.ShellRC, e.LoginRC); err != nil {
+		log.Warn("environment setup incomplete; continuing startup", log.Fields{"error": err.Error()})
+	}
 
 	if err := integrate.EnsureGitignoreBlock(projectPath); err != nil {
 		log.Warn("gitignore block update failed", log.Fields{"error": err.Error()})

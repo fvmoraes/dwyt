@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,16 +31,36 @@ func (pb *ProjectObsidian) Health() map[string]interface{} {
 	unmanagedNotes := 0
 	now := time.Now()
 
-	filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+	health := map[string]interface{}{
+		"project_id":    projectID,
+		"project_name":  projectName,
+		"vault_dir":     brainDir,
+		"total_notes":   totalNotes,
+		"total_bytes":   totalBytes,
+		"notes_by_area": counts,
+		// Canonical vs session is the health signal that matters: a Brain whose
+		// knowledge lives in session transcripts rather than canonical notes is
+		// the pre-v5 failure mode the spec set out to fix.
+		"canonical_notes":     canonicalNotes,
+		"compact_sessions":    compactSessions,
+		"stale_notes":         staleNotes,
+		"expiring_within_24h": expiringSoon,
+		"unmanaged_notes":     unmanagedNotes,
+		"partial":             false,
+	}
+	if err := filepath.Walk(brainDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
 			return nil
 		}
-		rel, relErr := filepath.Rel(brainDir, path)
-		if relErr != nil {
-			return nil
+		rel, err := filepath.Rel(brainDir, path)
+		if err != nil {
+			return fmt.Errorf("relative health path %q: %w", path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		totalNotes++
@@ -49,7 +70,7 @@ func (pb *ProjectObsidian) Health() map[string]interface{} {
 
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return fmt.Errorf("read health note %q: %w", rel, readErr)
 		}
 		lc := ParseLifecycle(string(data))
 		if !lc.Managed {
@@ -69,24 +90,19 @@ func (pb *ProjectObsidian) Health() map[string]interface{} {
 			compactSessions++
 		}
 		return nil
-	})
-
-	return map[string]interface{}{
-		"project_id":    projectID,
-		"project_name":  projectName,
-		"vault_dir":     brainDir,
-		"total_notes":   totalNotes,
-		"total_bytes":   totalBytes,
-		"notes_by_area": counts,
-		// Canonical vs session is the health signal that matters: a Brain whose
-		// knowledge lives in session transcripts rather than canonical notes is
-		// the pre-v5 failure mode the spec set out to fix.
-		"canonical_notes":     canonicalNotes,
-		"compact_sessions":    compactSessions,
-		"stale_notes":         staleNotes,
-		"expiring_within_24h": expiringSoon,
-		"unmanaged_notes":     unmanagedNotes,
+	}); err != nil {
+		health["partial"] = true
+		health["scan_error"] = err.Error()
 	}
+
+	health["total_notes"] = totalNotes
+	health["total_bytes"] = totalBytes
+	health["canonical_notes"] = canonicalNotes
+	health["compact_sessions"] = compactSessions
+	health["stale_notes"] = staleNotes
+	health["expiring_within_24h"] = expiringSoon
+	health["unmanaged_notes"] = unmanagedNotes
+	return health
 }
 
 // isCanonicalArea reports whether a vault-relative path lives in one of the
