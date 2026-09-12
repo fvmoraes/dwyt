@@ -81,23 +81,30 @@ func StartService(name, bin, healthURL string, args ...string) (*Check, error) {
 func WaitForHTTP(url string, timeout, interval time.Duration) *Check {
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
+	var lastCloseErr error
 
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
+			statusCode := resp.StatusCode
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				lastCloseErr = closeErr
+			} else if statusCode == http.StatusOK {
 				return &Check{Running: true, Healthy: true}
 			}
 		}
 		time.Sleep(interval)
 	}
 
-	return &Check{
+	check := &Check{
 		Running: false,
 		Healthy: false,
 		Error:   fmt.Sprintf("healthcheck timeout after %s", timeout),
 	}
+	if lastCloseErr != nil {
+		check.Error = fmt.Sprintf("healthcheck timeout after %s: response body close failed: %v", timeout, lastCloseErr)
+	}
+	return check
 }
 
 func ProbePort(port int) bool {
@@ -107,8 +114,12 @@ func ProbePort(port int) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	statusCode := resp.StatusCode
+	if err := resp.Body.Close(); err != nil {
+		log.Warn("health probe response body close failed", log.Fields{"port": port, "error": err})
+		return false
+	}
+	return statusCode == http.StatusOK
 }
 
 func ProbeURL(url string) bool {
@@ -177,7 +188,9 @@ func StopAll() {
 	for _, p := range activeProcesses {
 		if p.Cmd != nil && p.Cmd.Process != nil {
 			log.Info("stopping service", log.Fields{"name": p.Name})
-			p.Cmd.Process.Kill()
+			if err := p.Cmd.Process.Kill(); err != nil {
+				log.Warn("failed to stop service", log.Fields{"name": p.Name, "error": err})
+			}
 		}
 	}
 	activeProcesses = nil

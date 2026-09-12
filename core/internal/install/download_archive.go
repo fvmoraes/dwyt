@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,7 +106,9 @@ func writeExecutableReplacingRunning(destPath string, binData []byte) error {
 	defer func() { _ = os.Remove(tmpPath) }()
 
 	if _, err := tmp.Write(binData); err != nil {
-		tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return errors.Join(err, fmt.Errorf("close temporary executable: %w", closeErr))
+		}
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -213,18 +216,29 @@ func extractBinaryFromZip(data []byte, innerNames []string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rc.Close()
-		return io.ReadAll(io.LimitReader(rc, 512<<20)) // 512MB cap
+		binary, readErr := io.ReadAll(io.LimitReader(rc, 512<<20)) // 512MB cap
+		if closeErr := rc.Close(); closeErr != nil {
+			if readErr != nil {
+				return nil, errors.Join(readErr, fmt.Errorf("close zip entry %s: %w", f.Name, closeErr))
+			}
+			return nil, fmt.Errorf("close zip entry %s: %w", f.Name, closeErr)
+		}
+		return binary, readErr
 	}
 	return nil, fmt.Errorf("binary %v not found in zip archive", innerNames)
 }
 
-func extractBinaryFromTarGz(data []byte, innerNames []string) ([]byte, error) {
+func extractBinaryFromTarGz(data []byte, innerNames []string) (binary []byte, retErr error) {
 	gzr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("open gzip: %w", err)
 	}
-	defer gzr.Close()
+	defer func() {
+		if closeErr := gzr.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close gzip reader: %w", closeErr))
+		}
+	}()
+
 	tr := tar.NewReader(gzr)
 	for {
 		hdr, err := tr.Next()

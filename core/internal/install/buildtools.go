@@ -34,6 +34,9 @@ func ensureWindowsBuildTools() error {
 	haveRust := hasRust()
 	haveMSVC := hasMSVCBuildTools()
 	if haveRust && haveMSVC {
+		if err := ensureCargoOnPath(); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -48,7 +51,6 @@ func ensureWindowsBuildTools() error {
 			"--override", "-y --default-toolchain stable --profile minimal"); err != nil {
 			fmt.Printf("  ⚠ headroom: winget Rust falhou: %v\n", err)
 		}
-		ensureCargoOnPath()
 	}
 
 	if !haveMSVC {
@@ -62,6 +64,9 @@ func ensureWindowsBuildTools() error {
 	// Re-check after the install attempts.
 	if !hasRust() {
 		return fmt.Errorf("headroom: Rust ainda indisponível após a instalação automática.\n%s", windowsToolchainHint())
+	}
+	if err := ensureCargoOnPath(); err != nil {
+		return err
 	}
 	if !hasMSVCBuildTools() {
 		return fmt.Errorf("headroom: MSVC C++ build tools (link.exe) ainda indisponíveis após a instalação automática.\n%s", windowsToolchainHint())
@@ -94,19 +99,25 @@ func cargoBinDir() string {
 // ensureCargoOnPath prepends the rustup cargo bin dir to the current process
 // PATH so the immediately-following pip→maturin→cargo build can resolve it
 // without waiting for a new shell session.
-func ensureCargoOnPath() {
+func ensureCargoOnPath() error {
 	dir := cargoBinDir()
 	if dir == "" {
-		return
+		return nil
 	}
 	if _, err := os.Stat(dir); err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("headroom: cannot inspect Cargo path %s: %w", dir, err)
 	}
 	path := os.Getenv("PATH")
 	if strings.Contains(strings.ToLower(path), strings.ToLower(dir)) {
-		return
+		return nil
 	}
-	os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+path); err != nil {
+		return fmt.Errorf("headroom: cannot add Cargo to PATH: %w", err)
+	}
+	return nil
 }
 
 // hasMSVCBuildTools reports whether the MSVC C++ build tools (which provide

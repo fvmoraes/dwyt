@@ -264,7 +264,12 @@ func (h *Housekeeper) runContext(ctx context.Context, depth Depth, acquireLease 
 		return report
 	}
 
-	notes := scanVaultContext(ctx, vault.GetBrainDir())
+	notes, scanErr := scanVaultContext(ctx, vault.GetBrainDir())
+	if scanErr != nil {
+		report.Errors = append(report.Errors, fmt.Sprintf("scan vault: %v", scanErr))
+		report.Duration = time.Since(report.StartedAt).String()
+		return report
+	}
 	report.SessionsTotal = countSessions(notes)
 
 	h.runLight(ctx, &report, vault, notes, cfg)
@@ -694,19 +699,26 @@ type noteRef struct {
 // knowledge before a deletion, and a vault at the session limit is a few
 // hundred small files.
 func scanVault(brainDir string) []noteRef {
-	return scanVaultContext(context.Background(), brainDir)
+	notes, err := scanVaultContext(context.Background(), brainDir)
+	if err != nil {
+		log.Warn("housekeeper: scan vault for status failed", log.Fields{"vault": brainDir, "error": err})
+	}
+	return notes
 }
 
-func scanVaultContext(ctx context.Context, brainDir string) []noteRef {
+func scanVaultContext(ctx context.Context, brainDir string) ([]noteRef, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var out []noteRef
-	filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
 		if ctx.Err() != nil {
 			return filepath.SkipAll
 		}
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+		if err != nil {
+			return fmt.Errorf("inspect vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
@@ -714,11 +726,14 @@ func scanVaultContext(ctx context.Context, brainDir string) []noteRef {
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return fmt.Errorf("read vault note %s: %w", path, readErr)
 		}
 		content := string(data)
 		lc := brain.ParseLifecycle(content)
-		rel, _ := filepath.Rel(brainDir, path)
+		rel, relErr := filepath.Rel(brainDir, path)
+		if relErr != nil {
+			return fmt.Errorf("resolve vault-relative path %s: %w", path, relErr)
+		}
 		activity := lc.LastAccessed
 		if activity.IsZero() {
 			activity = lc.UpdatedAt
@@ -737,8 +752,13 @@ func scanVaultContext(ctx context.Context, brainDir string) []noteRef {
 			Activity:  activity,
 		})
 		return nil
-	})
-	return out
+	}); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return out, ctxErr
+		}
+		return out, fmt.Errorf("walk vault %s: %w", brainDir, err)
+	}
+	return out, nil
 }
 
 // isSessionNote reports whether a note is a compact session snapshot.
