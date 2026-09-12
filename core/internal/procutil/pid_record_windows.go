@@ -112,9 +112,11 @@ func replacePIDFile(source, target string) error {
 		return err
 	}
 
-	// A concurrent reader may have a short-lived handle that does not share
-	// delete access. Retrying the replace preserves atomic publication once the
-	// handle closes instead of treating normal polling as a permanent failure.
+	// A concurrent reader can briefly deny replacement even after the file is
+	// opened with delete sharing: MoveFileEx reports that conflict as either a
+	// sharing violation or access denied, depending on the Windows filesystem.
+	// Retrying preserves atomic publication once the reader closes; a persistent
+	// access error is still returned to the caller.
 	var moveErr error
 	const attempts = 20
 	for attempt := 0; attempt < attempts; attempt++ {
@@ -123,7 +125,7 @@ func replacePIDFile(source, target string) error {
 			targetPtr,
 			windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH,
 		)
-		if moveErr == nil || !errors.Is(moveErr, windows.ERROR_SHARING_VIOLATION) {
+		if moveErr == nil || (!errors.Is(moveErr, windows.ERROR_SHARING_VIOLATION) && !errors.Is(moveErr, windows.ERROR_ACCESS_DENIED)) {
 			return moveErr
 		}
 		if attempt+1 < attempts {
