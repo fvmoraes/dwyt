@@ -37,8 +37,10 @@ func localOriginGuard(port int) gin.HandlerFunc {
 func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 	api := r.Group("/api")
 	api.Use(localOriginGuard(ds.Port))
+	api.Use(vaultLeaseGuard(ds))
 	{
 		api.GET("/health", ds.apiHealth)
+		api.POST("/shutdown", ds.apiShutdown)
 		api.GET("/status", ds.apiStatus)
 		api.GET("/metrics", ds.apiMetrics)
 		api.GET("/events", ds.apiSSE)
@@ -83,6 +85,12 @@ func registerRoutes(r *gin.Engine, ds *DashboardServer) {
 		api.GET("/optimizer/housekeeper", ds.apiOptimizerHousekeeper)
 		api.GET("/optimizer/memory-health", ds.apiOptimizerMemoryHealth)
 		api.POST("/optimizer/route", ds.apiOptimizerRoute)
+		// MCP Startup Tax diagnostics (Fine-Tuning §8): schema overhead,
+		// measured and labeled estimated.
+		api.GET("/diagnostics/startup-tax", ds.apiStartupTax)
+		// Net savings derivation (Fine-Tuning §12.4): gross avoided minus
+		// measurable overheads; unknown stays unknown, never zero.
+		api.GET("/diagnostics/net-savings", ds.apiNetSavings)
 		api.GET("/optimizer/policy", ds.apiOptimizerPolicy)
 		// Brain v5: canonical memory, the Memory Compiler and the Housekeeper.
 		api.GET("/housekeeper/status", ds.apiHousekeeperStatus)

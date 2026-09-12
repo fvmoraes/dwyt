@@ -30,7 +30,9 @@ type Store struct {
 
 func New(path string) (*Store, error) {
 	dir := filepath.Dir(path)
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("sqlite create directory: %w", err)
+	}
 
 	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
@@ -341,7 +343,7 @@ func (s *Store) SumMetricsByTool(projectID string, sinceUnix int64) (map[string]
 // SumMetricsByToolBetween is SumMetricsByTool with an explicit upper bound, so
 // a session (or any historical span) can be summed without bleeding in events
 // that happened after it.
-func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int64) (map[string]map[string]int64, error) {
+func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int64) (out map[string]map[string]int64, err error) {
 	rows, err := s.db.Query(
 		`SELECT tool, metric, COALESCE(SUM(delta), 0)
 		 FROM metric_events WHERE project_id = ? AND ts >= ? AND ts <= ? GROUP BY tool, metric`,
@@ -350,9 +352,13 @@ func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
-	out := make(map[string]map[string]int64)
+	out = make(map[string]map[string]int64)
 	for rows.Next() {
 		var tool, metric string
 		var sum int64
@@ -364,13 +370,13 @@ func (s *Store) SumMetricsByToolBetween(projectID string, startUnix, endUnix int
 		}
 		out[tool][metric] = sum
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // MCPActivityTS returns the (distinct, ascending) timestamps at which MCP usage
 // was credited to a project. Session detection unions these with the other
 // activity ledgers.
-func (s *Store) MCPActivityTS(projectID string, sinceUnix int64) ([]int64, error) {
+func (s *Store) MCPActivityTS(projectID string, sinceUnix int64) (out []int64, err error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT ts FROM mcp_usage_events WHERE project_id = ? AND ts >= ? ORDER BY ts`,
 		projectID, sinceUnix,
@@ -378,8 +384,11 @@ func (s *Store) MCPActivityTS(projectID string, sinceUnix int64) ([]int64, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []int64
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	for rows.Next() {
 		var ts int64
 		if err := rows.Scan(&ts); err != nil {
@@ -392,7 +401,7 @@ func (s *Store) MCPActivityTS(projectID string, sinceUnix int64) ([]int64, error
 
 // MetricActivityTS returns the (distinct, ascending) timestamps at which tool
 // metric growth was recorded for a project.
-func (s *Store) MetricActivityTS(projectID string, sinceUnix int64) ([]int64, error) {
+func (s *Store) MetricActivityTS(projectID string, sinceUnix int64) (out []int64, err error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT ts FROM metric_events WHERE project_id = ? AND ts >= ? ORDER BY ts`,
 		projectID, sinceUnix,
@@ -400,8 +409,11 @@ func (s *Store) MetricActivityTS(projectID string, sinceUnix int64) ([]int64, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []int64
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	for rows.Next() {
 		var ts int64
 		if err := rows.Scan(&ts); err != nil {
@@ -423,7 +435,11 @@ func (s *Store) MCPUsageBetween(projectID string, startUnix, endUnix int64) (cal
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	byTool = map[string]int64{}
 	for rows.Next() {
@@ -460,16 +476,19 @@ func (s *Store) MarkIndexed(path string, nodes, edges int) error {
 	return err
 }
 
-func (s *Store) ListProjects() ([]*Project, error) {
+func (s *Store) ListProjects() (projects []*Project, err error) {
 	rows, err := s.db.Query(
 		`SELECT id, path, name, created_at, last_open, indexed_at, nodes, edges FROM projects WHERE removed = 0 ORDER BY last_open DESC`,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
-	var projects []*Project
 	for rows.Next() {
 		p := &Project{}
 		var indexedAt sql.NullString
@@ -485,7 +504,7 @@ func (s *Store) ListProjects() ([]*Project, error) {
 		}
 		projects = append(projects, p)
 	}
-	return projects, nil
+	return projects, rows.Err()
 }
 
 func (s *Store) SetConfig(key, value string) error {

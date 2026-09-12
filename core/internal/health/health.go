@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -80,23 +81,30 @@ func StartService(name, bin, healthURL string, args ...string) (*Check, error) {
 func WaitForHTTP(url string, timeout, interval time.Duration) *Check {
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
+	var lastCloseErr error
 
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
+			statusCode := resp.StatusCode
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				lastCloseErr = closeErr
+			} else if statusCode == http.StatusOK {
 				return &Check{Running: true, Healthy: true}
 			}
 		}
 		time.Sleep(interval)
 	}
 
-	return &Check{
+	check := &Check{
 		Running: false,
 		Healthy: false,
 		Error:   fmt.Sprintf("healthcheck timeout after %s", timeout),
 	}
+	if lastCloseErr != nil {
+		check.Error = fmt.Sprintf("healthcheck timeout after %s: response body close failed: %v", timeout, lastCloseErr)
+	}
+	return check
 }
 
 func ProbePort(port int) bool {
@@ -106,18 +114,37 @@ func ProbePort(port int) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	statusCode := resp.StatusCode
+	if err := resp.Body.Close(); err != nil {
+		log.Warn("health probe response body close failed", log.Fields{"port": port, "error": err})
+		return false
+	}
+	return statusCode == http.StatusOK
 }
 
 func ProbeURL(url string) bool {
+	return ProbeURLContext(context.Background(), url)
+}
+
+func ProbeURLContext(ctx context.Context, url string) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
-	return resp.StatusCode == 200
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	statusCode := resp.StatusCode
+	if err := resp.Body.Close(); err != nil {
+		log.Warn("health URL probe response body close failed", log.Fields{"url": url, "error": err.Error()})
+		return false
+	}
+	return statusCode == http.StatusOK
 }
 
 func IsPortOccupied(port int) bool {
@@ -133,21 +160,41 @@ func IsPortOccupied(port int) bool {
 	return false
 }
 
-func FindFreePort(defaultPort int) int {
-	for offset := 0; offset < 5; offset++ {
+// ErrPortConflict reports that none of the bounded candidate ports can be
+// reserved. Callers must surface/degrade this condition instead of retrying an
+// already-occupied requested port through a full health timeout.
+var ErrPortConflict = fmt.Errorf("no free port in bounded candidate range")
+
+func FindFreePortE(defaultPort int) (int, error) {
+	if defaultPort <= 0 || defaultPort > 65535 {
+		return defaultPort, nil
+	}
+	for offset := 0; offset < 5 && defaultPort+offset <= 65535; offset++ {
 		port := defaultPort + offset
 		if !IsPortOccupied(port) {
-			return port
+			return port, nil
 		}
 	}
-	return defaultPort
+	return 0, fmt.Errorf("%w starting at %d", ErrPortConflict, defaultPort)
+}
+
+// FindFreePort is the compatibility helper for advisory callers. Lifecycle
+// code must use FindFreePortE so exhaustion is never converted into a port.
+func FindFreePort(defaultPort int) int {
+	port, err := FindFreePortE(defaultPort)
+	if err != nil {
+		return defaultPort
+	}
+	return port
 }
 
 func StopAll() {
 	for _, p := range activeProcesses {
 		if p.Cmd != nil && p.Cmd.Process != nil {
 			log.Info("stopping service", log.Fields{"name": p.Name})
-			p.Cmd.Process.Kill()
+			if err := p.Cmd.Process.Kill(); err != nil {
+				log.Warn("failed to stop service", log.Fields{"name": p.Name, "error": err})
+			}
 		}
 	}
 	activeProcesses = nil

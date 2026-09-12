@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/fvmoraes/dwyt/internal/health"
@@ -46,7 +47,11 @@ func (ds *DashboardServer) apiMCPRegistry(c *gin.Context) {
 		if st != nil {
 			pid = st.PID
 		}
-		result[name] = map[string]interface{}{
+		// The dashboard cards look up entries by the short logical name
+		// (codebase/obsidian/optimizer), not the canonical namespaced key
+		// the registry stores (dwyt_codebase/...), so results must be
+		// re-keyed or every card sees a permanent miss and shows "Offline".
+		result[mcpregistry.LogicalName(name)] = map[string]interface{}{
 			"command":   entry.Command,
 			"port":      entry.Port,
 			"healthURL": entry.HealthURL,
@@ -117,7 +122,11 @@ func (ds *DashboardServer) apiMCPConfigure(c *gin.Context) {
 
 	integrate.Project(body.ProjectPath, clients, ds.DwytBin)
 	if strings.Contains(","+clients+",", ",kiro,") {
-		go kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath)
+		go func() {
+			if _, err := kiropow.EnsurePower(ds.DwytHome, ds.DwytBin, body.ProjectPath); err != nil {
+				log.Warn("Kiro Power reconciliation failed", log.Fields{"project": body.ProjectPath, "error": err.Error()})
+			}
+		}()
 	}
 
 	// Report the entry that was actually configured. For the all-servers
@@ -163,12 +172,20 @@ func (ds *DashboardServer) apiMCPStart(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Start(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.startManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -180,12 +197,20 @@ func (ds *DashboardServer) apiMCPStop(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Stop(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.stopManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -197,12 +222,20 @@ func (ds *DashboardServer) apiMCPRestart(c *gin.Context) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	c.BindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request body"})
+		return
+	}
+	service := mcpProcessName(body.Name)
 	if body.Name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
 		return
 	}
-	st, err := ds.ProcMan.Restart(mcpProcessName(body.Name))
+	if !isManagedService(service) {
+		c.JSON(400, gin.H{"error": "service lifecycle is client-managed: " + service})
+		return
+	}
+	st, err := ds.restartManagedService(c.Request.Context(), service)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -224,7 +257,9 @@ func (ds *DashboardServer) apiMCPLogs(c *gin.Context) {
 	name := c.Query("name")
 	tail := 50
 	if t := c.Query("tail"); t != "" {
-		fmt.Sscanf(t, "%d", &tail)
+		if parsed, err := strconv.Atoi(t); err == nil {
+			tail = parsed
+		}
 	}
 	if name == "" {
 		c.JSON(400, gin.H{"error": "name is required"})
@@ -259,6 +294,10 @@ func (ds *DashboardServer) apiMCPUsage(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "server is required"})
 		return
 	}
+	// This request crossed a DWYT-controlled proxy/API path, so it is valid
+	// evidence of activity. Client-owned stdio traffic that bypasses DWYT still
+	// remains unknown rather than being inferred from configuration.
+	ds.noteMCPActivity(body.Server)
 	ds.recordMCPCall(body.Server, body.Tool)
 	c.JSON(200, gin.H{"status": "ok"})
 }

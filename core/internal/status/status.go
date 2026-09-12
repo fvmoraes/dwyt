@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -43,11 +44,26 @@ type ToolStatus struct {
 	Port    int          `json:"port,omitempty"`
 	Details string       `json:"details,omitempty"`
 	Error   string       `json:"error,omitempty"`
+	// RuntimeState is the reconciler's lifecycle state (starting/healthy/
+	// degraded/failed/stopped/unknown) for DWYT-managed services. Additive:
+	// the probe-derived Status above stays untouched for older consumers.
+	RuntimeState string `json:"runtime_state,omitempty"`
+	// MCPActivity is the last observed client-side MCP session activity.
+	// Only filled where DWYT actually observes traffic; otherwise it stays
+	// empty/unknown — never fabricated into offline (honest telemetry).
+	MCPActivity string `json:"mcp_activity,omitempty"`
 }
 
 type SystemStatus struct {
-	Timestamp time.Time    `json:"timestamp"`
-	Tools     []ToolStatus `json:"tools"`
+	// Timestamp and Tools are the legacy status contract. Components, Status,
+	// and ToolErrors are additive v2 fields; existing consumers can continue
+	// reading tools[] unchanged.
+	Timestamp   time.Time                  `json:"timestamp"`
+	Tools       []ToolStatus               `json:"tools"`
+	Status      string                     `json:"status,omitempty"`
+	ToolErrors  map[string]string          `json:"tool_errors,omitempty"`
+	Components  map[string]ComponentStatus `json:"components,omitempty"`
+	ProjectPath string                     `json:"project_path,omitempty"`
 }
 
 type RTKMetrics struct {
@@ -64,12 +80,17 @@ type HeadroomMetrics struct {
 }
 
 const defaultHeadroomPort = 8787
+const defaultCodebasePort = 9749
 
 const toolProbeTimeout = 2 * time.Second
 
 var headroomPort atomic.Int64
+var codebasePort atomic.Int64
 
-func init() { headroomPort.Store(defaultHeadroomPort) }
+func init() {
+	headroomPort.Store(defaultHeadroomPort)
+	codebasePort.Store(defaultCodebasePort)
+}
 
 // SetHeadroomPort publishes the port selected by the daemon. Atomic access is
 // required because startup chooses a fallback port in a goroutine while the
@@ -88,6 +109,24 @@ func HeadroomPort() int {
 	port := int(headroomPort.Load())
 	if port < 1 || port > 65535 {
 		return defaultHeadroomPort
+	}
+	return port
+}
+
+// SetCodebasePort publishes the effective port selected for the managed
+// Codebase service. Status probes must follow fallback ports instead of
+// assuming the requested default forever.
+func SetCodebasePort(port int) {
+	if port < 1 || port > 65535 {
+		return
+	}
+	codebasePort.Store(int64(port))
+}
+
+func CodebasePort() int {
+	port := int(codebasePort.Load())
+	if port < 1 || port > 65535 {
+		return defaultCodebasePort
 	}
 	return port
 }
@@ -116,28 +155,25 @@ func PollAllWithPaths(codebaseBin, rtkBin, headroomBin string, hasObsidianVault 
 	return s
 }
 
-func pollCBMCP(dwytBin string) ToolStatus {
-	return pollCBMCPPath(platform.DWYTLauncherPath(dwytBin, "codebase-memory-mcp"))
-}
-
 func pollCBMCPPath(bin string) ToolStatus {
+	port := CodebasePort()
 	ts := ToolStatus{Name: "codebase-memory-mcp", Status: StateNotInstalled, State: StateNotInstalled}
-	if health.ProbeURL("http://127.0.0.1:9749/health") {
+	if health.ProbeURL(fmt.Sprintf("http://127.0.0.1:%d/health", port)) {
 		ts.Status = StateOnline
 		ts.State = StateOnline
 		ts.Running = true
 		ts.Healthy = true
-		ts.Port = 9749
-		ts.Details = "UI on port 9749"
+		ts.Port = port
+		ts.Details = fmt.Sprintf("UI on port %d", port)
 		return ts
 	}
-	if health.ProbePort(9749) {
+	if health.ProbePort(port) {
 		ts.Status = StatePortOpenNoHealth
 		ts.State = StatePortOpenNoHealth
 		ts.Running = false
 		ts.Healthy = false
-		ts.Port = 9749
-		ts.Details = "port 9749 occupied but healthcheck failed"
+		ts.Port = port
+		ts.Details = fmt.Sprintf("port %d occupied but healthcheck failed", port)
 		return ts
 	}
 
@@ -157,13 +193,9 @@ func pollCBMCPPath(bin string) ToolStatus {
 	ts.State = StateInstalled
 	ts.Running = false
 	ts.Healthy = false
-	ts.Port = 9749
+	ts.Port = port
 	ts.Details = "installed (launch on demand)"
 	return ts
-}
-
-func pollRTK(dwytBin string) ToolStatus {
-	return pollRTKPath(platform.DWYTLauncherPath(dwytBin, "rtk"))
 }
 
 func pollRTKPath(bin string) ToolStatus {
@@ -184,10 +216,6 @@ func pollRTKPath(bin string) ToolStatus {
 		ts.Error = "binary is present but not responding"
 	}
 	return ts
-}
-
-func pollHeadroom(dwytBin string, port int) ToolStatus {
-	return pollHeadroomPath(platform.DWYTLauncherPath(dwytBin, "headroom"), port)
 }
 
 func pollHeadroomPath(bin string, port int) ToolStatus {
@@ -290,14 +318,18 @@ func GetRTKMetricsForBinary(bin string) *RTKMetrics {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Total commands:") {
-			fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands)
+			if n, _ := fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands); n != 1 {
+				continue
+			}
 		}
 		if strings.HasPrefix(line, "Tokens saved:") {
 			parts := strings.Split(line, "(")
 			val := strings.TrimPrefix(strings.TrimSpace(parts[0]), "Tokens saved:")
 			m.TokensSaved = parseTokenCount(strings.TrimSpace(val))
 			if len(parts) > 1 {
-				fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved)
+				if n, _ := fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved); n != 1 {
+					continue
+				}
 			}
 		}
 	}
@@ -319,7 +351,7 @@ func getHeadroomMetrics(port int, client *http.Client) *HeadroomMetrics {
 	if err != nil {
 		return m
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		m.Running = true
 		var data map[string]any
@@ -364,8 +396,10 @@ func parseTokenCount(s string) int64 {
 		mul = 1_000
 		s = s[:len(s)-1]
 	}
-	var v float64
-	fmt.Sscanf(s, "%f", &v)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
 	return int64(v * float64(mul))
 }
 
@@ -393,14 +427,18 @@ func GetRTKMetricsForPathBinary(bin, projectPath string) *RTKMetrics {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "Total commands:") {
-			fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands)
+			if n, _ := fmt.Sscanf(line, "Total commands: %d", &m.TotalCommands); n != 1 {
+				continue
+			}
 		}
 		if strings.HasPrefix(line, "Tokens saved:") {
 			parts := strings.Split(line, "(")
 			val := strings.TrimPrefix(strings.TrimSpace(parts[0]), "Tokens saved:")
 			m.TokensSaved = parseTokenCount(strings.TrimSpace(val))
 			if len(parts) > 1 {
-				fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved)
+				if n, _ := fmt.Sscanf(strings.TrimRight(parts[1], ")%"), "%f", &m.PctSaved); n != 1 {
+					continue
+				}
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package procman
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -56,12 +57,13 @@ func longRunningCmd() (string, []string) {
 	return "/bin/sleep", []string{"10"}
 }
 
-// echoCmd returns a short-lived process that writes to stdout.
+// echoCmd writes to stdout and remains alive until ProcessManager stops it, so
+// the PID record can be authenticated before the fixture exits.
 func echoCmd() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return windowsCmd(), []string{"/c", "echo hello world"}
+		return windowsCmd(), []string{"/c", "echo hello world & ping -n 11 127.0.0.1 >nul"}
 	}
-	return "/bin/sh", []string{"-c", "echo hello world"}
+	return "/bin/sh", []string{"-c", "echo hello world; sleep 10"}
 }
 
 // failingCmd returns a process that exits immediately with a non-zero code.
@@ -94,6 +96,30 @@ func runningProcessManager(t *testing.T) (*ProcessManager, *ManagedProcess) {
 	}
 	pm.processes[mp.Name] = mp
 	return pm, mp
+}
+
+// TestProcessManagerStatusAfterRegisterReportsRequestedNotEffective proves
+// requirement (1): immediately after Register — before any Start — Status
+// reports the requested port with a zero effective port (nothing is bound yet).
+func TestProcessManagerStatusAfterRegisterReportsRequestedNotEffective(t *testing.T) {
+	pm := New(t.TempDir())
+	bin, args := longRunningCmd()
+	const requested = 45123
+	pm.Register("svc", bin, "/health", requested, args...)
+
+	status := pm.Status("svc")
+	if status.RequestedPort != requested {
+		t.Fatalf("RequestedPort = %d, want %d", status.RequestedPort, requested)
+	}
+	if status.EffectivePort != 0 {
+		t.Fatalf("EffectivePort = %d, want 0 before start", status.EffectivePort)
+	}
+	if status.Port != 0 {
+		t.Fatalf("Port (compat alias) = %d, want 0 before start", status.Port)
+	}
+	if status.Running {
+		t.Fatalf("service must not be running before Start, got %+v", status)
+	}
 }
 
 func TestProcessManager_StartStop(t *testing.T) {
@@ -385,4 +411,67 @@ func TestProcessManager_AllStatus(t *testing.T) {
 
 	pm.Stop("test1")
 	pm.Stop("test2")
+}
+
+func TestWaitForHealthContextCancelsBlockedProbe(t *testing.T) {
+	entered := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- waitForHealthContext(ctx, server.URL, time.Minute)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("health probe never reached the server")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForHealthContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled health probe did not return")
+	}
+}
+
+func TestProcessManagerStopContextCancelsTermination(t *testing.T) {
+	pm, mp := runningProcessManager(t)
+	pm.terminateTree = nil
+	entered := make(chan struct{})
+	pm.terminateTreeContext = func(ctx context.Context, pid int) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := pm.StopContext(ctx, mp.Name)
+		result <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("StopContext never entered termination")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("StopContext error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StopContext ignored cancellation")
+	}
 }

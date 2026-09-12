@@ -31,11 +31,19 @@ func (ot *ObsidianTools) Search(args map[string]interface{}) (string, error) {
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?q=%s", dwytAPI, url.QueryEscape(query)))
+	params := url.Values{}
+	params.Set("q", query)
+	if taskID, ok := args["task_id"].(string); ok && strings.TrimSpace(taskID) != "" {
+		params.Set("task_id", taskID)
+	}
+	if maxTokens, ok := args["max_tokens"]; ok {
+		params.Set("max_tokens", fmt.Sprint(maxTokens))
+	}
+	resp, err := ot.client.Get(fmt.Sprintf("%s/obsidian/search?%s", dwytAPI, params.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("obsidian search failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("obsidian search returned HTTP %d", resp.StatusCode)
 	}
@@ -74,12 +82,14 @@ func (ot *ObsidianTools) Save(args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("save failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("save returned HTTP %d", resp.StatusCode)
 	}
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	if status, ok := result["status"].(string); ok {
 		return fmt.Sprintf("Entry saved: %s", status), nil
 	}
@@ -99,7 +109,7 @@ func (ot *ObsidianTools) SaveContext(args map[string]interface{}) (string, error
 	if err != nil {
 		return "", fmt.Errorf("context save failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("context save returned HTTP %d", resp.StatusCode)
 	}
@@ -107,7 +117,9 @@ func (ot *ObsidianTools) SaveContext(args map[string]interface{}) (string, error
 		Status string `json:"status"`
 		File   string `json:"file"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	if result.File != "" {
 		return "Context saved: " + result.File, nil
 	}
@@ -119,12 +131,14 @@ func (ot *ObsidianTools) Status(args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("status check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("status returned HTTP %d", resp.StatusCode)
 	}
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	return string(data), nil
 }
@@ -138,7 +152,7 @@ func (ot *ObsidianTools) Summarize(args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("summarize failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("summarize returned HTTP %d", resp.StatusCode)
 	}
@@ -146,7 +160,9 @@ func (ot *ObsidianTools) Summarize(args map[string]interface{}) (string, error) 
 		Status  string `json:"status"`
 		Summary string `json:"summary"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	if result.Summary != "" {
 		return result.Summary, nil
 	}
@@ -162,7 +178,7 @@ func (ot *ObsidianTools) Open(args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open vault failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("open vault returned HTTP %d", resp.StatusCode)
 	}
@@ -186,7 +202,7 @@ func (ot *ObsidianTools) Canonical(args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("canonical memory read failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("canonical memory returned HTTP %d", resp.StatusCode)
 	}
@@ -215,9 +231,11 @@ func (ot *ObsidianTools) UpsertCanonical(args map[string]interface{}) (string, e
 	if err != nil {
 		return "", fmt.Errorf("canonical memory write failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		if msg, ok := result["error"].(string); ok {
 			return "", fmt.Errorf("canonical memory write: %s", msg)
@@ -236,9 +254,11 @@ func (ot *ObsidianTools) Compile(args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("memory compile failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
 	if resp.StatusCode >= 400 {
 		if msg, ok := result["error"].(string); ok {
 			return "", fmt.Errorf("memory compile: %s", msg)
@@ -300,7 +320,9 @@ func RegisterObsidianTools(s *Server) {
 	s.RegisterTool("obsidian_search",
 		"Search the Obsidian vault for notes matching a query. Returns matching entries with type, content, and creation date.",
 		map[string]Property{
-			"query": {Type: "string", Description: "Search query string to find matching notes in the vault"},
+			"query":      {Type: "string", Description: "Search query string to find matching notes in the vault"},
+			"task_id":    {Type: "string", Description: "Optional existing Optimizer task ID; applies its project-memory allowance"},
+			"max_tokens": {Type: "integer", Description: "Optional non-negative cap that can only reduce the task allowance"},
 		},
 		[]string{"query"},
 		ot.Search,

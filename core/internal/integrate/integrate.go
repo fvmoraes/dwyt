@@ -20,45 +20,45 @@ import (
 func Project(projectPath, clients, _ string) {
 	log.Info("integrating project", log.Fields{"path": projectPath, "clients": clients})
 	clientList := normalizeClients(clients)
+	writeInstruction := func(path, content string) {
+		if err := writeOrUpdateInstructionFile(path, content); err != nil {
+			log.Warn("project instruction update failed", log.Fields{"path": path, "error": err.Error()})
+		}
+	}
 
 	// DWYT does not touch the project's .gitignore. Whether to commit MCP
 	// configs is the team's call — paths are absolute per machine, so most
 	// teams either ignore them or rewrite them at clone time.
 
 	if containsClient(clientList, "claude") {
-		cp := filepath.Join(projectPath, "CLAUDE.md")
-		writeOrUpdateInstructionFile(cp, claudeMDTemplate())
+		writeInstruction(filepath.Join(projectPath, "CLAUDE.md"), claudeMDTemplate())
 	}
 
 	if containsClient(clientList, "cursor") {
-		cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
-		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, cursorRuleTemplate())
+		writeInstruction(filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc"), cursorRuleTemplate())
 	}
 
 	if containsClient(clientList, "kiro") {
-		cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, kiroSteeringTemplate())
+		writeInstruction(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"), kiroSteeringTemplate())
 	}
 
 	if containsClient(clientList, "copilot") {
-		cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, copilotMDTemplate())
+		writeInstruction(filepath.Join(projectPath, ".github", "copilot-instructions.md"), copilotMDTemplate())
 	}
 
 	if containsClient(clientList, "windsurf") {
-		cp := filepath.Join(projectPath, ".windsurf", "rules", "dwyt.md")
-		os.MkdirAll(filepath.Dir(cp), 0755)
-		writeOrUpdateInstructionFile(cp, windsurfRuleTemplate())
+		writeInstruction(filepath.Join(projectPath, ".windsurf", "rules", "dwyt.md"), windsurfRuleTemplate())
+	}
+
+	if containsClient(clientList, "continue") {
+		writeInstruction(filepath.Join(projectPath, ".continue", "rules", "dwyt.md"), continueRuleTemplate())
 	}
 
 	// AGENTS.md is the convention shared by Codex and OpenCode. Respect the
 	// client toggles: only create/update it when one of those clients is on.
 	// Disabling every AGENTS.md client means DWYT leaves the file untouched.
 	if containsClient(clientList, "codex") || containsClient(clientList, "opencode") {
-		writeOrUpdateInstructionFile(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(""))
+		writeInstruction(filepath.Join(projectPath, "AGENTS.md"), agentsMDTemplate(""))
 	}
 
 	// ── Per-project workspace state ─────────────────────────────────────
@@ -100,7 +100,9 @@ var markerEnd = "<!-- dwyt:headroom-proxy-end -->"
 func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients string) error {
 	// Store proxy state in ~/.dwyt/projects/<id>/ — never inside the project
 	dwytDir := workspace.ProjectDir(projectPath)
-	os.MkdirAll(dwytDir, 0755)
+	if err := os.MkdirAll(dwytDir, 0755); err != nil {
+		return fmt.Errorf("create headroom proxy state directory: %w", err)
+	}
 
 	proxyConfig := map[string]any{
 		"active":     true,
@@ -116,67 +118,85 @@ func WriteHeadroomProxyConfig(projectPath string, headroomPort int, clients stri
 	}
 
 	block := fmt.Sprintf("%s\n**Headroom proxy is ACTIVE** on http://127.0.0.1:%d — use OPENAI_BASE_URL and ANTHROPIC_BASE_URL env vars automatically.\n%s\n", markerStart, headroomPort, markerEnd)
+	var firstErr error
+	appendBlock := func(path string) {
+		if err := appendMarkedBlock(path, block); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("append headroom proxy block to %s: %w", path, err)
+		}
+	}
 
 	for _, c := range strings.Split(clients, ",") {
 		c = strings.TrimSpace(c)
 		switch c {
 		case "opencode":
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		case "claude":
-			appendMarkedBlock(filepath.Join(projectPath, "CLAUDE.md"), block)
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, "CLAUDE.md"))
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		case "codex":
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		case "copilot":
-			cp := filepath.Join(projectPath, ".github", "copilot-instructions.md")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, ".github", "copilot-instructions.md"))
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		case "kiro":
-			cp := filepath.Join(projectPath, ".kiro", "steering", "dwyt.md")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"))
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		case "cursor":
-			cp := filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc")
-			os.MkdirAll(filepath.Dir(cp), 0755)
-			appendMarkedBlock(cp, block)
-			appendMarkedBlock(filepath.Join(projectPath, "AGENTS.md"), block)
+			appendBlock(filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc"))
+			appendBlock(filepath.Join(projectPath, "AGENTS.md"))
 		}
 	}
 
-	return nil
+	return firstErr
 }
 
 func RemoveHeadroomProxyConfig(projectPath string, clients string) error {
 	// Proxy state lives in ~/.dwyt/projects/<id>/
 	proxyFile := filepath.Join(workspace.ProjectDir(projectPath), "headroom-proxy.json")
-	if data, err := os.ReadFile(proxyFile); err == nil {
-		var cfg map[string]any
-		if json.Unmarshal(data, &cfg) == nil {
-			cfg["active"] = false
-			if newData, err := json.MarshalIndent(cfg, "", "  "); err == nil {
-				os.WriteFile(proxyFile, newData, 0644)
-			}
+	var firstErr error
+	recordError := func(action string, err error) {
+		if err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("%s: %w", action, err)
 		}
 	}
+	if data, err := os.ReadFile(proxyFile); err == nil {
+		var cfg map[string]any
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			recordError("decode headroom proxy state", err)
+		} else {
+			cfg["active"] = false
+			if newData, err := json.MarshalIndent(cfg, "", "  "); err != nil {
+				recordError("encode headroom proxy state", err)
+			} else if err := os.WriteFile(proxyFile, newData, 0644); err != nil {
+				recordError("write headroom proxy state", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		recordError("read headroom proxy state", err)
+	}
 
-	removeMarkedBlocks(filepath.Join(projectPath, "CLAUDE.md"))
-	removeMarkedBlocks(filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc"))
-	removeMarkedBlocks(filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"))
-	removeMarkedBlocks(filepath.Join(projectPath, "AGENTS.md"))
-	removeMarkedBlocks(filepath.Join(projectPath, ".github", "copilot-instructions.md"))
-	removeMarkedBlocks(filepath.Join(projectPath, "opencode.json"))
+	for _, filePath := range []string{
+		filepath.Join(projectPath, "CLAUDE.md"),
+		filepath.Join(projectPath, ".cursor", "rules", "dwyt.mdc"),
+		filepath.Join(projectPath, ".kiro", "steering", "dwyt.md"),
+		filepath.Join(projectPath, "AGENTS.md"),
+		filepath.Join(projectPath, ".github", "copilot-instructions.md"),
+		filepath.Join(projectPath, "opencode.json"),
+	} {
+		recordError("remove headroom proxy block from "+filePath, removeMarkedBlocks(filePath))
+	}
 
-	return nil
+	return firstErr
 }
 
-func appendMarkedBlock(filePath, block string) error {
+func appendMarkedBlock(filePath, block string) (retErr error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		// Create file if it doesn't exist
 		if os.IsNotExist(err) {
-			os.MkdirAll(filepath.Dir(filePath), 0755)
+			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+				return err
+			}
 			return os.WriteFile(filePath, []byte(block), 0644)
 		}
 		return err
@@ -189,18 +209,29 @@ func appendMarkedBlock(filePath, block string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); retErr == nil && closeErr != nil {
+			retErr = closeErr
+		}
+	}()
 	if len(content) > 0 && content[len(content)-1] != '\n' {
-		f.Write([]byte("\n"))
+		if _, err := f.Write([]byte("\n")); err != nil {
+			return err
+		}
 	}
-	f.Write([]byte(block))
+	if _, err := f.Write([]byte(block)); err != nil {
+		return err
+	}
 	return nil
 }
 
 func removeMarkedBlocks(filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	content := string(data)
 
@@ -224,7 +255,7 @@ func removeMarkedBlocks(filePath string) error {
 	}
 
 	if string(data) != content {
-		os.WriteFile(filePath, []byte(content), 0644)
+		return os.WriteFile(filePath, []byte(content), 0644)
 	}
 	return nil
 }

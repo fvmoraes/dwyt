@@ -15,6 +15,7 @@
 package rawstore
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -82,7 +83,7 @@ func New(dwytHome string) (*Store, error) {
 		return nil, fmt.Errorf("rawstore: create %s: %w", dir, err)
 	}
 	// Best-effort tightening of stores created before the permission change.
-	os.Chmod(dir, 0700)
+	_ = os.Chmod(dir, 0700)
 	return &Store{dir: dir}, nil
 }
 
@@ -284,6 +285,13 @@ type PruneResult struct {
 // still cited by a note is never removed for lack of a sidecar (spec §29:
 // "do not delete before validating the reference").
 func (s *Store) Prune(referenced map[string]bool, now time.Time) (PruneResult, error) {
+	return s.PruneContext(context.Background(), referenced, now)
+}
+
+func (s *Store) PruneContext(ctx context.Context, referenced map[string]bool, now time.Time) (PruneResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	res := PruneResult{}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -296,6 +304,9 @@ func (s *Store) Prune(referenced map[string]bool, now time.Time) (PruneResult, e
 	payloads := map[string]int64{}
 	metas := map[string]Meta{}
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		if e.IsDir() {
 			continue
 		}
@@ -314,6 +325,9 @@ func (s *Store) Prune(referenced map[string]bool, now time.Time) (PruneResult, e
 	}
 
 	for id, size := range payloads {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		meta, hasMeta := metas[id]
 		switch {
 		case hasMeta && meta.Expired(now) && !referenced[id]:
@@ -335,6 +349,9 @@ func (s *Store) Prune(referenced map[string]bool, now time.Time) (PruneResult, e
 
 	// Drop metadata whose payload is gone: it can only mislead.
 	for id := range metas {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		if _, ok := payloads[id]; !ok {
 			_ = os.Remove(s.metaPath(id))
 		}
@@ -344,6 +361,13 @@ func (s *Store) Prune(referenced map[string]bool, now time.Time) (PruneResult, e
 
 // Usage reports the store footprint for the dashboard.
 func (s *Store) Usage() (count int, bytes int64, err error) {
+	return s.UsageContext(context.Background())
+}
+
+func (s *Store) UsageContext(ctx context.Context) (count int, bytes int64, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -352,6 +376,9 @@ func (s *Store) Usage() (count int, bytes int64, err error) {
 		return 0, 0, err
 	}
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return count, bytes, err
+		}
 		if e.IsDir() || strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
@@ -402,11 +429,11 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmpName := tmp.Name()
 	defer func() {
 		if _, statErr := os.Stat(tmpName); statErr == nil {
-			os.Remove(tmpName)
+			_ = os.Remove(tmpName)
 		}
 	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

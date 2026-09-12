@@ -23,6 +23,64 @@ func cleanDWYTHome(e *detect.Env) {
 	fmt.Println("  ✓ DWYT home cleaned (Obsidian vaults preserved)")
 }
 
+// sandboxUninstall is the deliberately narrow lifecycle used by hermetic
+// installer tests. It only touches paths proved to be below sandboxRoot:
+// DWYT-managed state (while retaining protected vaults) and, when supplied,
+// the test launcher. It never terminates processes, edits profiles/PATH, runs
+// package managers, or reaches globally installed tools.
+func sandboxUninstall(e *detect.Env, sandboxRoot, installDir string) error {
+	if e == nil || e.DwytHome == "" {
+		return fmt.Errorf("sandbox uninstall requires a DWYT home")
+	}
+	root, err := filepath.Abs(sandboxRoot)
+	if err != nil || sandboxRoot == "" {
+		return fmt.Errorf("sandbox uninstall requires an absolute-safe root")
+	}
+	home, err := filepath.Abs(e.DwytHome)
+	if err != nil {
+		return fmt.Errorf("resolve DWYT home: %w", err)
+	}
+	if !pathWithin(root, home) {
+		return fmt.Errorf("DWYT home is outside sandbox root: %s", e.DwytHome)
+	}
+	if installDir != "" {
+		bin, err := filepath.Abs(installDir)
+		if err != nil {
+			return fmt.Errorf("resolve sandbox install dir: %w", err)
+		}
+		if !pathWithin(root, bin) {
+			return fmt.Errorf("install directory is outside sandbox root: %s", installDir)
+		}
+	}
+	if !security.IsSafeHome(e.DwytHome) {
+		return fmt.Errorf("unsafe DWYT home path: %s", e.DwytHome)
+	}
+
+	cleanDWYTHome(e)
+	if installDir == "" {
+		return nil
+	}
+	launcher := platform.DWYTLauncherPath(installDir, "dwyt")
+	if err := os.Remove(launcher); err != nil && !os.IsNotExist(err) {
+		// Windows cannot remove the executable currently running this command.
+		// The protected-data contract still holds because CleanHome ran inside
+		// the explicit sandbox; the CI scenario asserts that managed state is
+		// gone and the user-owned vault/config remain intact.
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("remove sandbox launcher: %w", err)
+		}
+	}
+	return nil
+}
+
+func pathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+	return !filepath.IsAbs(rel)
+}
+
 func removeSymlinks(home string) {
 	if runtime.GOOS == "windows" {
 		return
@@ -31,7 +89,10 @@ func removeSymlinks(home string) {
 	for _, name := range []string{"dwyt", "rtk", "headroom", "codebase-memory-mcp"} {
 		link := filepath.Join(localBin, name)
 		if _, err := os.Lstat(link); err == nil {
-			os.Remove(link)
+			if err := os.Remove(link); err != nil {
+				fmt.Printf("  ⚠ Failed to remove symlink %s: %v\n", link, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed symlink: %s\n", link)
 		}
 	}
@@ -46,7 +107,10 @@ func removeRTKData(home string) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
@@ -56,7 +120,10 @@ func removeRTKData(home string) {
 	}
 	for _, b := range bins {
 		if _, err := os.Lstat(b); err == nil {
-			os.Remove(b)
+			if err := os.Remove(b); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", b, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", b)
 		}
 	}
@@ -71,12 +138,15 @@ func removeHeadroomData(home string) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
-	exec.Command("pip", "uninstall", "-y", "headroom-ai").Run()
-	exec.Command("pip3", "uninstall", "-y", "headroom-ai").Run()
+	_ = exec.Command("pip", "uninstall", "-y", "headroom-ai").Run()
+	_ = exec.Command("pip3", "uninstall", "-y", "headroom-ai").Run()
 }
 
 func removeCodebaseData(home string, e *detect.Env) {
@@ -89,14 +159,20 @@ func removeCodebaseData(home string, e *detect.Env) {
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); err == nil {
-			os.RemoveAll(d)
+			if err := os.RemoveAll(d); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", d, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", d)
 		}
 	}
 	cbmcpBin := platform.DWYTLauncherPath(e.DwytBin, "codebase-memory-mcp")
 	if _, err := os.Stat(cbmcpBin); err == nil {
-		exec.Command(cbmcpBin, "uninstall", "-y").Run()
-		fmt.Println("  ✓ Codebase agent configs removed")
+		if err := exec.Command(cbmcpBin, "uninstall", "-y").Run(); err != nil {
+			fmt.Printf("  ⚠ Failed to remove Codebase agent configs: %v\n", err)
+		} else {
+			fmt.Println("  ✓ Codebase agent configs removed")
+		}
 	}
 	bins := []string{
 		filepath.Join(home, ".local", "bin", "codebase-memory-mcp"),
@@ -104,7 +180,10 @@ func removeCodebaseData(home string, e *detect.Env) {
 	}
 	for _, b := range bins {
 		if _, err := os.Lstat(b); err == nil {
-			os.Remove(b)
+			if err := os.Remove(b); err != nil {
+				fmt.Printf("  ⚠ Failed to remove %s: %v\n", b, err)
+				continue
+			}
 			fmt.Printf("  ✓ Removed: %s\n", b)
 		}
 	}
@@ -160,7 +239,10 @@ func removeFromRC(rcFile string) bool {
 	if result == original {
 		return false
 	}
-	os.WriteFile(rcFile, []byte(result), 0644)
+	if err := os.WriteFile(rcFile, []byte(result), 0644); err != nil {
+		fmt.Printf("  ⚠ Failed to clean %s: %v\n", rcFile, err)
+		return false
+	}
 	return true
 }
 
@@ -190,5 +272,7 @@ func removeFromWindowsUserPath(dwytBin string) {
 		}
 	}
 	newPath := strings.Join(filtered, ";")
-	exec.Command("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f").Run()
+	if err := exec.Command("reg", "add", `HKCU\Environment`, "/v", "PATH", "/t", "REG_EXPAND_SZ", "/d", newPath, "/f").Run(); err != nil {
+		fmt.Printf("  ⚠ Failed to update Windows PATH: %v\n", err)
+	}
 }

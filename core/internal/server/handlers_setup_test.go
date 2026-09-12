@@ -11,7 +11,6 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/fvmoraes/dwyt/internal/db"
@@ -285,13 +284,17 @@ func TestAPIServicesStartStopAllUpdatesRuntimeState(t *testing.T) {
 		t.Fatalf("expected stop HTTP 200, got %d: %s", stop.Code, stop.Body.String())
 	}
 	for _, name := range []string{"codebase", "headroom"} {
-		if _, ok := runtimeState.GetProcess(name); ok {
-			t.Fatalf("%s still present in runtime state after stop", name)
+		process, ok := runtimeState.GetProcess(name)
+		if !ok {
+			t.Fatalf("%s desired state was removed after stop", name)
+		}
+		if process.DesiredState != desiredStopped || process.State != svcStopped || process.PID != 0 || process.Healthy {
+			t.Fatalf("%s stop state was not persisted honestly: %+v", name, process)
 		}
 	}
 }
 
-func TestAPIServicesStopAllReportsStopErrors(t *testing.T) {
+func TestAPIServicesStopAllReconcilesStaleRuntimeHints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	home := t.TempDir()
 	runtimeState := state.Init(home)
@@ -308,27 +311,13 @@ func TestAPIServicesStopAllReportsStopErrors(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/services/stop-all", nil)
 	ds.apiServicesStopAll(c)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("stop-all status = %d, want 500; body=%s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Status string            `json:"status"`
-		Error  string            `json:"error"`
-		Errors map[string]string `json:"errors"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Status != "error" || len(body.Errors) != 2 ||
-		!strings.Contains(body.Error, "codebase") || !strings.Contains(body.Error, "headroom") {
-		t.Fatalf("stop-all response = %+v, want both stop errors", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stop-all status = %d, want 200 for already-absent processes; body=%s", rec.Code, rec.Body.String())
 	}
 	for _, service := range []string{"codebase", "headroom"} {
-		if body.Errors[service] == "" {
-			t.Fatalf("stop-all response omitted %s error: %+v", service, body)
-		}
-		if _, ok := runtimeState.GetProcess(service); !ok {
-			t.Fatalf("failed stop must not remove %s from runtime state", service)
+		process, ok := runtimeState.GetProcess(service)
+		if !ok || process.DesiredState != desiredStopped || process.State != svcStopped || process.Healthy {
+			t.Fatalf("stale %s hint was not reconciled to stopped: %+v (present=%v)", service, process, ok)
 		}
 	}
 }

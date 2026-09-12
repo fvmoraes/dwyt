@@ -56,16 +56,76 @@ type Compacted struct {
 	// DWYT does not recognise usually puts its verdict.
 	Tail []string `json:"tail,omitempty"`
 
-	RawRef         string  `json:"raw_ref,omitempty"`
-	RawTokensEst   int     `json:"raw_tokens_est"`
-	SentTokensEst  int     `json:"sent_tokens_est"`
-	CompressionPct float64 `json:"compression_pct"`
+	RawRef                    string  `json:"raw_ref,omitempty"`
+	RawTokensEst              int     `json:"raw_tokens_est"`
+	SentTokensEst             int     `json:"sent_tokens_est"`
+	CompressionMetadataTokens int     `json:"compression_metadata_tokens"`
+	CompressionPct            float64 `json:"compression_pct"`
 
 	// Suppressed counts what was dropped, by category, so the reduction is
 	// auditable rather than magical.
 	Suppressed map[string]int `json:"suppressed,omitempty"`
 	// Truncated is true when even the compacted form hit the size cap.
 	Truncated bool `json:"truncated,omitempty"`
+	// PassedThrough is set by ApplyCompressionGate when the net gain did not
+	// justify the reduction (Law 6). Callers must send the raw payload (or
+	// fetch it via RawRef) instead of the structured envelope.
+	PassedThrough bool `json:"passed_through,omitempty"`
+}
+
+// Cost model for the compression gate (Law 6): sending the compacted
+// envelope also costs its raw-ref handle, and a consumer that needs the
+// original bytes later pays a recovery round-trip. Both are real token
+// costs and belong in the net-gain math.
+const (
+	// RecoveryOverheadTokens is the expected cost of a later dwyt_get_raw
+	// round-trip amortized over the payload's lifetime.
+	RecoveryOverheadTokens = 30
+	// DefaultMinGainTokens is the conservative net-gain floor. Calibrated
+	// deliberately low: false passthrough wastes a few tokens, false
+	// compression loses evidence. Benchmark evidence may tune it (Fase 9).
+	DefaultMinGainTokens = 120
+)
+
+// EstimateCompressionMetadataTokens returns only the future recovery overhead
+// that is not already part of the rendered payload. The raw-ref handle itself
+// is included in SentTokensEst after Render, so charging it again would double
+// count it in both the gate and net-savings calculation.
+func EstimateCompressionMetadataTokens(rawRef string) int {
+	if rawRef == "" {
+		return 0
+	}
+	return RecoveryOverheadTokens
+}
+
+// ApplyCompressionGate decides whether a compaction result is worth sending
+// (Fine-Tuning §3.7: raw cost minus sent payload — which already contains its
+// raw-ref handle — minus expected future recovery overhead, pass through when
+// the gain is not useful). It is idempotent: applying it twice is a no-op.
+// Structured diagnostics survive regardless of gain — Law 7 (critical
+// evidence) overrides Law 6.
+func ApplyCompressionGate(c Compacted, minGainTokens int) Compacted {
+	if c.PassedThrough || c.RawTokensEst <= 0 {
+		c.CompressionMetadataTokens = 0
+		return c
+	}
+	metadata := EstimateCompressionMetadataTokens(c.RawRef)
+	netGain := c.RawTokensEst - c.SentTokensEst - metadata
+	hasEvidence := len(c.Errors) > 0 || len(c.Warnings) > 0
+	if netGain >= minGainTokens || hasEvidence {
+		c.CompressionMetadataTokens = metadata
+		return c
+	}
+	c.PassedThrough = true
+	c.SentTokensEst = c.RawTokensEst
+	c.CompressionMetadataTokens = 0
+	c.CompressionPct = 0
+	c.Errors = nil
+	c.Warnings = nil
+	c.Suppressed = nil
+	c.Tail = nil
+	c.Summary = "compression would not reduce cost; passed through"
+	return c
 }
 
 // Options tunes a compaction pass.

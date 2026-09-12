@@ -2,6 +2,7 @@ package brain
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -232,7 +233,7 @@ func ReadVaultMeta(vaultDir string) (*VaultMeta, error) {
 // either sees the previous contents or the new contents, never a half-written
 // file. On Windows this also avoids the "file in use" error the rename would
 // otherwise raise when the vault is open in the Obsidian app.
-func WriteVaultMeta(vaultDir string, meta VaultMeta) error {
+func WriteVaultMeta(vaultDir string, meta VaultMeta) (err error) {
 	if vaultDir == "" {
 		return fmt.Errorf("vault: empty directory")
 	}
@@ -263,13 +264,18 @@ func WriteVaultMeta(vaultDir string, meta VaultMeta) error {
 	}
 	tmpName := tmp.Name()
 	defer func() {
-		if _, statErr := os.Stat(tmpName); statErr == nil {
-			os.Remove(tmpName)
+		if removeErr := os.Remove(tmpName); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
+			err = fmt.Errorf("vault: remove temp metadata: %w", removeErr)
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("vault: write temp metadata: %w", err)
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("vault: write temp metadata: %w", errors.Join(
+				writeErr,
+				fmt.Errorf("close temp metadata: %w", closeErr),
+			))
+		}
+		return fmt.Errorf("vault: write temp metadata: %w", writeErr)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("vault: close temp metadata: %w", err)

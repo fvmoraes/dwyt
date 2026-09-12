@@ -14,11 +14,18 @@
 
 .EXAMPLE
   .\install.ps1 -SkipDeps      # install only the dwyt binary
+
+.NOTES
+  -DwytHome, -BinaryPath, and -NoPath are opt-in hermetic-test controls. They
+  preserve the normal release download and user PATH behavior by default.
 #>
 [CmdletBinding()]
 param(
   [switch]$SkipDeps,
-  [string]$Repo = "fvmoraes/dwyt"
+  [string]$Repo = "fvmoraes/dwyt",
+  [string]$DwytHome = "",
+  [string]$BinaryPath = "",
+  [switch]$NoPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -150,54 +157,85 @@ $baseUrl     = "https://github.com/$Repo/releases/latest/download"
 $archiveUrl  = "$baseUrl/$archiveName"
 $checksumUrl = "$baseUrl/checksums.txt"
 
-# Layout mirrors detect.go / platform.go: %APPDATA%\dwyt
-$dwytHome = Join-Path $env:APPDATA "dwyt"
+# Layout mirrors detect.go / platform.go: %APPDATA%\dwyt. A supplied home (or
+# DWYT_HOME) is intentionally opt-in so the normal installer keeps its stable
+# platform path while CI can exercise the same logic entirely below a temp dir.
+if ([string]::IsNullOrWhiteSpace($DwytHome)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:DWYT_HOME)) {
+    $DwytHome = $env:DWYT_HOME
+  }
+  else {
+    $DwytHome = Join-Path $env:APPDATA "dwyt"
+  }
+}
+$dwytHome = [IO.Path]::GetFullPath($DwytHome)
 $binDir   = Join-Path $dwytHome "bin"
 $null = New-Item -ItemType Directory -Force -Path $binDir
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("dwyt-" + [Guid]::NewGuid().ToString("N"))
-$null = New-Item -ItemType Directory -Force -Path $tmp
+$tmp = $null
 
 try {
-  $archivePath  = Join-Path $tmp $archiveName
-  $checksumPath = Join-Path $tmp "checksums.txt"
-
-  Write-Step "Downloading $archiveName ..."
-  Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -UseBasicParsing
-
-  Write-Step "Verifying SHA-256 checksum ..."
-  Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
-  $expected = (Select-String -Path $checksumPath -Pattern ([regex]::Escape($archiveName)) |
-               Select-Object -First 1).Line -split '\s+' | Select-Object -First 1
-  if (-not $expected) { throw "checksum for $archiveName not found in checksums.txt" }
-  $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
-  if ($actual -ne $expected.ToLower()) {
-    throw "checksum mismatch (expected $expected, got $actual)"
+  $exe = $null
+  $localBinary = ""
+  if ($BinaryPath) {
+    $localBinary = (Resolve-Path -LiteralPath $BinaryPath -ErrorAction Stop).Path
+    Write-Step "Using local DWYT binary ..."
   }
-  Write-Ok "Checksum verified."
+  else {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("dwyt-" + [Guid]::NewGuid().ToString("N"))
+    $null = New-Item -ItemType Directory -Force -Path $tmp
+    $archivePath  = Join-Path $tmp $archiveName
+    $checksumPath = Join-Path $tmp "checksums.txt"
 
-  Write-Step "Extracting ..."
-  Expand-Archive -Path $archivePath -DestinationPath $tmp -Force
-  $exe = Get-ChildItem -Path $tmp -Recurse -Filter "dwyt.exe" | Select-Object -First 1
-  if (-not $exe) { throw "dwyt.exe not found in archive" }
+    Write-Step "Downloading $archiveName ..."
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -UseBasicParsing
+
+    Write-Step "Verifying SHA-256 checksum ..."
+    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
+    $expected = (Select-String -Path $checksumPath -Pattern ([regex]::Escape($archiveName)) |
+                 Select-Object -First 1).Line -split '\s+' | Select-Object -First 1
+    if (-not $expected) { throw "checksum for $archiveName not found in checksums.txt" }
+    $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expected.ToLower()) {
+      throw "checksum mismatch (expected $expected, got $actual)"
+    }
+    Write-Ok "Checksum verified."
+
+    Write-Step "Extracting ..."
+    Expand-Archive -Path $archivePath -DestinationPath $tmp -Force
+    $exe = Get-ChildItem -Path $tmp -Recurse -Filter "dwyt.exe" | Select-Object -First 1
+    if (-not $exe) { throw "dwyt.exe not found in archive" }
+  }
 
   $dest = Join-Path $binDir "dwyt.exe"
   Stop-DwytDaemon -DaemonPath $dest -DwytHome $dwytHome
-  Copy-Item -Path $exe.FullName -Destination $dest -Force
+  if ($BinaryPath) {
+    Copy-Item -LiteralPath $localBinary -Destination $dest -Force
+  }
+  else {
+    Copy-Item -Path $exe.FullName -Destination $dest -Force
+  }
   Write-Ok "Installed: $dest"
 
   # Persist bin dir on the user PATH (registry) so future terminals see it.
-  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-  if (($userPath -split ';') -notcontains $binDir) {
-    Write-Step "Adding $binDir to your user PATH ..."
-    $newPath = if ([string]::IsNullOrEmpty($userPath)) { $binDir } else { "$userPath;$binDir" }
-    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-    Write-Ok "PATH updated (new terminals pick it up automatically)."
+  # A hermetic test explicitly opts out with -NoPath, avoiding registry and
+  # process-environment changes outside the supplied temporary home.
+  if (-not $NoPath) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (($userPath -split ';') -notcontains $binDir) {
+      Write-Step "Adding $binDir to your user PATH ..."
+      $newPath = if ([string]::IsNullOrEmpty($userPath)) { $binDir } else { "$userPath;$binDir" }
+      [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+      Write-Ok "PATH updated (new terminals pick it up automatically)."
+    }
+    # Always expose it in THIS session too, so `dwyt` works immediately — even on
+    # a re-install where the registry PATH already contained it (otherwise the
+    # current shell, opened before the first install, never sees the new entry).
+    if (($env:Path -split ';') -notcontains $binDir) {
+      $env:Path = "$binDir;$env:Path"
+    }
   }
-  # Always expose it in THIS session too, so `dwyt` works immediately — even on
-  # a re-install where the registry PATH already contained it (otherwise the
-  # current shell, opened before the first install, never sees the new entry).
-  if (($env:Path -split ';') -notcontains $binDir) {
-    $env:Path = "$binDir;$env:Path"
+  else {
+    Write-Host "  (skipping PATH changes; -NoPath)" -ForegroundColor DarkGray
   }
 
   $version = & $dest version 2>&1
@@ -219,9 +257,11 @@ try {
 }
 catch {
   Write-Err $_.Exception.Message
-  Write-Host "  See https://github.com/$Repo for manual install steps." -ForegroundColor DarkGray
+  Write-Host "  See https://github.com/fvmoraes/dwyt for manual install steps." -ForegroundColor DarkGray
   exit 1
 }
 finally {
-  Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  if ($tmp) {
+    Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }

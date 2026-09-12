@@ -2,7 +2,10 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
@@ -74,20 +77,26 @@ type DashboardServer struct {
 	// Housekeeper enforces Brain retention: the 100-session limit, TTLs, stale
 	// detection and raw pruning, always promoting reusable knowledge first.
 	Housekeeper *housekeeper.Housekeeper
+	// SvcCtl is the service reconciler: the single watchdog that adopts
+	// healthy instances, publishes lifecycle states and recovers dead
+	// auto-start services with bounded backoff.
+	SvcCtl *ServiceReconciler `json:"-"`
 	// Telemetry is the request and task ledger behind cost-per-completed-task.
 	Telemetry *telemetry.Store
 	// V5Config is the consolidated DWYT v5 configuration (spec §57).
-	V5Config         dwytconfig.Config
-	HeadroomPort     int
-	headroomMu       sync.RWMutex
-	projectMu        sync.RWMutex
-	sseClients       map[chan string]bool
-	sseMu            sync.Mutex
-	installMu        sync.Mutex
-	installStatus    map[string]string
-	installing       bool
-	indexProject     string
-	codebaseProgress struct {
+	V5Config              dwytconfig.Config
+	HeadroomPort          int // effective port used by health/status/client wrappers
+	HeadroomRequestedPort int // configured port retained across transient fallbacks
+	headroomMu            sync.RWMutex
+	projectMu             sync.RWMutex
+	sseClients            map[chan string]bool
+	sseProjectPaths       map[chan string]string
+	sseMu                 sync.Mutex
+	installMu             sync.Mutex
+	installStatus         map[string]string
+	installing            bool
+	indexProject          string
+	codebaseProgress      struct {
 		mu       sync.Mutex
 		indexing bool
 		progress string
@@ -96,4 +105,39 @@ type DashboardServer struct {
 	codebaseIndexCancel context.CancelFunc
 	headroomStartMu     sync.Mutex
 	savingsMu           sync.Mutex
+	// Dashboard-first startup: non-critical boot work runs as ordered
+	// background tasks only after http.Server has entered its accept loop.
+	// startupTasksOverride replaces the real task list in tests; startupDone
+	// closes when the loop finishes.
+	startupTasksOverride []startupTask
+	startupDone          <-chan struct{}
+	startupCancel        context.CancelFunc
+	startupStarted       time.Time
+
+	// lifecycleMu serializes Start, post-bind service activation and Shutdown.
+	// All WaitGroup additions happen while Start holds this lock and before the
+	// server becomes externally observable, so Shutdown can wait safely.
+	lifecycleMu       sync.Mutex
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
+	httpServer        *http.Server
+	lifecycleWG       sync.WaitGroup
+	lifecycleDone     <-chan struct{}
+	lifecycleStarted  bool
+	lifecycleStopping bool
+	svcCtlStarted     bool
+	shutdownRequested bool
+	shutdownStarted   bool
+	shutdownDone      chan struct{}
+	shutdownErr       error
+
+	// vaultMigrationMu is a filesystem lease for structural vault changes.
+	// HTTP/MCP vault operations hold a read lease; startup/manual migrations
+	// hold the write lease. vaultMigrating enables fail-fast 503 responses.
+	vaultMigrationMu sync.RWMutex
+	vaultMigrating   atomic.Bool
+	// hasSetupConfig/setupConfig mirror the persisted setup so background
+	// tasks (MCP config sync) can act on it after New() returned.
+	hasSetupConfig bool
+	setupConfig    Config
 }

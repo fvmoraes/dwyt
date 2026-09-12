@@ -10,6 +10,7 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/health"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/status"
 	"github.com/gin-gonic/gin"
 )
@@ -28,7 +29,141 @@ func (ds *DashboardServer) apiHealth(c *gin.Context) {
 }
 
 func (ds *DashboardServer) apiStatus(c *gin.Context) {
-	c.JSON(200, status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil))
+	project, err := ds.statusProjectPath(c.Query("path"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "path": c.Query("path")})
+		return
+	}
+	c.JSON(http.StatusOK, ds.statusSnapshotForProject(project))
+}
+
+// defaultStatusProject snapshots the daemon's active project. Callers that
+// render another registered project pass that path explicitly instead.
+func (ds *DashboardServer) defaultStatusProject() string {
+	if ds == nil {
+		return ""
+	}
+	ds.projectMu.RLock()
+	defer ds.projectMu.RUnlock()
+	return ds.DefaultProject
+}
+
+// statusProjectPath resolves a project requested by a dashboard view without
+// changing the daemon's active project. Explicit paths must be registered so a
+// status request cannot cause graph metadata to be created for an arbitrary
+// local directory.
+func (ds *DashboardServer) statusProjectPath(requested string) (string, error) {
+	project := strings.TrimSpace(requested)
+	if project == "" {
+		return ds.defaultStatusProject(), nil
+	}
+	if !projectDirExists(project) {
+		return "", fmt.Errorf("project path does not exist or is not a directory")
+	}
+	if ds.Store != nil {
+		if _, err := ds.Store.GetProjectByPath(project); err != nil {
+			return "", fmt.Errorf("project is not registered")
+		}
+	}
+	return project, nil
+}
+
+// pollSystemStatus is the sole probe source for both REST and SSE. Using the
+// configured tool paths here keeps an external/local source from oscillating
+// between its real REST state and a launcher-derived SSE state.
+func (ds *DashboardServer) pollSystemStatus() *status.SystemStatus {
+	return status.PollAllWithPaths(ds.codebasePath(), ds.rtkPath(), ds.headroomPath(), ds.projectObsidian() != nil)
+}
+
+func (ds *DashboardServer) statusSnapshotForProject(project string) *status.SystemStatus {
+	return ds.statusProjectionForProject(ds.pollSystemStatus(), project)
+}
+
+// statusProjectionForProject copies the global probe result before adding a
+// project-scoped component projection. Runtime and lifecycle evidence remain
+// global; only capability uses project.
+func (ds *DashboardServer) statusProjectionForProject(all *status.SystemStatus, project string) *status.SystemStatus {
+	return ds.enrichSystemStatusForProject(cloneSystemStatus(all), project)
+}
+
+func cloneSystemStatus(all *status.SystemStatus) *status.SystemStatus {
+	if all == nil {
+		return nil
+	}
+	clone := *all
+	clone.Tools = append([]status.ToolStatus(nil), all.Tools...)
+	if all.ToolErrors != nil {
+		clone.ToolErrors = make(map[string]string, len(all.ToolErrors))
+		for key, value := range all.ToolErrors {
+			clone.ToolErrors[key] = value
+		}
+	}
+	return &clone
+}
+
+// enrichSystemStatus overlays the reconciler's lifecycle states and MCP
+// activity on the probe-derived status. The probes answer "is the HTTP
+// health endpoint answering right now"; the reconciler answers "what phase
+// of its lifecycle is the managed service in" — both facts travel together
+// so the UI never has to collapse unknown into offline.
+func (ds *DashboardServer) enrichSystemStatus(all *status.SystemStatus) *status.SystemStatus {
+	return ds.enrichSystemStatusForProject(all, ds.defaultStatusProject())
+}
+
+func (ds *DashboardServer) enrichSystemStatusForProject(all *status.SystemStatus, project string) *status.SystemStatus {
+	if all == nil {
+		return nil
+	}
+	if ds.RuntimeState != nil {
+		for i := range all.Tools {
+			t := &all.Tools[i]
+			proc := rsNameForTool(t.Name)
+			if proc == "" {
+				continue
+			}
+			if info, ok := ds.RuntimeState.GetProcess(proc); ok {
+				if info.State != "" {
+					t.RuntimeState = info.State
+				}
+				// RuntimeState holds the reconciler's observed effective port. It
+				// must override a probe's requested/stale value so legacy tools
+				// and v2 components describe the same endpoint after a fallback.
+				if info.EffectivePort > 0 {
+					t.Port = info.EffectivePort
+				} else if info.Port > 0 {
+					t.Port = info.Port
+				}
+				if t.Error == "" && info.LastError != "" && info.State != "" && info.State != "healthy" {
+					t.Error = info.LastError
+				}
+			}
+			// Activity is reported only after a DWYT-owned endpoint observed a
+			// call. Client-owned stdio remains unknown/configured, never offline.
+			t.MCPActivity = string(ds.componentMCPActivity(proc))
+		}
+		all.ToolErrors = ds.RuntimeState.ToolErrorsSnapshot()
+	}
+	// v2 is additive: legacy tools[] remains populated while components[] is
+	// assembled server-side from probes, lifecycle state, configuration and the
+	// selected project's capabilities. The UI receives no raw boolean heuristic.
+	all.Components = ds.buildComponentStatusesForProject(all, project)
+	all.Status = status.OverallState(all.Components)
+	all.ProjectPath = project
+	return all
+}
+
+// rsNameForTool maps a status tool name to the runtime-state process key.
+func rsNameForTool(tool string) string {
+	switch tool {
+	case "codebase-memory-mcp":
+		return "codebase"
+	case "headroom":
+		return "headroom"
+	case "obsidian":
+		return "obsidian"
+	default:
+		return ""
+	}
 }
 
 func (ds *DashboardServer) apiMetrics(c *gin.Context) {
@@ -182,10 +317,14 @@ func (ds *DashboardServer) recordSavingsSnapshot(projectPath string, details map
 		if d == nil || d.UptimeSecs == -1 {
 			continue // tool not installed — skip
 		}
-		ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d))
+		if err := ds.Store.RecordMetricDeltas(pid, tool, toolMetrics(d)); err != nil {
+			log.Warn("status metric delta persistence failed", log.Fields{"project": projectPath, "tool": tool, "error": err.Error()})
+		}
 	}
 	// Keep the event log bounded: nothing is queried beyond 7 days.
-	ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix())
+	if err := ds.Store.PruneMetricEvents(time.Now().Add(-8 * 24 * time.Hour).Unix()); err != nil {
+		log.Warn("status metric event pruning failed", log.Fields{"project": projectPath, "error": err.Error()})
+	}
 }
 
 // applySavingsWindow rewrites every counter on each card to reflect only the
@@ -344,7 +483,7 @@ func isPortOpen(port int) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return true
 }
 
@@ -470,7 +609,7 @@ func (ds *DashboardServer) detailHeadroom() *ToolDetail {
 	statsURL := fmt.Sprintf("http://127.0.0.1:%d/stats", port)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, err := client.Get(statsURL); err == nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var stats map[string]interface{}
 		if json.NewDecoder(resp.Body).Decode(&stats) == nil {
 			d.TokensSaved = headroomTokensSaved(stats)

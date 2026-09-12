@@ -1,6 +1,8 @@
 package brain
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -130,7 +132,9 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	}
 
 	brainDir := baseDir
-	os.MkdirAll(brainDir, 0755)
+	if err := os.MkdirAll(brainDir, 0755); err != nil {
+		return nil, fmt.Errorf("obsidian: create vault directory: %w", err)
+	}
 
 	dirs := []string{
 		"knowledge",
@@ -149,7 +153,9 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		".dwyt",
 	}
 	for _, d := range dirs {
-		os.MkdirAll(filepath.Join(brainDir, d), 0755)
+		if err := os.MkdirAll(filepath.Join(brainDir, d), 0755); err != nil {
+			return nil, fmt.Errorf("obsidian: create vault subdirectory %q: %w", d, err)
+		}
 	}
 
 	pb := &ProjectObsidian{
@@ -175,7 +181,9 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 		pb.RebuildSummary()
 	}
 
-	ensureBrainJSON(baseDir, projectPath)
+	if err := ensureBrainJSON(baseDir, projectPath); err != nil {
+		return nil, err
+	}
 	// vault.json is the durable identity of the vault (project_hash +
 	// project_name + directory_name). It is what allows a future migration to
 	// recover the project name when the registry or runtime state is gone.
@@ -186,7 +194,9 @@ func NewProjectObsidian(dwytHome, projectPath string) (*ProjectObsidian, error) 
 	}); err != nil {
 		log.Warn("vault: failed to write metadata", log.Fields{"dir": brainDir, "error": err.Error()})
 	}
-	ensureSeedFiles(brainDir)
+	if err := ensureSeedFiles(brainDir); err != nil {
+		return nil, err
+	}
 	return pb, nil
 }
 
@@ -212,12 +222,21 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 	}
 
 	legacyInfo, legacyErr := os.Stat(legacyDir)
-	canonicalInfo, canonicalErr := os.Stat(canonicalDir)
 
-	// No legacy directory → just use the canonical path.
-	if legacyErr != nil || !legacyInfo.IsDir() {
+	// No legacy directory → just use the canonical path. A different stat
+	// failure is not evidence that no legacy data exists, so do not migrate
+	// based on an incomplete filesystem view.
+	if legacyErr != nil {
+		if os.IsNotExist(legacyErr) {
+			return canonicalDir, nil
+		}
+		return "", fmt.Errorf("vault: inspect legacy path %s: %w", legacyDir, legacyErr)
+	}
+	if !legacyInfo.IsDir() {
 		return canonicalDir, nil
 	}
+
+	canonicalInfo, canonicalErr := os.Stat(canonicalDir)
 
 	// Canonical path exists but is NOT a directory (a stray file with an
 	// unlucky name). Renaming onto it would fail on every platform, and
@@ -232,7 +251,7 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 
 	// Canonical directory already exists. Decide which one wins.
 	switch {
-	case canonicalErr != nil || !canonicalInfo.IsDir():
+	case os.IsNotExist(canonicalErr):
 		// Canonical doesn't exist yet → rename legacy into place.
 		if err := os.MkdirAll(projectsDir, 0755); err != nil {
 			return "", fmt.Errorf("vault: prepare projects dir: %w", err)
@@ -248,6 +267,8 @@ func adoptLegacyVaultLayout(dwytHome, projectHash, projectName string) (string, 
 			log.Warn("vault: obsidian registry update failed", log.Fields{"error": err.Error()})
 		}
 		return canonicalDir, nil
+	case canonicalErr != nil:
+		return "", fmt.Errorf("vault: inspect canonical path %s: %w", canonicalDir, canonicalErr)
 	default:
 		// Both exist. Keep the canonical (newer) directory untouched and
 		// log a warning so the user can decide how to merge.
@@ -264,7 +285,7 @@ func samePath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-func ensureSeedFiles(brainDir string) {
+func ensureSeedFiles(brainDir string) error {
 	seeds := map[string]string{
 		"index.md": `---
 type: index
@@ -489,48 +510,393 @@ Links: [[context/index]] [[maps/project-map]] [[instructions/codebase-law]] [[in
 	}
 	for name, content := range seeds {
 		path := filepath.Join(brainDir, name)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.MkdirAll(filepath.Dir(path), 0755)
-			os.WriteFile(path, []byte(content), 0644)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("obsidian: stat seed file %q: %w", name, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return fmt.Errorf("obsidian: create seed directory for %q: %w", name, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("obsidian: write seed file %q: %w", name, err)
 		}
 	}
+	return nil
 }
 
 func MigrateOldMemoryDirs(dwytHome string) error {
+	return MigrateOldMemoryDirsContext(context.Background(), dwytHome)
+}
+
+type legacyMemoryPayload struct {
+	Entries []legacyMemoryEntry `json:"entries"`
+}
+
+type legacyMemoryEntry struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+const (
+	legacyMemoryPlanVersion = 1
+	legacyMemoryPlanSource  = "memory/memory.json"
+)
+
+type legacyMemoryMigrationPlan struct {
+	Version    int                           `json:"version"`
+	Source     string                        `json:"source"`
+	SourceHash string                        `json:"source_hash"`
+	Targets    []legacyMemoryMigrationTarget `json:"targets"`
+	Completed  bool                          `json:"completed"`
+}
+
+type legacyMemoryMigrationTarget struct {
+	Path         string `json:"path"`
+	BeforeSHA256 string `json:"before_sha256"`
+	After        string `json:"after"`
+}
+
+func MigrateOldMemoryDirsContext(ctx context.Context, dwytHome string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
+	if os.IsNotExist(err) {
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("read legacy memory projects directory %s: %w", projectsDir, err)
+	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !entry.IsDir() {
 			continue
 		}
 		baseDir := filepath.Join(projectsDir, entry.Name())
+		plan, hasPlan, err := readLegacyMemoryPlan(baseDir)
+		if err != nil {
+			return err
+		}
 		memoryDir := filepath.Join(baseDir, "memory")
-		if info, err := os.Stat(memoryDir); err == nil && info.IsDir() {
-			memoryFile := filepath.Join(memoryDir, "memory.json")
-			if data, err := os.ReadFile(memoryFile); err == nil && len(data) > 2 {
-				_ = migrateLegacyVaultLayout(baseDir)
-				os.MkdirAll(filepath.Join(baseDir, "knowledge"), 0755)
-				os.MkdirAll(filepath.Join(baseDir, "logs"), 0755)
-				ensureSeedFiles(baseDir)
-				var pm struct {
-					Entries []struct {
-						Type    string `json:"type"`
-						Content string `json:"content"`
-					} `json:"entries"`
-				}
-				if err := json.Unmarshal(data, &pm); err == nil {
-					for _, e := range pm.Entries {
-						appendToMarkdown(baseDir, e.Type, e.Content)
-					}
+		memoryInfo, err := os.Stat(memoryDir)
+		if os.IsNotExist(err) {
+			if hasPlan && !plan.Completed {
+				if err := resumeLegacyMemoryPlan(ctx, baseDir, plan); err != nil {
+					return err
 				}
 			}
-			os.RemoveAll(memoryDir)
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("stat legacy memory directory %s: %w", memoryDir, err)
+		}
+		if !memoryInfo.IsDir() {
+			continue
+		}
+
+		memoryFile := filepath.Join(memoryDir, "memory.json")
+		data, err := os.ReadFile(memoryFile)
+		if os.IsNotExist(err) {
+			if !hasPlan {
+				if err := removeEmptyLegacyMemoryDir(memoryDir); err != nil {
+					return err
+				}
+				continue
+			}
+			if !plan.Completed {
+				if err := resumeLegacyMemoryPlan(ctx, baseDir, plan); err != nil {
+					return err
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := removeEmptyLegacyMemoryDir(memoryDir); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read legacy memory file %s: %w", memoryFile, err)
+		}
+
+		var payload legacyMemoryPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return fmt.Errorf("decode legacy memory file %s: %w", memoryFile, err)
+		}
+		if err := migrateLegacyVaultLayout(baseDir); err != nil {
+			return fmt.Errorf("migrate legacy vault layout %s: %w", baseDir, err)
+		}
+		if err := os.MkdirAll(filepath.Join(baseDir, "knowledge"), 0755); err != nil {
+			return fmt.Errorf("create migrated knowledge directory %s: %w", baseDir, err)
+		}
+		if err := os.MkdirAll(filepath.Join(baseDir, "logs"), 0755); err != nil {
+			return fmt.Errorf("create migrated logs directory %s: %w", baseDir, err)
+		}
+		if err := ensureSeedFiles(baseDir); err != nil {
+			return fmt.Errorf("seed migrated vault %s: %w", baseDir, err)
+		}
+
+		sourceHash := legacyMemoryContentHash(data)
+		if hasPlan {
+			if plan.Source != legacyMemoryPlanSource || plan.SourceHash != sourceHash {
+				return fmt.Errorf("legacy memory plan for %s does not match its source", baseDir)
+			}
+			// Preserve the legacy source as a verified backup after completion.
+			// It also prevents a concurrent writer from losing a replacement
+			// memory.json during cleanup.
+			if plan.Completed {
+				continue
+			}
+		} else {
+			partiallyImported, err := legacyMemoryAppearsPartiallyImported(ctx, baseDir, payload)
+			if err != nil {
+				return err
+			}
+			if partiallyImported {
+				return fmt.Errorf("legacy memory import for %s appears partially applied; preserving source for manual reconciliation", baseDir)
+			}
+			plan, err = newLegacyMemoryPlan(ctx, baseDir, sourceHash, payload)
+			if err != nil {
+				return err
+			}
+			if err := writeLegacyMemoryPlan(baseDir, plan); err != nil {
+				return err
+			}
+		}
+		if err := resumeLegacyMemoryPlan(ctx, baseDir, plan); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// The completed plan is the durable import record. Retain memory.json
+		// as a source backup rather than racing a legacy writer during cleanup.
+	}
+	return nil
+}
+
+func legacyMemoryPlanPath(baseDir string) string {
+	return filepath.Join(baseDir, ".dwyt", "legacy-memory-plan.json")
+}
+
+// removeEmptyLegacyMemoryDir only removes a proven-empty residue. It never
+// recursively deletes a directory because an interrupted cleanup or a legacy
+// writer may have added data after the import plan was recorded.
+func removeEmptyLegacyMemoryDir(memoryDir string) error {
+	entries, err := os.ReadDir(memoryDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read residual legacy memory directory %s: %w", memoryDir, err)
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("legacy memory source missing with residual files in %s", memoryDir)
+	}
+	if err := os.Remove(memoryDir); err != nil {
+		return fmt.Errorf("remove empty migrated memory directory %s: %w", memoryDir, err)
+	}
+	return nil
+}
+
+func readLegacyMemoryPlan(baseDir string) (*legacyMemoryMigrationPlan, bool, error) {
+	data, err := os.ReadFile(legacyMemoryPlanPath(baseDir))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read legacy memory plan: %w", err)
+	}
+	var plan legacyMemoryMigrationPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return nil, false, fmt.Errorf("decode legacy memory plan: %w", err)
+	}
+	if plan.Version != legacyMemoryPlanVersion || plan.Source != legacyMemoryPlanSource {
+		return nil, false, fmt.Errorf("unsupported legacy memory plan in %s", baseDir)
+	}
+	for _, target := range plan.Targets {
+		if _, err := legacyMemoryPlanTargetPath(baseDir, target.Path); err != nil {
+			return nil, false, err
+		}
+	}
+	return &plan, true, nil
+}
+
+func writeLegacyMemoryPlan(baseDir string, plan *legacyMemoryMigrationPlan) error {
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode legacy memory plan: %w", err)
+	}
+	if err := WriteFileAtomic(legacyMemoryPlanPath(baseDir), append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("write legacy memory plan: %w", err)
+	}
+	return nil
+}
+
+func newLegacyMemoryPlan(ctx context.Context, baseDir, sourceHash string, payload legacyMemoryPayload) (*legacyMemoryMigrationPlan, error) {
+	now := time.Now()
+	entriesByTarget := make(map[string]*strings.Builder)
+	var targetOrder []string
+	for _, legacy := range payload.Entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		entryType := safeEntryName(legacy.Type)
+		relativeTarget := legacyMemoryTargetRelative(entryType, now)
+		builder := entriesByTarget[relativeTarget]
+		if builder == nil {
+			builder = &strings.Builder{}
+			entriesByTarget[relativeTarget] = builder
+			targetOrder = append(targetOrder, relativeTarget)
+		}
+		builder.WriteString(legacyMarkdownEntry(entryType, legacy.Content, now))
+	}
+
+	plan := &legacyMemoryMigrationPlan{
+		Version:    legacyMemoryPlanVersion,
+		Source:     legacyMemoryPlanSource,
+		SourceHash: sourceHash,
+		Targets:    make([]legacyMemoryMigrationTarget, 0, len(targetOrder)),
+	}
+	for _, relativeTarget := range targetOrder {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		targetPath, err := legacyMemoryPlanTargetPath(baseDir, relativeTarget)
+		if err != nil {
+			return nil, err
+		}
+		existing, err := readLegacyMemoryTarget(targetPath)
+		if err != nil {
+			return nil, err
+		}
+		after := string(existing) + entriesByTarget[relativeTarget].String()
+		plan.Targets = append(plan.Targets, legacyMemoryMigrationTarget{
+			Path:         relativeTarget,
+			BeforeSHA256: legacyMemoryContentHash(existing),
+			After:        after,
+		})
+	}
+	return plan, nil
+}
+
+func legacyMemoryTargetRelative(entryType string, now time.Time) string {
+	switch entryType {
+	case "decision":
+		return "decisions.md"
+	case "task":
+		return "tasks.md"
+	case "error", "command":
+		return filepath.ToSlash(filepath.Join("logs", entryType+"-"+now.Format("2006-01-02")+".md"))
+	default:
+		return filepath.ToSlash(filepath.Join("knowledge", entryType+"-"+now.Format("150405")+".md"))
+	}
+}
+
+func legacyMemoryPlanTargetPath(baseDir, relativeTarget string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(relativeTarget))
+	if filepath.IsAbs(cleaned) || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid legacy memory plan target %q", relativeTarget)
+	}
+	return filepath.Join(baseDir, cleaned), nil
+}
+
+func readLegacyMemoryTarget(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read legacy memory target %q: %w", path, err)
+	}
+	return data, nil
+}
+
+func resumeLegacyMemoryPlan(ctx context.Context, baseDir string, plan *legacyMemoryMigrationPlan) error {
+	for _, target := range plan.Targets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		targetPath, err := legacyMemoryPlanTargetPath(baseDir, target.Path)
+		if err != nil {
+			return err
+		}
+		current, err := readLegacyMemoryTarget(targetPath)
+		if err != nil {
+			return err
+		}
+		if string(current) == target.After {
+			continue
+		}
+		if legacyMemoryContentHash(current) != target.BeforeSHA256 {
+			return fmt.Errorf("legacy memory target %q changed while migration was incomplete", target.Path)
+		}
+		if err := WriteFileAtomic(targetPath, []byte(target.After), 0644); err != nil {
+			return fmt.Errorf("write legacy memory target %q: %w", target.Path, err)
+		}
+	}
+	if !plan.Completed {
+		plan.Completed = true
+		if err := writeLegacyMemoryPlan(baseDir, plan); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func legacyMemoryContentHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func legacyMemoryAppearsPartiallyImported(ctx context.Context, baseDir string, payload legacyMemoryPayload) (bool, error) {
+	var candidates []string
+	for _, path := range []string{"decisions.md", "tasks.md"} {
+		candidates = append(candidates, filepath.Join(baseDir, path))
+	}
+	for _, dir := range []string{"logs", "knowledge"} {
+		entries, err := os.ReadDir(filepath.Join(baseDir, dir))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("read legacy memory output directory %q: %w", dir, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+				candidates = append(candidates, filepath.Join(baseDir, dir, entry.Name()))
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		data, err := readLegacyMemoryTarget(candidate)
+		if err != nil {
+			return false, err
+		}
+		content := string(data)
+		if !strings.Contains(content, "migrated: true\n") {
+			continue
+		}
+		for _, legacy := range payload.Entries {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			entryType := safeEntryName(legacy.Type)
+			signature := fmt.Sprintf("## %s\n\n%s\n\n---\n\n", entryType, legacy.Content)
+			if strings.Contains(content, signature) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // migrateLegacyVaultLayout flattens older project layouts where the vault
@@ -608,8 +974,9 @@ func safeEntryName(entryType string) string {
 	return name
 }
 
-func appendToMarkdown(brainDir, entryType, content string) {
+func appendToMarkdown(brainDir, entryType, content string) error {
 	entryType = safeEntryName(entryType)
+	now := time.Now()
 	var targetFile string
 	switch entryType {
 	case "decision":
@@ -617,25 +984,33 @@ func appendToMarkdown(brainDir, entryType, content string) {
 	case "task":
 		targetFile = filepath.Join(brainDir, "tasks.md")
 	case "error", "command":
-		targetFile = filepath.Join(brainDir, "logs", entryType+"-"+time.Now().Format("2006-01-02")+".md")
+		targetFile = filepath.Join(brainDir, "logs", entryType+"-"+now.Format("2006-01-02")+".md")
 	default:
-		targetFile = filepath.Join(brainDir, "knowledge", entryType+"-"+time.Now().Format("150405")+".md")
+		targetFile = filepath.Join(brainDir, "knowledge", entryType+"-"+now.Format("150405")+".md")
 	}
+	return appendMarkdownEntry(targetFile, legacyMarkdownEntry(entryType, content, now))
+}
 
+func legacyMarkdownEntry(entryType, content string, now time.Time) string {
 	frontmatter := fmt.Sprintf(`---
 type: %s
 date: %s
 migrated: true
 ---
 
-`, entryType, time.Now().Format(time.RFC3339))
+`, entryType, now.Format(time.RFC3339))
+	return fmt.Sprintf("%s## %s\n\n%s\n\n---\n\n", frontmatter, entryType, content)
+}
 
-	existing := ""
-	if data, err := os.ReadFile(targetFile); err == nil {
-		existing = string(data)
+func appendMarkdownEntry(targetFile, entry string) error {
+	existing, err := readLegacyMemoryTarget(targetFile)
+	if err != nil {
+		return err
 	}
-	entry := fmt.Sprintf("%s## %s\n\n%s\n\n---\n\n", frontmatter, entryType, content)
-	os.WriteFile(targetFile, []byte(existing+entry), 0644)
+	if err := atomicWriteFile(targetFile, append(existing, []byte(entry)...), 0644); err != nil {
+		return fmt.Errorf("write migrated note %q: %w", targetFile, err)
+	}
+	return nil
 }
 
 func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) error {
@@ -667,7 +1042,7 @@ func (pb *ProjectObsidian) SaveEntry(entryType, content string, tags []string) e
 // (spec §19). It remains available for the case the spec explicitly reserves it
 // for: a complex handoff where the commands, actions and prose genuinely need to
 // survive. Callers reach it through `POST /api/obsidian/context?rich=true`.
-func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string, error) {
+func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (path string, retErr error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	defer pb.invalidateStats()
@@ -687,43 +1062,81 @@ func (pb *ProjectObsidian) SaveContextSnapshot(snapshot ContextSnapshot) (string
 		return "", fmt.Errorf("obsidian context save: %w", err)
 	}
 	id := fmt.Sprintf("%s_context_%d", now.Format("2006-01-02_150405"), now.UnixNano()%10000)
-	path := filepath.Join(dir, id+".md")
+	path = filepath.Join(dir, id+".md")
 
 	f, err := os.Create(path)
 	if err != nil {
 		return "", fmt.Errorf("obsidian context save: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); retErr == nil && closeErr != nil {
+			path = ""
+			retErr = fmt.Errorf("obsidian context save close: %w", closeErr)
+		}
+	}()
 
-	writeContextFrontmatter(f, snapshot, pb, now)
-	fmt.Fprintf(f, "# Conversation Context - %s\n\n", now.Format("2006-01-02 15:04"))
-	writeVaultLinks(f)
-	fmt.Fprintf(f, "Project: %s\n\nPath: %s\n\nClient: %s\n\n", pb.ProjectName, pb.ProjectPath, snapshot.Client)
-	if snapshot.ConversationID != "" {
-		fmt.Fprintf(f, "Conversation: %s\n\n", snapshot.ConversationID)
+	if err := writeContextFrontmatter(f, snapshot, pb, now); err != nil {
+		return "", fmt.Errorf("obsidian context save frontmatter: %w", err)
 	}
-	writeMarkdownSection(f, "User Request", snapshot.UserRequest)
-	writeMarkdownSection(f, "Summary", snapshot.Summary)
-	writeMarkdownSection(f, "Context", snapshot.Context)
-	writeMarkdownSection(f, "Outcome", snapshot.Outcome)
-	writeMarkdownList(f, "Files", snapshot.Files)
-	writeMarkdownList(f, "Decisions", snapshot.Decisions)
-	writeMarkdownList(f, "Actions", snapshot.Actions)
-	writeMarkdownList(f, "Commands", snapshot.Commands)
-	writeMarkdownList(f, "Errors", snapshot.Errors)
-	writeMarkdownList(f, "Next Steps", snapshot.NextSteps)
+	if err := writeFileString(f, fmt.Sprintf("# Conversation Context - %s\n\n", now.Format("2006-01-02 15:04"))); err != nil {
+		return "", fmt.Errorf("obsidian context save heading: %w", err)
+	}
+	if err := writeVaultLinks(f); err != nil {
+		return "", fmt.Errorf("obsidian context save links: %w", err)
+	}
+	if err := writeFileString(f, fmt.Sprintf("Project: %s\n\nPath: %s\n\nClient: %s\n\n", pb.ProjectName, pb.ProjectPath, snapshot.Client)); err != nil {
+		return "", fmt.Errorf("obsidian context save project details: %w", err)
+	}
+	if snapshot.ConversationID != "" {
+		if err := writeFileString(f, fmt.Sprintf("Conversation: %s\n\n", snapshot.ConversationID)); err != nil {
+			return "", fmt.Errorf("obsidian context save conversation: %w", err)
+		}
+	}
+	for _, section := range []struct {
+		title   string
+		content string
+	}{
+		{title: "User Request", content: snapshot.UserRequest},
+		{title: "Summary", content: snapshot.Summary},
+		{title: "Context", content: snapshot.Context},
+		{title: "Outcome", content: snapshot.Outcome},
+	} {
+		if err := writeMarkdownSection(f, section.title, section.content); err != nil {
+			return "", fmt.Errorf("obsidian context save %s: %w", strings.ToLower(strings.ReplaceAll(section.title, " ", "-")), err)
+		}
+	}
+	for _, list := range []struct {
+		title string
+		items []string
+	}{
+		{title: "Files", items: snapshot.Files},
+		{title: "Decisions", items: snapshot.Decisions},
+		{title: "Actions", items: snapshot.Actions},
+		{title: "Commands", items: snapshot.Commands},
+		{title: "Errors", items: snapshot.Errors},
+		{title: "Next Steps", items: snapshot.NextSteps},
+	} {
+		if err := writeMarkdownList(f, list.title, list.items); err != nil {
+			return "", fmt.Errorf("obsidian context save %s: %w", strings.ToLower(strings.ReplaceAll(list.title, " ", "-")), err)
+		}
+	}
 	if len(snapshot.Metadata) > 0 {
-		fmt.Fprintln(f, "## Metadata")
-		fmt.Fprintln(f)
+		if err := writeFileString(f, "## Metadata\n\n"); err != nil {
+			return "", fmt.Errorf("obsidian context save metadata heading: %w", err)
+		}
 		keys := make([]string, 0, len(snapshot.Metadata))
 		for k := range snapshot.Metadata {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Fprintf(f, "- %s: %s\n", k, snapshot.Metadata[k])
+			if err := writeFileString(f, fmt.Sprintf("- %s: %s\n", k, snapshot.Metadata[k])); err != nil {
+				return "", fmt.Errorf("obsidian context save metadata value: %w", err)
+			}
 		}
-		fmt.Fprintln(f)
+		if err := writeFileString(f, "\n"); err != nil {
+			return "", fmt.Errorf("obsidian context save metadata spacing: %w", err)
+		}
 	}
 
 	return path, nil
@@ -741,7 +1154,7 @@ func (pb *ProjectObsidian) appendToTasksLogLocked(content string, now time.Time)
 	return appendFile(path, entry)
 }
 
-func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []string, now time.Time) error {
+func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []string, now time.Time) (retErr error) {
 	dir := filepath.Join(pb.brainDir, "logs")
 	switch entryType {
 	case "error", "debug":
@@ -751,48 +1164,80 @@ func (pb *ProjectObsidian) saveToLogsLocked(entryType, content string, tags []st
 	case "session":
 		dir = filepath.Join(pb.brainDir, "logs", "sessions")
 	}
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("obsidian save: create log directory: %w", err)
+	}
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("obsidian save: %w", err)
 	}
-	defer f.Close()
-	writeFrontmatter(f, entryType, tags, now)
-	fmt.Fprintf(f, "# %s\n\n", entryType)
-	writeVaultLinks(f)
-	fmt.Fprintf(f, "%s\n", content)
+	defer func() {
+		if closeErr := f.Close(); retErr == nil && closeErr != nil {
+			retErr = fmt.Errorf("obsidian save: close log entry: %w", closeErr)
+		}
+	}()
+	if err := writeFrontmatter(f, entryType, tags, now); err != nil {
+		return fmt.Errorf("obsidian save: write log frontmatter: %w", err)
+	}
+	if err := writeFileString(f, fmt.Sprintf("# %s\n\n", entryType)); err != nil {
+		return fmt.Errorf("obsidian save: write log heading: %w", err)
+	}
+	if err := writeVaultLinks(f); err != nil {
+		return fmt.Errorf("obsidian save: write log links: %w", err)
+	}
+	if err := writeFileString(f, content+"\n"); err != nil {
+		return fmt.Errorf("obsidian save: write log content: %w", err)
+	}
 	return nil
 }
 
-func (pb *ProjectObsidian) saveToKnowledgeLocked(entryType, content string, tags []string, now time.Time) error {
+func (pb *ProjectObsidian) saveToKnowledgeLocked(entryType, content string, tags []string, now time.Time) (retErr error) {
 	dir := filepath.Join(pb.brainDir, "knowledge")
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("obsidian save: create knowledge directory: %w", err)
+	}
 	id := fmt.Sprintf("%s_%s_%d", now.Format("2006-01-02_1504"), entryType, now.UnixNano()%10000)
 	path := filepath.Join(dir, id+".md")
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("obsidian save: %w", err)
 	}
-	defer f.Close()
-	writeFrontmatter(f, entryType, tags, now)
+	defer func() {
+		if closeErr := f.Close(); retErr == nil && closeErr != nil {
+			retErr = fmt.Errorf("obsidian save: close knowledge entry: %w", closeErr)
+		}
+	}()
+	if err := writeFrontmatter(f, entryType, tags, now); err != nil {
+		return fmt.Errorf("obsidian save: write knowledge frontmatter: %w", err)
+	}
 	title := content
 	if len(title) > 60 {
 		title = title[:57] + "..."
 	}
-	fmt.Fprintf(f, "# %s\n\n", title)
-	writeVaultLinks(f)
-	fmt.Fprintf(f, "%s\n", content)
+	if err := writeFileString(f, fmt.Sprintf("# %s\n\n", title)); err != nil {
+		return fmt.Errorf("obsidian save: write knowledge heading: %w", err)
+	}
+	if err := writeVaultLinks(f); err != nil {
+		return fmt.Errorf("obsidian save: write knowledge links: %w", err)
+	}
+	if err := writeFileString(f, content+"\n"); err != nil {
+		return fmt.Errorf("obsidian save: write knowledge content: %w", err)
+	}
 	return nil
 }
 
-func appendFile(path, content string) error {
+func appendFile(path, content string) (retErr error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); retErr == nil && closeErr != nil {
+			retErr = closeErr
+		}
+	}()
 	_, err = f.WriteString(content)
 	return err
 }
@@ -812,13 +1257,16 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 	var results []BrainEntry
 	query = strings.ToLower(query)
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+	walkErr := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("read vault note %s: %w", path, err)
 		}
 		content := string(data)
 		if strings.Contains(strings.ToLower(content), query) {
@@ -834,6 +1282,9 @@ func (pb *ProjectObsidian) Search(query string) []BrainEntry {
 		}
 		return nil
 	})
+	if walkErr != nil {
+		log.Warn("obsidian search incomplete", log.Fields{"path": pb.brainDir, "error": walkErr.Error()})
+	}
 
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].CreatedAt.After(results[j].CreatedAt)
@@ -877,20 +1328,29 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	var parts []string
 	typeCount := map[string]int{}
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+	if err := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
 		entryType := detectType(pb.brainDir, path)
 		typeCount[entryType]++
 
-		data, _ := os.ReadFile(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read vault note %s: %w", path, err)
+		}
 		content := string(data)
 		if title := extractTitle(content); title != "" {
 			parts = append(parts, title)
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Warn("obsidian summary rebuild incomplete", log.Fields{"path": pb.brainDir, "error": err.Error()})
+		return pb.Summary
+	}
 
 	summary := fmt.Sprintf("# %s — Project Brain\n\n", pb.ProjectName)
 	summary += fmt.Sprintf("**Last updated:** %s\n\n", time.Now().Format(time.RFC3339))
@@ -907,11 +1367,21 @@ func (pb *ProjectObsidian) RebuildSummary() string {
 	pb.Summary = summary
 	pb.UpdatedAt = time.Now()
 	contextFile := filepath.Join(pb.brainDir, "context.md")
-	os.WriteFile(contextFile, []byte(summary), 0644)
+	if err := atomicWriteFile(contextFile, []byte(summary), 0644); err != nil {
+		log.Warn("obsidian: failed to persist summary", log.Fields{"path": contextFile, "error": err.Error()})
+	}
 	return summary
 }
 
 func (pb *ProjectObsidian) Stats() map[string]interface{} {
+	stats, _ := pb.StatsContext(context.Background())
+	return stats
+}
+
+func (pb *ProjectObsidian) StatsContext(ctx context.Context) (map[string]interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Short TTL cache: the dashboard polls every few seconds and several
 	// handlers call Stats() within a single poll. Walking the vault each time
 	// is wasteful, so reuse a recent result. Writes invalidate via invalidateStats.
@@ -919,7 +1389,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	if pb.statsCache != nil && time.Since(pb.statsAt) < 2*time.Second {
 		cached := pb.statsCache
 		pb.statsMu.Unlock()
-		return cached
+		return cached, nil
 	}
 	pb.statsMu.Unlock()
 
@@ -930,8 +1400,14 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	totalFiles := 0
 	var totalBytes int64
 
-	filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+	walkErr := filepath.Walk(pb.brainDir, func(path string, info os.FileInfo, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			return fmt.Errorf("walk vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 			return nil
 		}
 		totalFiles++
@@ -940,6 +1416,9 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 		typeCount[entryType]++
 		return nil
 	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
 
 	result := map[string]interface{}{
 		"project_id":    pb.ProjectID,
@@ -960,7 +1439,7 @@ func (pb *ProjectObsidian) Stats() map[string]interface{} {
 	pb.statsCache = result
 	pb.statsAt = time.Now()
 	pb.statsMu.Unlock()
-	return result
+	return result, nil
 }
 
 // invalidateStats drops the cached Stats() result so the next read reflects a
@@ -998,7 +1477,9 @@ func (pb *ProjectObsidian) RegisterObsidianVault() error {
 
 	config := map[string]interface{}{}
 	if data, err := os.ReadFile(configPath); err == nil && len(data) > 0 {
-		json.Unmarshal(data, &config)
+		if err := json.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("obsidian: decode vault registry: %w", err)
+		}
 	}
 
 	vaults, _ := config["vaults"].(map[string]interface{})
@@ -1094,13 +1575,19 @@ func CountVaultFiles(dwytHome, projectPath string) (int, bool) {
 			continue
 		}
 		count := 0
-		filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
+		if err := filepath.Walk(baseDir, func(path string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return fmt.Errorf("walk vault path %s: %w", path, err)
+			}
+			if fi.IsDir() || filepath.Ext(path) != ".md" || filepath.Base(path) == "context.md" {
 				return nil
 			}
 			count++
 			return nil
-		})
+		}); err != nil {
+			log.Warn("vault file count incomplete", log.Fields{"path": baseDir, "error": err.Error()})
+			continue
+		}
 		return count, true
 	}
 	return 0, false
@@ -1136,56 +1623,79 @@ func AutoSaveCommand(pb *ProjectObsidian, command string) error {
 // The legacy `date` field is kept alongside `created_at` because existing
 // Obsidian views and user queries reference it; dropping it would break vaults
 // silently.
-func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Time) {
+func writeFrontmatter(f *os.File, entryType string, tags []string, date time.Time) error {
 	allTags := []string{"dwyt", entryType}
 	allTags = append(allTags, tags...)
-	fmt.Fprintf(f, "---\n")
-	fmt.Fprintf(f, "tags: [%s]\n", strings.Join(allTags, ", "))
-	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprint(f, NewLifecycle(entryType, date).Render())
-	fmt.Fprintf(f, "---\n\n")
-}
-
-func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectObsidian, date time.Time) {
-	fmt.Fprintf(f, "---\n")
-	fmt.Fprintf(f, "tags: [dwyt, context, session, conversation]\n")
-	fmt.Fprintf(f, "date: %s\n", date.Format(time.RFC3339))
-	fmt.Fprint(f, NewLifecycle("context", date).Render())
-	fmt.Fprintf(f, "client: %q\n", snapshot.Client)
-	fmt.Fprintf(f, "project: %q\n", pb.ProjectName)
-	fmt.Fprintf(f, "project_path: %q\n", pb.ProjectPath)
-	if snapshot.ConversationID != "" {
-		fmt.Fprintf(f, "conversation_id: %q\n", snapshot.ConversationID)
+	for _, content := range []string{
+		"---\n",
+		fmt.Sprintf("tags: [%s]\n", strings.Join(allTags, ", ")),
+		fmt.Sprintf("date: %s\n", date.Format(time.RFC3339)),
+		NewLifecycle(entryType, date).Render(),
+		"---\n\n",
+	} {
+		if err := writeFileString(f, content); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintf(f, "---\n\n")
+	return nil
 }
 
-func writeVaultLinks(f *os.File) {
-	fmt.Fprintln(f, "Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]")
-	fmt.Fprintln(f)
+func writeContextFrontmatter(f *os.File, snapshot ContextSnapshot, pb *ProjectObsidian, date time.Time) error {
+	parts := []string{
+		"---\n",
+		"tags: [dwyt, context, session, conversation]\n",
+		fmt.Sprintf("date: %s\n", date.Format(time.RFC3339)),
+		NewLifecycle("context", date).Render(),
+		fmt.Sprintf("client: %q\n", snapshot.Client),
+		fmt.Sprintf("project: %q\n", pb.ProjectName),
+		fmt.Sprintf("project_path: %q\n", pb.ProjectPath),
+	}
+	if snapshot.ConversationID != "" {
+		parts = append(parts, fmt.Sprintf("conversation_id: %q\n", snapshot.ConversationID))
+	}
+	parts = append(parts, "---\n\n")
+	for _, content := range parts {
+		if err := writeFileString(f, content); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func writeMarkdownSection(f *os.File, title, content string) {
+func writeVaultLinks(f *os.File) error {
+	return writeFileString(f, "Links: [[index]] [[maps/project-map]] [[instructions/obsidian-law]] [[instructions/codebase-law]]\n\n")
+}
+
+func writeMarkdownSection(f *os.File, title, content string) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return
+		return nil
 	}
-	fmt.Fprintf(f, "## %s\n\n%s\n\n", title, content)
+	return writeFileString(f, fmt.Sprintf("## %s\n\n%s\n\n", title, content))
 }
 
-func writeMarkdownList(f *os.File, title string, items []string) {
+func writeMarkdownList(f *os.File, title string, items []string) error {
 	if len(items) == 0 {
-		return
+		return nil
 	}
-	fmt.Fprintf(f, "## %s\n\n", title)
+	if err := writeFileString(f, fmt.Sprintf("## %s\n\n", title)); err != nil {
+		return err
+	}
 	for _, item := range items {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
-		fmt.Fprintf(f, "- %s\n", strings.ReplaceAll(item, "\n", "\n  "))
+		if err := writeFileString(f, fmt.Sprintf("- %s\n", strings.ReplaceAll(item, "\n", "\n  "))); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintln(f)
+	return writeFileString(f, "\n")
+}
+
+func writeFileString(f *os.File, content string) error {
+	_, err := f.WriteString(content)
+	return err
 }
 
 func extractTitle(content string) string {
@@ -1250,7 +1760,7 @@ type ProjectMeta struct {
 	ObsidianFiles int       `json:"obsidian_files"`
 }
 
-func ensureBrainJSON(baseDir, projectPath string) {
+func ensureBrainJSON(baseDir, projectPath string) error {
 	projFile := filepath.Join(baseDir, "project.json")
 	meta := ProjectMeta{
 		Name:      filepath.Base(projectPath),
@@ -1259,10 +1769,20 @@ func ensureBrainJSON(baseDir, projectPath string) {
 		LastOpen:  time.Now(),
 	}
 	if data, err := os.ReadFile(projFile); err == nil {
-		json.Unmarshal(data, &meta)
+		if err := json.Unmarshal(data, &meta); err != nil {
+			return fmt.Errorf("obsidian: decode project metadata %q: %w", projFile, err)
+		}
 		meta.LastOpen = time.Now()
 		meta.Path = projectPath
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("obsidian: read project metadata %q: %w", projFile, err)
 	}
-	data, _ := json.MarshalIndent(meta, "", "  ")
-	os.WriteFile(projFile, data, 0644)
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("obsidian: encode project metadata %q: %w", projFile, err)
+	}
+	if err := os.WriteFile(projFile, data, 0644); err != nil {
+		return fmt.Errorf("obsidian: write project metadata %q: %w", projFile, err)
+	}
+	return nil
 }

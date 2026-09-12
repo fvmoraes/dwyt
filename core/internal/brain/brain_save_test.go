@@ -76,7 +76,9 @@ func TestAppendToMarkdownSanitizesType(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(brainDir, "knowledge"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	appendToMarkdown(brainDir, "../../../tmp/dwyt_escape_md", "content")
+	if err := appendToMarkdown(brainDir, "../../../tmp/dwyt_escape_md", "content"); err != nil {
+		t.Fatal(err)
+	}
 
 	knowledgeDir := filepath.Join(brainDir, "knowledge")
 	entries, err := os.ReadDir(knowledgeDir)

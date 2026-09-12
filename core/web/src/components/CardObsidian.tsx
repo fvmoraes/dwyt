@@ -1,13 +1,13 @@
 import { type ChangeEvent } from 'react'
-import type { ToolDetail, BadgeText, ToolState, MCPRegistry } from '../types'
-import { CardHeader, Row, Hr, RepoRow } from './CardParts'
+import type { ComponentStatus, ToolDetail, BadgeText, ToolState, MCPRegistry } from '../types'
+import { CardHeader, ComponentStatusRows, Row, Hr, RepoRow } from './CardParts'
 import Button from './Button'
 import MCPFeedbackBanner from './MCPFeedbackBanner'
 
 interface Props {
   det: ToolDetail | undefined
-  state: ToolState
-  badgeText: BadgeText
+  component?: ComponentStatus
+  badge: (s: ToolState) => BadgeText
   repoName: string
   indexPath: string
   obsidianCount: number
@@ -37,7 +37,7 @@ interface Props {
 }
 
 export default function CardObsidian({
-  det, state, badgeText, repoName, indexPath, obsidianCount,
+  det, component, badge, repoName, indexPath, obsidianCount,
   savingBrain, openingBrain, openingDir, summarizing, configuringMCP,
   mcpRegistry, searchQuery, saveType, saveContent, searchResult,
   configureFeedback, t,
@@ -46,13 +46,12 @@ export default function CardObsidian({
   onSave, onSearch, onSummarize, onOpenVault, onOpenDir, onConfigure,
   onDismissFeedback,
 }: Props) {
+  const state = component?.display_state || 'unknown'
+  const badgeText = badge(state)
+  // Registry state is retained solely to choose Configure/Reconfigure. The
+  // visible state grid is the server-derived components v2 contract.
   const mcp = mcpRegistry['obsidian']
   const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
-  const mcpValue = mcp?.status === 'online'
-    ? `\uD83D\uDFE2 ${t.mcpOnline}`
-    : mcpReady
-      ? `\uD83D\uDFE2 ${t.mcpConfigured}`
-      : `\uD83D\uDD34 ${t.mcpOffline}`
   const configureRunning = configuringMCP === 'obsidian'
   const configureDisabled = configuringMCP !== ''
 
@@ -62,8 +61,8 @@ export default function CardObsidian({
       <Hr />
       <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
-      <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
-      <Row label="MCP" value={mcpValue} />
+      <Row label={t.uptime} value={det?.uptime_label || '—'} />
+      <ComponentStatusRows component={component} t={t} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
       <MCPFeedbackBanner feedback={configureFeedback} name="obsidian" onDismiss={onDismissFeedback} />

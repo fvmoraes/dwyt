@@ -1,14 +1,13 @@
 // Package procutil provides cross-platform process control (liveness checks,
 // graceful/forced termination) and PID-file tracking. The platform-specific
-// behaviour lives in procutil_unix.go and procutil_windows.go; everything in
-// this file is OS-agnostic so the daemon, process manager, and CLI share one
-// reliable way to stop services on Linux, macOS, and Windows.
+// behaviour lives in build-tagged files; everything in this file is
+// OS-agnostic so the daemon, process manager, and CLI share one reliable way
+// to stop services on Linux, macOS, and Windows.
 package procutil
 
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -18,13 +17,11 @@ func PIDDir(dwytHome string) string {
 	return filepath.Join(dwytHome, "run")
 }
 
-// WritePID records pid for a named process under PIDDir(dwytHome).
+// WritePID records a versioned identity for a named process under
+// PIDDir(dwytHome). The process is inspected before the record is atomically
+// published, so a bare caller-supplied PID is never persisted as authority.
 func WritePID(dwytHome, name string, pid int) error {
-	dir := PIDDir(dwytHome)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, name+".pid"), []byte(strconv.Itoa(pid)), 0644)
+	return writePIDWithInspector(dwytHome, name, pid, inspectProcess)
 }
 
 // RemovePID deletes a named PID file (best effort).
@@ -32,20 +29,21 @@ func RemovePID(dwytHome, name string) {
 	_ = os.Remove(filepath.Join(PIDDir(dwytHome), name+".pid"))
 }
 
-// ReadPID reads a single PID file, returning 0 if missing or malformed.
+// ReadPID reads either a versioned PID record or a legacy decimal PID file,
+// returning 0 if the file is missing or malformed. Legacy compatibility here
+// is read-only; StopAllTracked never authorizes termination from a bare PID.
 func ReadPID(path string) int {
-	data, err := os.ReadFile(path)
+	record, _, _, err := readPIDRecordFile(path, false)
 	if err != nil {
 		return 0
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0
-	}
-	return pid
+	return record.PID
 }
 
-// ListPIDs returns name -> pid for every *.pid file in PIDDir(dwytHome).
+// ListPIDs returns name -> pid for every readable *.pid file in
+// PIDDir(dwytHome). Both current JSON records and legacy decimal files are
+// exposed for compatibility, but only validated current records can be used
+// by StopAllTracked.
 func ListPIDs(dwytHome string) map[string]int {
 	dir := PIDDir(dwytHome)
 	out := map[string]int{}
@@ -53,42 +51,23 @@ func ListPIDs(dwytHome string) map[string]int {
 	if err != nil {
 		return out
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".pid") {
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pid") {
 			continue
 		}
-		name := strings.TrimSuffix(e.Name(), ".pid")
-		if pid := ReadPID(filepath.Join(dir, e.Name())); pid > 0 {
+		name := strings.TrimSuffix(entry.Name(), ".pid")
+		if pid := ReadPID(filepath.Join(dir, entry.Name())); pid > 0 {
 			out[name] = pid
 		}
 	}
 	return out
 }
 
-// StopAllTracked terminates every process recorded in PIDDir and clears the
-// PID files. Returns the names that were signalled.
+// StopAllTracked validates and terminates every actionable process record.
+// It preserves the historical signature and returns only names for which the
+// terminator was invoked after a successful identity/start-time validation.
+// Call StopAllTrackedWithReport when per-record failures must be observed.
 func StopAllTracked(dwytHome string) []string {
-	var stopped []string
-	pids := ListPIDs(dwytHome)
-	stop := func(name string, pid int) {
-		if Alive(pid) {
-			_ = TerminateTree(pid)
-		}
-		RemovePID(dwytHome, name)
-		stopped = append(stopped, name)
-	}
-
-	// Stop individually tracked services first. The daemon is a session/group
-	// leader on Unix (and a taskkill tree root on Windows), so stopping it last
-	// prevents an already-killed child PID from being acted on again and also
-	// catches any untracked descendants left by an older release.
-	for name, pid := range pids {
-		if name != "daemon" {
-			stop(name, pid)
-		}
-	}
-	if pid, ok := pids["daemon"]; ok {
-		stop("daemon", pid)
-	}
-	return stopped
+	report, _ := StopAllTrackedWithReport(dwytHome)
+	return report.Signaled
 }

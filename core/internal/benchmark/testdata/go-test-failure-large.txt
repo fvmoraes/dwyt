@@ -1,0 +1,26 @@
+go: downloading github.com/example/mod0 v1.2.0
+go: downloading github.com/example/mod1 v1.2.1
+go: downloading github.com/example/mod2 v1.2.2
+go: downloading github.com/example/mod3 v1.2.3
+go: downloading github.com/example/mod4 v1.2.4
+go: downloading github.com/example/mod5 v1.2.5
+go: downloading github.com/example/mod6 v1.2.6
+go: downloading github.com/example/mod7 v1.2.7
+go: downloading github.com/example/mod8 v1.2.8
+go: downloading github.com/example/mod9 v1.2.9
+ok  	github.com/fvmoraes/dwyt/internal/pkg00	0.001s
+ok  	github.com/fvmoraes/dwyt/internal/pkg01	0.002s
+ok  	github.com/fvmoraes/dwyt/internal/pkg02	0.003s
+ok  	github.com/fvmoraes/dwyt/internal/pkg03	0.004s
+ok  	github.com/fvmoraes/dwyt/internal/pkg04	0.005s
+--- FAIL: TestSearchV2ExcludesStaleNotes (0.00s)
+    search_test.go:51: expected the default top-k of 5, got 9
+    search_test.go:60: note 0 was not excluded
+    search_test.go:61: note 1 was not excluded
+    search_test.go:62: note 2 was not excluded
+    search_test.go:63: note 3 was not excluded
+    search_test.go:64: note 4 was not excluded
+--- FAIL: TestTemperatureClassifiesResolvedAsCold (0.00s)
+    temperature_test.go:33: got warm, want cold
+FAIL	github.com/fvmoraes/dwyt/internal/brain	0.014s
+FAIL

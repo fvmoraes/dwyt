@@ -210,7 +210,7 @@ All notable changes to DWYT are documented here.
 ### ✅ Validation
 
 - `go build ./...` ✅
-- `go vet ./...` ✅  
+- `go vet ./...` ✅
 - `go test ./...` ✅ (17 tests, 22 packages)
 - `npm run lint` ✅ (0 errors, 0 warnings)
 - `npm run build` ✅

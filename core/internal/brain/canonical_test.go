@@ -3,6 +3,7 @@ package brain
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -232,5 +233,115 @@ func TestBodyOfStripsGeneratedHeaders(t *testing.T) {
 	}
 	if !strings.Contains(again.Body, "line three") {
 		t.Fatalf("content lost:\n%s", again.Body)
+	}
+}
+
+func TestUpsertCanonicalPreservesSourceAndStaleStateWhenSourceIsOmitted(t *testing.T) {
+	pb := testVault(t)
+	if err := pb.EnsureCanonicalLayout(); err != nil {
+		t.Fatal(err)
+	}
+	source := SourceRef{File: "internal/api.go", Hash: "sha256:before"}
+	if _, err := pb.UpsertCanonical("architecture", "", "derived architecture\n", source); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := pb.MarkCanonicalStale("architecture"); err != nil || !changed {
+		t.Fatalf("MarkCanonicalStale() = (%v, %v), want (true, nil)", changed, err)
+	}
+
+	if _, err := pb.UpsertCanonical("architecture", "", "updated derived architecture\n", SourceRef{}); err != nil {
+		t.Fatal(err)
+	}
+	note, ok := pb.ReadCanonical("architecture")
+	if !ok {
+		t.Fatal("architecture note should exist")
+	}
+	if note.Lifecycle.SourceFile != source.File || note.Lifecycle.SourceHash != source.Hash {
+		t.Fatalf("source was erased by a source-less update: %+v", note.Lifecycle)
+	}
+	if note.Lifecycle.State != NoteStale {
+		t.Fatalf("state = %q, want stale", note.Lifecycle.State)
+	}
+}
+
+func TestAppendCanonicalBulletPreservesSource(t *testing.T) {
+	pb := testVault(t)
+	if err := pb.EnsureCanonicalLayout(); err != nil {
+		t.Fatal(err)
+	}
+	source := SourceRef{File: "internal/worker.go", Hash: "sha256:worker"}
+	if _, err := pb.UpsertCanonical("lessons", "", "Reusable lessons.\n", source); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := pb.AppendCanonicalBullet("lessons", "Always wait for the worker"); err != nil || !added {
+		t.Fatalf("AppendCanonicalBullet() = (%v, %v), want (true, nil)", added, err)
+	}
+	note, _ := pb.ReadCanonical("lessons")
+	if note.Lifecycle.SourceFile != source.File || note.Lifecycle.SourceHash != source.Hash {
+		t.Fatalf("bullet append erased source provenance: %+v", note.Lifecycle)
+	}
+}
+
+func TestUpsertCanonicalReplacesSourcePathWhenHashMatches(t *testing.T) {
+	pb := testVault(t)
+	if err := pb.EnsureCanonicalLayout(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pb.UpsertCanonical("architecture", "", "derived architecture\n", SourceRef{
+		File: "internal/old.go", Hash: "sha256:shared",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pb.UpsertCanonical("architecture", "", "derived architecture\n", SourceRef{
+		File: "internal/new.go", Hash: "sha256:shared",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	note, _ := pb.ReadCanonical("architecture")
+	if note.Lifecycle.SourceFile != "internal/new.go" {
+		t.Fatalf("source path = %q, want replacement path", note.Lifecycle.SourceFile)
+	}
+	if note.Lifecycle.State != NoteActive {
+		t.Fatalf("explicit source refresh should activate the note, got %q", note.Lifecycle.State)
+	}
+}
+
+func TestUpsertCanonicalRejectsPartialSourceRef(t *testing.T) {
+	pb := testVault(t)
+	for name, source := range map[string]SourceRef{
+		"file only": {File: "internal/api.go"},
+		"hash only": {Hash: "sha256:source"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := pb.UpsertCanonical("architecture", "", "derived architecture\n", source); err == nil {
+				t.Fatalf("partial source %+v must be rejected", source)
+			}
+		})
+	}
+}
+
+func TestAtomicWriteFilePreservesExistingModeAndContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "canonical.md")
+	if err := os.WriteFile(path, []byte("old content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWriteFile(path, []byte("new complete content\n"), 0o644); err != nil {
+		t.Fatalf("atomicWriteFile() error = %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Fatalf("mode = %#o, want %#o", got, want)
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "new complete content\n"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
 	}
 }

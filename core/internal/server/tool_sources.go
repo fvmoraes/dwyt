@@ -10,6 +10,7 @@ import (
 	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/mcpregistry"
 	"github.com/fvmoraes/dwyt/internal/procman"
+	"github.com/fvmoraes/dwyt/internal/state"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 )
 
@@ -212,27 +213,25 @@ func (ds *DashboardServer) toolProcessSpec(service, tool string, sources map[str
 	}
 }
 
-// replaceToolProcess atomically replaces one ProcessManager registration from
-// the server's point of view. A running service is restarted with the new spec;
-// if that start fails, the previous spec is registered and started again before
-// the error is returned. The returned function reverses a successful change so
-// applyToolSourceProcesses can roll back an earlier service when a later one
-// fails.
+// replaceToolProcess updates one ProcessManager registration while all process
+// transitions remain serialized by ServiceReconciler. desired=stopped blocks a
+// periodic pass from restarting the old spec in the stop/register window.
 func (ds *DashboardServer) replaceToolProcess(previous, next toolProcessSpec) (func() error, error) {
 	current := ds.ProcMan.Status(next.service)
 	wasRunning := current != nil && current.Running
-	if wasRunning && current.Port > 0 {
-		// Preserve an already-selected fallback port across both the handoff and
-		// a possible rollback. Once Stop completes the port should be reusable.
-		previous.port = current.Port
-		next.port = current.Port
-	}
+	// The spec's port is the durable REQUESTED port. A running instance may have
+	// been moved to an effective fallback port, but that observation must not
+	// overwrite the requested configuration on either spec: doing so would make
+	// a transient fallback the next boot's request. Both specs keep their
+	// original requested port so equality (no-op detection) and re-registration
+	// remain in terms of configuration, not observation.
 	if previous.equal(next) {
 		return nil, nil
 	}
 
+	ctx := ds.lifecycleOperationContext()
 	if wasRunning {
-		if _, err := ds.ProcMan.Stop(next.service); err != nil {
+		if _, err := ds.stopManagedService(ctx, next.service); err != nil {
 			return nil, fmt.Errorf("stop %s before changing its source: %w", next.service, err)
 		}
 	}
@@ -268,15 +267,13 @@ func (ds *DashboardServer) registerToolProcess(spec toolProcessSpec) {
 }
 
 func (ds *DashboardServer) startToolProcess(service string) (*procman.ServiceStatus, error) {
-	if service == "headroom" {
-		return ds.startHeadroom()
-	}
-	return ds.ProcMan.Start(service)
+	return ds.startManagedService(ds.lifecycleOperationContext(), service)
 }
 
 func (ds *DashboardServer) restoreToolProcess(previous toolProcessSpec, wasRunning bool) error {
+	ctx := ds.lifecycleOperationContext()
 	if current := ds.ProcMan.Status(previous.service); current != nil && current.Running {
-		if _, err := ds.ProcMan.Stop(previous.service); err != nil {
+		if _, err := ds.stopManagedService(ctx, previous.service); err != nil {
 			return fmt.Errorf("stop replacement %s: %w", previous.service, err)
 		}
 	}
@@ -285,7 +282,7 @@ func (ds *DashboardServer) restoreToolProcess(previous toolProcessSpec, wasRunni
 	if !wasRunning {
 		return nil
 	}
-	status, err := ds.startToolProcess(previous.service)
+	status, err := ds.startManagedService(ctx, previous.service)
 	if err != nil {
 		ds.recordToolProcessFailure(previous.service, err)
 		return fmt.Errorf("restart previous %s: %w", previous.service, err)
@@ -299,18 +296,46 @@ func (ds *DashboardServer) restoreToolProcess(previous toolProcessSpec, wasRunni
 	return nil
 }
 
+// recordToolProcess records the observed result of a tool-source handoff
+// without erasing the durable lifecycle projection the reconciler owns.
+// SetProcessLifecycle preserves DesiredState, Ownership, RequestedPort and
+// Identity (they are omitted here, so previous values survive) while updating
+// only the freshly observed PID, effective port and health.
 func (ds *DashboardServer) recordToolProcess(service string, status *procman.ServiceStatus) {
 	if ds.RuntimeState == nil || status == nil {
 		return
 	}
-	ds.RuntimeState.RegisterProcess(service, status.PID, status.Port)
-	ds.RuntimeState.SetProcessHealthy(service, status.Healthy, status.Error)
+	lifecycleState := svcStarting
+	if status.Healthy {
+		lifecycleState = svcHealthy
+	}
+	ds.RuntimeState.SetProcessLifecycle(stateProcessInfo(service, status, lifecycleState))
 }
 
+// recordToolProcessFailure records a failed handoff as an unhealthy
+// observation. It must NOT remove the process: doing so would discard the
+// operator's DesiredState, the RequestedPort and the reconciler-owned
+// ownership/identity. The observation is invalidated (PID/effective cleared)
+// and the error is surfaced, while the durable configuration is preserved.
 func (ds *DashboardServer) recordToolProcessFailure(service string, err error) {
 	if ds.RuntimeState == nil {
 		return
 	}
-	ds.RuntimeState.RemoveProcess(service)
-	ds.RuntimeState.SetToolError(service, err.Error())
+	ds.RuntimeState.InvalidateProcessObservation(service)
+	ds.RuntimeState.SetProcessState(service, svcFailed, err.Error())
+}
+
+// stateProcessInfo maps an observed ServiceStatus into the lifecycle
+// projection, leaving durable fields (DesiredState/Ownership/RequestedPort/
+// Identity) unset so SetProcessLifecycle preserves them.
+func stateProcessInfo(service string, status *procman.ServiceStatus, lifecycleState string) state.ProcessInfo {
+	errMessage := status.Error
+	if !status.Healthy && errMessage == "" {
+		errMessage = "service state: " + lifecycleState
+	}
+	return state.ProcessInfo{
+		Name: service, PID: status.PID,
+		Port: status.Port, EffectivePort: status.Port,
+		Healthy: status.Healthy, State: lifecycleState, LastError: errMessage,
+	}
 }

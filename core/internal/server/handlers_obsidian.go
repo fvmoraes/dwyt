@@ -11,7 +11,9 @@ import (
 
 	"github.com/fvmoraes/dwyt/internal/brain"
 	"github.com/fvmoraes/dwyt/internal/db"
+	"github.com/fvmoraes/dwyt/internal/housekeeper"
 	"github.com/fvmoraes/dwyt/internal/install"
+	"github.com/fvmoraes/dwyt/internal/log"
 	"github.com/fvmoraes/dwyt/internal/toolsource"
 	"github.com/gin-gonic/gin"
 )
@@ -42,9 +44,44 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "query parameter 'q' is required"})
 		return
 	}
+
+	requestedMaxTokens, maxTokensSet, err := nonNegativeQueryInt(c, "max_tokens")
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	effectiveMaxTokens := brain.DefaultSearchMaxTokens
+	if maxTokensSet {
+		effectiveMaxTokens = requestedMaxTokens
+	}
+	if taskID := strings.TrimSpace(c.Query("task_id")); taskID != "" {
+		if ds.Optimizer == nil {
+			c.JSON(503, gin.H{"error": "optimizer not initialized"})
+			return
+		}
+		requested := -1
+		if maxTokensSet {
+			requested = requestedMaxTokens
+		}
+		allowance, ok := ds.Optimizer.SearchAllowance(taskID, requested)
+		if !ok {
+			c.JSON(400, gin.H{"error": "unknown task_id"})
+			return
+		}
+		effectiveMaxTokens = allowance
+		requestedMaxTokens = allowance
+		maxTokensSet = true
+	}
+
 	pb := ds.projectObsidian()
 	if pb == nil {
-		c.JSON(200, gin.H{"results": []interface{}{}, "count": 0, "note": "no Obsidian vault"})
+		c.JSON(200, gin.H{
+			"results":              []interface{}{},
+			"count":                0,
+			"note":                 "no Obsidian vault",
+			"effective_max_tokens": effectiveMaxTokens,
+		})
 		return
 	}
 
@@ -52,7 +89,8 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		Query:          query,
 		Types:          splitCSV(c.Query("types")),
 		Limit:          atoiOr(c.Query("limit"), 0),
-		MaxTokens:      atoiOr(c.Query("max_tokens"), 0),
+		MaxTokens:      requestedMaxTokens,
+		MaxTokensSet:   maxTokensSet,
 		PreferCurrent:  c.Query("prefer_current") != "false",
 		IncludeRaw:     c.Query("include_raw") == "true",
 		IncludeExpired: c.Query("include_expired") == "true",
@@ -65,12 +103,17 @@ func (ds *DashboardServer) apiObsidianSearch(c *gin.Context) {
 		opts.ExcludeState = states
 	}
 
-	results := pb.SearchV2(opts)
+	results, err := pb.SearchV2(opts)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "obsidian search: " + err.Error()})
+		return
+	}
 	ds.creditObsidianUsage()
 	c.JSON(200, gin.H{
-		"results": results,
-		"count":   len(results),
-		"limit":   effectiveSearchLimit(opts),
+		"results":              results,
+		"count":                len(results),
+		"limit":                effectiveSearchLimit(opts),
+		"effective_max_tokens": effectiveMaxTokens,
 	})
 }
 
@@ -79,6 +122,18 @@ func effectiveSearchLimit(opts brain.SearchOptions) int {
 		return opts.Limit
 	}
 	return brain.DefaultSearchLimit
+}
+
+func nonNegativeQueryInt(c *gin.Context, key string) (int, bool, error) {
+	raw, present := c.GetQuery(key)
+	if !present {
+		return 0, false, nil
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return 0, true, fmt.Errorf("query parameter %q must be a non-negative integer", key)
+	}
+	return value, true, nil
 }
 
 func splitCSV(raw string) []string {
@@ -137,6 +192,14 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "no Obsidian vault loaded"})
 		return
 	}
+
+	completed := false
+	defer func() {
+		if completed {
+			ds.runSessionCloseHousekeeping(c)
+		}
+	}()
+
 	var body brain.ContextSnapshot
 	if err := c.ShouldBindJSON(&body); err != nil && err != io.EOF {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -160,6 +223,7 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 			return
 		}
 		ds.creditObsidianUsage()
+		completed = true
 		c.JSON(200, gin.H{
 			"status":  "saved",
 			"written": true,
@@ -209,7 +273,30 @@ func (ds *DashboardServer) apiObsidianSaveContext(c *gin.Context) {
 	if outcome.Written {
 		response["summary"] = pb.RebuildSummary()
 	}
+	completed = true
 	c.JSON(200, response)
+}
+
+// runSessionCloseHousekeeping records lifecycle updates after an accepted task
+// snapshot. When the request already holds the vault read lease, it reuses that
+// lease instead of recursively acquiring the same RWMutex. Housekeeping remains
+// best-effort: task persistence succeeds even when a non-fatal maintenance
+// problem is found.
+func (ds *DashboardServer) runSessionCloseHousekeeping(c *gin.Context) {
+	if ds.Housekeeper == nil {
+		return
+	}
+	var report housekeeper.Report
+	if vaultReadLeaseHeld(c) {
+		report = ds.Housekeeper.OnSessionCloseWithLeaseHeld()
+	} else {
+		report = ds.Housekeeper.OnSessionClose()
+	}
+	if len(report.Errors) > 0 {
+		log.Warn("housekeeper: session-close pass reported errors", log.Fields{
+			"errors": strings.Join(report.Errors, "; "),
+		})
+	}
 }
 
 func (ds *DashboardServer) apiObsidianSummarize(c *gin.Context) {
@@ -305,7 +392,9 @@ func (ds *DashboardServer) currentContextMarkdown() string {
 	var setup Config
 	if ds.Store != nil {
 		if raw, err := ds.Store.GetConfig("setup"); err == nil {
-			json.Unmarshal([]byte(raw), &setup)
+			if err := json.Unmarshal([]byte(raw), &setup); err != nil {
+				log.Warn("invalid persisted setup in context snapshot", log.Fields{"error": err.Error()})
+			}
 		}
 	}
 	data, _ := json.MarshalIndent(statusPayload, "", "  ")

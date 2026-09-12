@@ -74,7 +74,9 @@ func init() {
 		DwytData = DwytHome + "/data"
 	}
 
-	log.SetOutput(filepath.Join(DwytHome, "dwyt.log"))
+	if err := log.SetOutput(filepath.Join(DwytHome, "dwyt.log")); err != nil {
+		log.Warn("failed to configure DWYT log file", log.Fields{"path": filepath.Join(DwytHome, "dwyt.log"), "error": err.Error()})
+	}
 
 	Cmd.AddCommand(stopCmd)
 	Cmd.AddCommand(statusCmd)
@@ -97,7 +99,10 @@ func runDefault(projectPath string) error {
 	banner()
 	fmt.Printf("  Project: %s\n", projectPath)
 
-	env.Init(dwytHome, dwytBin, dwytData, e.ShellRC, e.LoginRC)
+	if err := env.Init(dwytHome, dwytBin, dwytData, e.ShellRC, e.LoginRC); err != nil {
+		log.Warn("environment setup incomplete; continuing startup", log.Fields{"error": err.Error()})
+		fmt.Printf("  ⚠ Ambiente configurado parcialmente: %v\n", err)
+	}
 
 	if err := integrate.EnsureGitignoreBlock(projectPath); err != nil {
 		log.Warn("gitignore block update failed", log.Fields{"error": err.Error()})
@@ -230,7 +235,7 @@ func probeDaemonURL(url string, timeout time.Duration) daemonProbe {
 		probe.Error = err.Error()
 		return probe
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		probe.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		return probe
@@ -379,7 +384,9 @@ func stopDaemonProcess() {
 		procutil.StopAllTracked(DwytHome)
 		// Keep the daemon group/tree kill as a final catch-all for untracked
 		// descendants or stale PID files from older releases.
-		procutil.TerminateTree(pid)
+		if err := procutil.TerminateTree(pid); err != nil {
+			log.Warn("failed to terminate tracked daemon process tree", log.Fields{"pid": pid, "error": err.Error()})
+		}
 		procutil.RemovePID(DwytHome, "daemon")
 		stoppedTrackedDaemon = true
 	}
@@ -390,9 +397,9 @@ func stopDaemonProcess() {
 	if runtime.GOOS != "windows" && !stoppedTrackedDaemon {
 		exe, _ := os.Executable()
 		if exe != "" {
-			exec.Command("pkill", "-f", exe+" daemon").Run()
+			_ = exec.Command("pkill", "-f", exe+" daemon").Run()
 		}
-		exec.Command("pkill", "-f", "dwyt.*daemon").Run()
+		_ = exec.Command("pkill", "-f", "dwyt.*daemon").Run()
 	}
 }
 
@@ -407,7 +414,9 @@ func switchProject(projectPath string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		return fmt.Errorf("close switch response: %w", err)
+	}
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("switch failed: %d", resp.StatusCode)
 	}
@@ -420,7 +429,7 @@ func ensureKiroPowerIfEnabled(projectPath string) {
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var cfg map[string]interface{}
 	if json.NewDecoder(resp.Body).Decode(&cfg) != nil || !kiroEnabledInConfig(cfg) {
 		return
@@ -433,7 +442,7 @@ func ensureKiroPowerIfEnabled(projectPath string) {
 	q.Set("project", projectPath)
 	req.URL.RawQuery = q.Encode()
 	if refreshResp, err := client.Do(req); err == nil {
-		refreshResp.Body.Close()
+		_ = refreshResp.Body.Close()
 		if refreshResp.StatusCode < 300 {
 			fmt.Printf("  \u2713 Kiro Power ready\n")
 		}
@@ -488,7 +497,9 @@ func requestedHeadroomPort() int {
 }
 
 func openBrowserURL(url string) {
-	platform.OpenURL(url)
+	if err := platform.OpenURL(url); err != nil {
+		log.Warn("failed to open browser", log.Fields{"url": url, "error": err.Error()})
+	}
 }
 
 func getCWD() string {

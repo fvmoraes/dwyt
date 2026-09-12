@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/fvmoraes/dwyt/internal/log"
 )
@@ -90,24 +89,22 @@ type Server struct {
 	handlers map[string]ToolHandler
 	reader   *bufio.Reader
 	writer   io.Writer
-	logFile  string
 }
 
-func NewServer(name, version string) *Server {
-	logPath := os.Getenv("MCP_LOG")
-	if logPath == "" {
-		home, _ := os.UserHomeDir()
-		logPath = home + "/.dwyt/logs/mcp-" + name + ".log"
-	}
-	os.MkdirAll(filepath.Dir(logPath), 0755)
-
+func newSchemaServer(name, version string) *Server {
 	return &Server{
 		name:     name,
 		version:  version,
-		reader:   bufio.NewReader(os.Stdin),
-		writer:   os.Stdout,
-		handlers: make(map[string]ToolHandler),
+		tools:    []Tool{},
+		handlers: map[string]ToolHandler{},
 	}
+}
+
+func NewServer(name, version string) *Server {
+	server := newSchemaServer(name, version)
+	server.reader = bufio.NewReader(os.Stdin)
+	server.writer = os.Stdout
+	return server
 }
 
 func (s *Server) RegisterTool(name, description string, props map[string]Property, required []string, handler ToolHandler) {
@@ -121,6 +118,29 @@ func (s *Server) RegisterTool(name, description string, props map[string]Propert
 		},
 	})
 	s.handlers[name] = handler
+}
+
+// ToolCount reports how many tools this server exposes.
+func (s *Server) ToolCount() int {
+	return len(s.tools)
+}
+
+// ToolPayloads returns the tool definitions in wire order, for size audits.
+func (s *Server) ToolPayloads() []Tool {
+	out := make([]Tool, len(s.tools))
+	copy(out, s.tools)
+	return out
+}
+
+// ToolsListJSON returns the schema-bearing JSON value placed in the JSON-RPC
+// tools/list result. It intentionally excludes the transport envelope, whose
+// request ID and newline are client-specific.
+func (s *Server) ToolsListJSON() []byte {
+	b, err := json.Marshal(map[string]interface{}{"tools": s.tools})
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 func (s *Server) Run() error {
@@ -223,6 +243,12 @@ func (s *Server) sendError(id interface{}, code int, message string) {
 }
 
 func (s *Server) writeResponse(resp JSONRPCResponse) {
-	data, _ := json.Marshal(resp)
-	fmt.Fprintf(s.writer, "%s\n", string(data))
+	data, err := json.Marshal(resp)
+	if err != nil {
+		log.Error("mcp response marshal failed", log.Fields{"error": err.Error()})
+		return
+	}
+	if _, err := fmt.Fprintf(s.writer, "%s\n", string(data)); err != nil {
+		log.Warn("mcp response write failed", log.Fields{"error": err.Error()})
+	}
 }

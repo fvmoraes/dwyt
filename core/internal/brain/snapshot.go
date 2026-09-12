@@ -3,7 +3,9 @@ package brain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -132,7 +134,11 @@ func (pb *ProjectObsidian) SaveCompactSnapshot(s CompactSnapshot) (SnapshotOutco
 		return outcome, fmt.Errorf("obsidian snapshot: %w", err)
 	}
 
-	if existing, err := findSnapshotByStateHash(dir, hash); err == nil && existing != "" {
+	existing, err := findSnapshotByStateHash(dir, hash)
+	if err != nil {
+		return outcome, fmt.Errorf("obsidian snapshot: inspect existing snapshots: %w", err)
+	}
+	if existing != "" {
 		// Same state as an existing snapshot: refresh its access metadata so
 		// the housekeeper sees the session is still live, but do not create a
 		// second near-identical note.
@@ -157,7 +163,7 @@ func (pb *ProjectObsidian) SaveCompactSnapshot(s CompactSnapshot) (SnapshotOutco
 	lc.RawRefs = s.RawRefs
 	body := renderCompactSnapshot(s, lc, now, pb)
 
-	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(body), 0o644); err != nil {
 		return outcome, fmt.Errorf("obsidian snapshot: %w", err)
 	}
 	outcome.Written = true
@@ -183,10 +189,25 @@ func findSnapshotByStateHash(dir, hash string) (string, error) {
 		path := filepath.Join(dir, e.Name())
 		f, err := os.Open(path)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("open snapshot candidate %q: %w", path, err)
 		}
-		n, _ := f.Read(buf)
-		f.Close()
+		n, readErr := f.Read(buf)
+		closeErr := f.Close()
+		if readErr != nil && readErr != io.EOF {
+			if closeErr != nil {
+				return "", fmt.Errorf("read snapshot candidate %q: %w", path, errors.Join(
+					readErr,
+					fmt.Errorf("close snapshot candidate %q: %w", path, closeErr),
+				))
+			}
+			return "", fmt.Errorf("read snapshot candidate %q: %w", path, readErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close snapshot candidate %q: %w", path, closeErr)
+		}
 		if n > 0 && strings.Contains(string(buf[:n]), needle) {
 			return path, nil
 		}

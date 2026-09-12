@@ -28,6 +28,7 @@ func TestProjectGeneratesClientInstructionsOnly(t *testing.T) {
 		filepath.Join(".kiro", "steering", "dwyt.md"),
 		filepath.Join(".github", "copilot-instructions.md"),
 		filepath.Join(".windsurf", "rules", "dwyt.md"),
+		filepath.Join(".continue", "rules", "dwyt.md"),
 	} {
 		assertEnglishInstructionFile(t, filepath.Join(projectPath, path))
 	}
@@ -125,29 +126,25 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 	if strings.Count(content, instructionMarkerStart) != 1 || strings.Count(content, instructionMarkerEnd) != 1 {
 		t.Fatalf("%s: expected one DWYT instruction block:\n%s", path, content)
 	}
-	// v5 entry contract (spec §4): the block names the three MCPs, points at
-	// the optimizer, and states the retrieval preferences — nothing more.
 	for _, want := range []string{
-		"**dwyt_optimizer** — context optimizer",
-		"**dwyt_obsidian** — persistent project memory",
-		"**dwyt_codebase** — structural code retrieval",
-		"`dwyt_context_plan`",
-		"`obsidian_save_context`",
-		"`dwyt_get_raw`",
-		"codex, opencode, claude, cursor, kiro, copilot,\nwindsurf, continue",
-		"symbols and line ranges over full files",
-		"canonical memory over old sessions",
-		"reusing context already obtained over retrieving it again",
-		"RTK reduces terminal output; it is not an MCP.",
-		"Do not truncate an artifact the user asked for.",
+		"**Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.",
+		"Always report concise telemetry promptly with `dwyt_report_usage`",
+		"`dwyt_optimizer` — context optimizer",
+		"`dwyt_codebase` — structural code retrieval and the **PRIMARY** repository layer",
+		"`dwyt_obsidian` — persistent project memory",
+		"**Codebase first. Shell discovery only as fallback.**",
+		"`dwyt_context_plan`", "`dwyt_context_status`", "`dwyt_register_context`", "`dwyt_output_profile`",
+		"`dwyt_compact_tool_output`", "`dwyt_get_raw`", "`dwyt_cache_guidance`", "`dwyt_route`",
+		"`get_architecture`", "`search_graph`", "`query_graph`", "`trace_path`", "`get_code_snippet`",
+		"`detect_changes`", "`check_index_coverage`/`index_status`", "`index_repository`", "`manage_adr`",
+		"`obsidian_canonical` first", "`obsidian_search` only when canonical knowledge is insufficient",
+		"`obsidian_save_context`", "`obsidian_upsert_canonical`", "`obsidian_compile`", "`obsidian_summarize`",
+		"Do not begin with `grep`, `rg`, `find`", "Use Headroom for verbose logs when available",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("%s: expected generated instructions to contain %q:\n%s", path, want, content)
 		}
 	}
-	// The v5 contract must not re-state the policy the Optimizer owns. Each of
-	// these strings marks a whole section that was deliberately moved into the
-	// DWYT MCP; their reappearance means the duplication regressed.
 	for _, forbidden := range []string{
 		"Lei do", "Ordem de Prioridade", "Configuracoes",
 		"~/.dwyt/projects/<id>/" + "obsidian/",
@@ -161,14 +158,13 @@ func assertEnglishInstructionFile(t *testing.T, path string) {
 			t.Fatalf("%s: generated instructions contain %q:\n%s", path, forbidden, content)
 		}
 	}
-	// Size guard: the contract lives in the cacheable prefix of every request,
-	// so growth here is multiplied by every call the user ever makes. 2500
-	// bytes is roughly a quarter of the pre-v5 block and leaves room for
-	// wording changes without inviting a new policy section.
-	const maxContractBytes = 2500
+	// This remains a prompt-prefix contract, but the compact operational
+	// mapping deliberately names the concrete local tools. Keep a hard bound
+	// so future edits cannot turn it into a copied manual.
+	const maxContractBytes = 4800
 	if len(content) > maxContractBytes {
 		t.Fatalf("%s: DWYT instruction block grew to %d bytes (max %d); "+
-			"detailed policy belongs in the DWYT Optimizer, not in instruction files",
+			"detailed policy belongs in the DWYT MCPs, not in instruction files",
 			path, len(content), maxContractBytes)
 	}
 }

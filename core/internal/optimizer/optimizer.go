@@ -266,6 +266,26 @@ func (g *Optimizer) Session(taskID string) (*contextopt.Session, bool) {
 	return s, ok
 }
 
+// SearchAllowance returns the per-call project-memory allowance for an
+// existing task session. A negative requested value means the caller supplied
+// no additional cap; a non-negative request can only tighten the session
+// budget. Search allowance is a retrieval-set cap, not a cumulative ledger.
+// Unknown tasks deliberately receive no fallback budget.
+func (g *Optimizer) SearchAllowance(taskID string, requested int) (int, bool) {
+	sess, ok := g.Session(taskID)
+	if !ok {
+		return 0, false
+	}
+	allowance := sess.Budget().ProjectMemory
+	if allowance < 0 {
+		allowance = 0
+	}
+	if requested >= 0 && requested < allowance {
+		allowance = requested
+	}
+	return allowance, true
+}
+
 // PlanRequest is the optimizer's public plan input. It mirrors
 // contextopt.PlanRequest plus the task identity, so the MCP layer has a single
 // struct to decode into.
@@ -704,11 +724,16 @@ func (g *Optimizer) CompactToolOutput(req CompactRequest) (toolopt.Compacted, er
 		}
 		compacted.CompressionPct = float64(saved) / float64(compacted.RawTokensEst) * 100
 	}
+	// Law 6 (positive Token ROI): with the raw-ref handle attached and the
+	// sent estimate exact, the gate decides whether the reduction pays for
+	// its metadata and recovery overhead. Critical evidence always survives.
+	compacted = toolopt.ApplyCompressionGate(compacted, toolopt.DefaultMinGainTokens)
 	span.SetAll(map[string]interface{}{
 		"raw_tokens":      compacted.RawTokensEst,
 		"sent_tokens":     compacted.SentTokensEst,
 		"compression_pct": compacted.CompressionPct,
 		"archived":        compacted.RawRef != "",
+		"passed_through":  compacted.PassedThrough,
 	})
 	return compacted, nil
 }
@@ -752,6 +777,9 @@ type Usage struct {
 
 	ContextBeforeDWYT *int `json:"context_before_dwyt,omitempty"`
 	ContextAfterDWYT  *int `json:"context_after_dwyt,omitempty"`
+	// CompressionMetadataTokens is expected recovery overhead not included in
+	// ContextAfterDWYT. Nil is unmeasured; explicit zero means no such cost.
+	CompressionMetadataTokens *int `json:"compression_metadata_tokens,omitempty"`
 
 	EstimatedCostUSD *float64 `json:"estimated_cost_usd,omitempty"`
 	ActualCostUSD    *float64 `json:"actual_cost_usd,omitempty"`
@@ -763,7 +791,9 @@ type Usage struct {
 
 	// Observed is true when the numbers came from the provider rather than
 	// from a DWYT estimate (spec §39, §52). Never set it for an estimate.
-	Observed bool `json:"observed"`
+	// Provenance refines that legacy request-wide flag for every metric.
+	Observed   bool                       `json:"observed"`
+	Provenance telemetry.MetricProvenance `json:"provenance,omitempty"`
 
 	// CachedHashes are the prefix hashes the provider confirmed as cache
 	// reads; they feed the ranker's cost model.

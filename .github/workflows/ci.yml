@@ -2,17 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [ main, 'fix/**', 'feat/**' ]
+    branches: [ main, 'fix/**', 'feat/**', 'plan/**' ]
     paths:
       - "core/**"
+      - "install.sh"
       - "install.ps1"
-      - ".github/workflows/ci.yml"
+      - "install-lib/**"
+      - ".github/workflows/**"
+      - "plan/**"
+      - "docs/**"
+      - "readme.md"
   pull_request:
     branches: [ main ]
     paths:
       - "core/**"
+      - "install.sh"
       - "install.ps1"
-      - ".github/workflows/ci.yml"
+      - "install-lib/**"
+      - ".github/workflows/**"
+      - "plan/**"
+      - "docs/**"
+      - "readme.md"
 
 permissions:
   contents: read
@@ -27,24 +37,39 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26.6"
           cache: true
           cache-dependency-path: core/go.sum
+
+      - name: Check go.mod tidiness
+        working-directory: core
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
       - name: Test
         working-directory: core
         shell: bash
         run: |
           set -o pipefail
-          go test ./... 2>&1 | tee /tmp/go-test-output.txt
+          go test -shuffle=on -count=1 ./... 2>&1 | tee /tmp/go-test-output.txt
 
       - name: Report failing tests
         if: failure()
         shell: bash
         run: |
+          if [[ ! -f /tmp/go-test-output.txt ]]; then
+            {
+              echo "### Go test output unavailable"
+              echo "The test step did not run; inspect the first failed step above."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           # Emit failing test names as workflow annotations (readable via the
           # public check-runs annotations API) and the output tail as a step
           # summary, so Windows failures are diagnosable without log access.
@@ -60,6 +85,24 @@ jobs:
             tail -n 150 /tmp/go-test-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: core/web/package-lock.json
+
+      - name: Lint frontend
+        working-directory: core/web
+        run: npm ci && npm run lint
+
+      - name: Build frontend
+        working-directory: core/web
+        run: npm run build
+
+      - name: Check embedded frontend is current
+        if: runner.os == 'Linux'
+        run: git diff --exit-code -- core/internal/server/dashboard/dist
 
       - name: Vet
         working-directory: core
@@ -84,16 +127,116 @@ jobs:
             throw ($parseErrors | Out-String)
           }
 
-      - uses: actions/setup-node@v6
+  darwin-build:
+    name: Darwin CLI build (${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: core/web/package-lock.json
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
 
-      - name: Lint frontend
-        working-directory: core/web
-        run: npm ci && npm run lint
+      - name: Build Darwin CLI artifact
+        working-directory: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          GOOS=darwin GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 \
+            go build -trimpath -o "dist/dwyt_darwin_${{ matrix.goarch }}" .
+          test -s "dist/dwyt_darwin_${{ matrix.goarch }}"
+          file "dist/dwyt_darwin_${{ matrix.goarch }}"
 
-      - name: Build frontend
-        working-directory: core/web
-        run: npm run build
+  installer-e2e:
+    name: Sandboxed installer lifecycle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Verify POSIX install, reinstall, and uninstall preservation
+        if: runner.os != 'Windows'
+        working-directory: core
+        shell: bash
+        run: bash test/install-lifecycle.sh "$GITHUB_WORKSPACE"
+
+      - name: Verify Windows install, reinstall, and uninstall preservation
+        if: runner.os == 'Windows'
+        working-directory: core
+        shell: pwsh
+        run: .\test\install-lifecycle.ps1 -RepositoryRoot $env:GITHUB_WORKSPACE
+
+  docs:
+    name: Documentation consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Validate documentation contracts and links
+        working-directory: core
+        run: go test ./internal/integrate -run '^(TestDocumentation|TestActiveDocumentation)' -count=1
+
+  race:
+    # Data races are undefined behavior; run the detector on the two fastest
+    # runners. Windows is skipped: its race builds are slow and the same code
+    # paths are covered by the unix race runs.
+    name: Race detector (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: Race tests
+        working-directory: core
+        run: go test -race -shuffle=on -count=1 ./...
+
+  govulncheck:
+    name: Vulnerabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: core/go.sum
+
+      - name: govulncheck
+        working-directory: core
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...

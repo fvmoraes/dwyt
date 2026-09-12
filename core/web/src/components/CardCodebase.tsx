@@ -1,5 +1,5 @@
-import type { ToolInfo, ToolDetail, MCPRegistry, BadgeText, ToolState } from '../types'
-import { CardHeader, Row, Hr, RepoRow } from './CardParts'
+import type { ComponentStatus, ToolDetail, MCPRegistry, BadgeText, ToolState } from '../types'
+import { CardHeader, ComponentStatusRows, Row, Hr, RepoRow } from './CardParts'
 import Button from './Button'
 import MCPFeedbackBanner from './MCPFeedbackBanner'
 
@@ -14,9 +14,8 @@ interface Props {
   indexError: string
   configureFeedback?: { kind: 'success' | 'error'; message: string; name: string } | null
   t: Record<string, string>
-  cbmcp: ToolInfo | undefined
+  component?: ComponentStatus
   getDetail: (n: string) => ToolDetail | undefined
-  toolState: (tool: ToolInfo | undefined, det: ToolDetail | undefined) => ToolState
   badge: (s: ToolState) => BadgeText
   fmtN: (n: number | undefined) => string
   setIndexPath: (v: string) => void
@@ -27,17 +26,14 @@ interface Props {
 }
 
 export default function CardCodebase(props: Props) {
-  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, cbmcp, getDetail, toolState, badge, fmtN, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
+  const { indexPath, isIndexed, indexing, openingGraph, configuringMCP, mcpRegistry, indexError, t, component, getDetail, badge, fmtN, setIndexPath, onIndex, onOpenGraph, onConfigure } = props
   const det = getDetail('codebase-memory-mcp')
-  const state = toolState(cbmcp, det) as 'not_installed' | 'inactive' | 'active'
+  const state = component?.display_state || 'unknown'
   const b = badge(state)
+  // The registry remains only for deciding whether Configure/Reconfigure is
+  // offered. All displayed status dimensions come from /status v2.
   const mcp = mcpRegistry['codebase']
   const mcpReady = mcp?.status === 'installed' || mcp?.status === 'port_open_no_health' || mcp?.installed
-  const mcpValue = mcp?.status === 'online'
-    ? `\uD83D\uDFE2 ${t.mcpOnline}`
-    : mcpReady
-      ? `\uD83D\uDFE2 ${t.mcpConfigured}`
-      : `\uD83D\uDD34 ${t.mcpOffline}`
   const configureRunning = configuringMCP === 'codebase'
   const configureDisabled = configuringMCP !== ''
 
@@ -46,9 +42,9 @@ export default function CardCodebase(props: Props) {
       <CardHeader label={t.codeMap} color="var(--green)" state={state} badgeText={b} />
       <Hr />
       <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
-      <Row label={t.uptime} value={det?.uptime_label || '\u2014'} />
+      <Row label={t.uptime} value={det?.uptime_label || '—'} />
       <Row label={t.status} value={isIndexed ? t.indexed : (state === 'not_installed' ? t.notInstalled : t.notIndexed)} />
-      <Row label="MCP" value={mcpValue} />
+      <ComponentStatusRows component={component} t={t} />
       <RepoRow projectName={props.repoName} projectPath={indexPath} label={t.repos} />
       <Hr />
       <MCPFeedbackBanner feedback={props.configureFeedback} name="codebase" onDismiss={props.onDismissFeedback} />

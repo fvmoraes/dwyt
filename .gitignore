@@ -12,8 +12,11 @@ copilot-instructions.md
 AGENTS.md
 CLAUDE.md
 plan/
+.agents/
+semantic-review/
 
 # dwyt start
 *mcp.json
 *opencode.json
 # dwyt end
+skills-lock.json

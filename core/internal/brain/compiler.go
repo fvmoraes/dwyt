@@ -3,6 +3,7 @@ package brain
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -232,6 +233,9 @@ func (pb *ProjectObsidian) appendDecisionLog(decision string) (bool, error) {
 	existing := readFileString(path)
 	if containsEquivalentBullet(existing, decision) {
 		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return false, err
 	}
 	if strings.TrimSpace(existing) == "" {
 		// Seed the note header so the log is a proper canonical note in

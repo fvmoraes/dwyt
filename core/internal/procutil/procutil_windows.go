@@ -3,6 +3,7 @@
 package procutil
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -11,10 +12,17 @@ import (
 // Alive reports whether pid is a live process using tasklist, which is the
 // portable way to query process existence on Windows without cgo.
 func Alive(pid int) bool {
+	return aliveContext(context.Background(), pid)
+}
+
+func aliveContext(ctx context.Context, pid int) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if pid <= 0 {
 		return false
 	}
-	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
+	out, err := exec.CommandContext(ctx, "tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
 	if err != nil {
 		return false
 	}
@@ -35,17 +43,27 @@ func Alive(pid int) bool {
 // real failure, and callers (e.g. a failed-daemon cleanup racing the daemon's
 // own shutdown) must not surface that as a warning on every ordinary exit.
 func Terminate(pid int) error {
+	return TerminateContext(context.Background(), pid)
+}
+
+func TerminateContext(ctx context.Context, pid int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if pid <= 0 {
 		return nil
 	}
-	if !Alive(pid) {
-		return nil
+	if !aliveContext(ctx, pid) {
+		return ctx.Err()
 	}
-	out, err := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid)).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid)).CombinedOutput()
 	if err == nil {
 		return nil
 	}
-	if !Alive(pid) {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !aliveContext(ctx, pid) {
 		// taskkill failed on part of the tree (e.g. a child that exited
 		// between the check above and the call) but the target itself is
 		// gone, which is what the caller actually needs.

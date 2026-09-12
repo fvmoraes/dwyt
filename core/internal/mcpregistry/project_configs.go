@@ -1,6 +1,7 @@
 package mcpregistry
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 )
@@ -9,21 +10,32 @@ import (
 // selected. An empty selection writes nothing — DWYT never touches configs for
 // clients that were left unchecked in setup.
 func (r *Registry) syncConfiguredTargets(projectPath string, clients []string, names []string) []string {
+	return r.syncConfiguredTargetsContext(context.Background(), projectPath, clients, names)
+}
+
+func (r *Registry) syncConfiguredTargetsContext(ctx context.Context, projectPath string, clients []string, names []string) []string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sel := clientSet(clients)
 	errors := []string{}
 
 	// Global (machine-level) client configs.
-	if sel["claude"] {
+	if ctx.Err() == nil && sel["claude"] {
 		if err := r.syncClaudeDesktop(names); err != nil {
 			errors = append(errors, "claude: "+err.Error())
 		}
 	}
-	if sel["codex"] {
+	if ctx.Err() == nil && sel["codex"] {
 		if err := r.syncCodexGlobal(names); err != nil {
 			errors = append(errors, "codex: "+err.Error())
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		errors = append(errors, err.Error())
+		return errors
+	}
 	if projectPath == "" {
 		return errors
 	}
@@ -48,6 +60,10 @@ func (r *Registry) syncConfiguredTargets(projectPath string, clients []string, n
 		{"windsurf", "windsurf", r.syncWindsurf},
 		{"continue", "continue", r.syncContinue},
 	} {
+		if err := ctx.Err(); err != nil {
+			errors = append(errors, err.Error())
+			break
+		}
 		if !sel[target.client] {
 			continue
 		}
@@ -141,10 +157,6 @@ func (r *Registry) syncOpenCodeProject(projectPath string, names []string) error
 	config["permission"] = permission
 
 	return writeJSONFile(path, config)
-}
-
-func (r *Registry) projectStdioServers(includeType bool) map[string]interface{} {
-	return r.projectStdioServersFor(nil, includeType)
 }
 
 func (r *Registry) projectStdioServersFor(names []string, includeType bool) map[string]interface{} {

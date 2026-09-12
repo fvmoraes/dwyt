@@ -124,13 +124,18 @@ func (pb *ProjectObsidian) readCanonicalLocked(key string) (CanonicalNote, bool)
 
 // UpsertCanonical writes or updates a canonical note.
 //
-// The write is *idempotent on content*: when the rendered body is unchanged the
-// file is left alone, so re-running a compile pass does not churn mtimes and
-// does not make every note look freshly edited in Obsidian.
+// The write is *idempotent on content*: when the rendered body and lifecycle
+// provenance are unchanged the file is left alone, so re-running a compile pass
+// does not churn mtimes and does not make every note look freshly edited in
+// Obsidian.
 func (pb *ProjectObsidian) UpsertCanonical(key, title, body string, source SourceRef) (CanonicalNote, error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	defer pb.invalidateStats()
+
+	if (source.File == "") != (source.Hash == "") {
+		return CanonicalNote{}, fmt.Errorf("brain: source file and source hash must be provided together")
+	}
 
 	path, noteType, ok := pb.canonicalPath(key)
 	if !ok {
@@ -149,33 +154,40 @@ func (pb *ProjectObsidian) UpsertCanonical(key, title, body string, source Sourc
 	lc := NewLifecycle(noteType, now)
 	if existed {
 		// Preserve the durable history of the note: creation time and usage
-		// stats belong to the fact, not to this particular write.
+		// stats belong to the fact, not to this particular write. Omitted
+		// provenance means "leave it unchanged", not "clear the source".
 		if !existing.Lifecycle.CreatedAt.IsZero() {
 			lc.CreatedAt = existing.Lifecycle.CreatedAt
 		}
 		lc.AccessCount = existing.Lifecycle.AccessCount
 		lc.LastAccessed = existing.Lifecycle.LastAccessed
+		lc.SourceFile = existing.Lifecycle.SourceFile
+		lc.SourceHash = existing.Lifecycle.SourceHash
+		lc.State = existing.Lifecycle.State
 	}
 	lc.UpdatedAt = now
-	lc.State = NoteActive
 	if source.File != "" {
+		// A complete, explicit source replaces the provenance and confirms that
+		// this write regenerated the fact, so a stale note becomes active again.
 		lc.SourceFile = source.File
 		lc.SourceHash = source.Hash
+		lc.State = NoteActive
 	}
 
 	rendered := renderCanonical(key, title, body, lc, pb)
 	if existed && strings.TrimSpace(existing.Body) == strings.TrimSpace(body) &&
-		existing.Lifecycle.SourceHash == lc.SourceHash {
-		// Same fact, same source: nothing to write. Returning the note as it is
-		// on disk (rather than the freshly built one) keeps the caller's view
-		// consistent with the file.
+		existing.Lifecycle.SourceFile == lc.SourceFile &&
+		existing.Lifecycle.SourceHash == lc.SourceHash &&
+		existing.Lifecycle.State == lc.State {
+		// Same fact, provenance and lifecycle state: nothing to write. Returning
+		// the note as it is on disk keeps the caller's view consistent with it.
 		return existing, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return CanonicalNote{}, fmt.Errorf("brain: create canonical dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(rendered), 0644); err != nil {
+	if err := atomicWriteFile(path, []byte(rendered), 0o644); err != nil {
 		return CanonicalNote{}, fmt.Errorf("brain: write canonical %q: %w", key, err)
 	}
 	pb.UpdatedAt = now
@@ -330,7 +342,10 @@ func (pb *ProjectObsidian) MarkCanonicalStale(key string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	return true, os.WriteFile(path, []byte(updated), 0644)
+	if err := atomicWriteFile(path, []byte(updated), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // EnsureCanonicalLayout creates the v5 numbered directories and seeds the
@@ -380,7 +395,7 @@ func (pb *ProjectObsidian) EnsureCanonicalLayout() error {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("brain: seed canonical %q: %w", key, err)
 		}
 	}
@@ -389,8 +404,15 @@ func (pb *ProjectObsidian) EnsureCanonicalLayout() error {
 	// Obsidian can find them.
 	indexPath := filepath.Join(pb.brainDir, "maps", "canonical-map.md")
 	if _, err := os.Stat(indexPath); err != nil {
-		os.MkdirAll(filepath.Dir(indexPath), 0755)
-		os.WriteFile(indexPath, []byte(canonicalMapNote(now)), 0644)
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("brain: stat canonical map: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+			return fmt.Errorf("brain: create canonical map dir: %w", err)
+		}
+		if err := atomicWriteFile(indexPath, []byte(canonicalMapNote(now)), 0o644); err != nil {
+			return fmt.Errorf("brain: seed canonical map: %w", err)
+		}
 	}
 	return nil
 }
@@ -504,18 +526,15 @@ func bodyOf(content string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-// joinVault builds a path inside the vault from slash-separated parts, creating
-// the parent directory. Used by the compiler, which writes into the numbered
-// areas without going through UpsertCanonical.
+// joinVault builds a path inside the vault from slash-separated parts. Writers
+// create the parent directory at the point where they can return an I/O error.
 func joinVault(brainDir string, parts ...string) string {
 	segments := make([]string, 0, len(parts)+1)
 	segments = append(segments, brainDir)
 	for _, p := range parts {
 		segments = append(segments, filepath.FromSlash(p))
 	}
-	path := filepath.Join(segments...)
-	os.MkdirAll(filepath.Dir(path), 0755)
-	return path
+	return filepath.Join(segments...)
 }
 
 // readFileString reads a file, returning "" when it does not exist. Callers use

@@ -11,6 +11,7 @@
 package housekeeper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,10 +80,11 @@ func DefaultConfig() Config {
 type Depth string
 
 const (
-	// Light runs on session close: state hash, access metadata, raw refs.
+	// Light runs on session close and startup: state hash, access metadata,
+	// raw refs.
 	Light Depth = "light"
-	// Deep runs on startup and on the interval: session limit, TTLs, dedup,
-	// stale detection, canonical merge, raw pruning.
+	// Deep runs on the interval: session limit, TTLs, dedup, stale detection,
+	// canonical merge, raw pruning.
 	Deep Depth = "deep"
 )
 
@@ -127,11 +129,23 @@ type Housekeeper struct {
 	vault *brain.ProjectObsidian
 	raw   *rawstore.Store
 
+	// runLease joins the server's vault filesystem lease. It is optional so
+	// standalone/library users retain the same API; the daemon injects it.
+	runLease func() func()
+
 	lastRun    time.Time
 	lastReport *Report
 
-	// stopCh terminates the periodic loop.
-	stopCh chan struct{}
+	// stopCh terminates the periodic loop. startOnce/stopOnce make lifecycle
+	// calls idempotent, while lifecycleDone lets daemon shutdown await both the
+	// startup pass and the ticker loop.
+	stopCh          chan struct{}
+	startOnce       sync.Once
+	stopOnce        sync.Once
+	lifecycleWG     sync.WaitGroup
+	lifecycleDone   chan struct{}
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 	// running guards against two passes overlapping; a pass reads and rewrites
 	// notes, and two concurrent passes could each decide to delete the same
 	// session.
@@ -149,7 +163,12 @@ func New(cfg Config, vault *brain.ProjectObsidian, raw *rawstore.Store) *Houseke
 		log.Warn("housekeeper: knowledge extraction disabled; expiring notes will lose reusable knowledge",
 			log.Fields{"extract": cfg.ExtractReusableKnowledge, "promote": cfg.PromoteToCanonicalMemory})
 	}
-	return &Housekeeper{cfg: cfg, vault: vault, raw: raw, stopCh: make(chan struct{})}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	return &Housekeeper{
+		cfg: cfg, vault: vault, raw: raw,
+		stopCh: make(chan struct{}), lifecycleDone: make(chan struct{}),
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
+	}
 }
 
 // SetVault swaps the vault, e.g. after a project switch.
@@ -157,6 +176,14 @@ func (h *Housekeeper) SetVault(vault *brain.ProjectObsidian) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.vault = vault
+}
+
+// SetRunLease installs a read lease held for each complete pass. The callback
+// returns its release function; it must not mutate Housekeeper state.
+func (h *Housekeeper) SetRunLease(acquire func() func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.runLease = acquire
 }
 
 // Config returns the active policy.
@@ -169,6 +196,22 @@ func (h *Housekeeper) Config() Config {
 // Run executes one pass. It is safe to call concurrently: an overlapping call
 // returns a skipped report rather than racing the pass in flight.
 func (h *Housekeeper) Run(depth Depth) Report {
+	return h.RunContext(context.Background(), depth)
+}
+
+// RunContext executes a pass and stops at safe note/object boundaries when the
+// context is cancelled. Mutations already in progress finish atomically.
+func (h *Housekeeper) RunContext(ctx context.Context, depth Depth) Report {
+	return h.runContext(ctx, depth, true)
+}
+
+// runContext executes one pass. Callers that already hold the lease supplied to
+// SetRunLease pass acquireLease=false to avoid recursively acquiring an RWMutex
+// while a structural migration writer is pending.
+func (h *Housekeeper) runContext(ctx context.Context, depth Depth, acquireLease bool) Report {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	report := Report{Depth: depth, StartedAt: time.Now()}
 
 	h.mu.Lock()
@@ -184,9 +227,7 @@ func (h *Housekeeper) Run(depth Depth) Report {
 		report.Duration = time.Since(report.StartedAt).String()
 		return report
 	}
-	vault := h.vault
-	raw := h.raw
-	cfg := h.cfg
+	lease := h.runLease
 	h.running = true
 	h.mu.Unlock()
 
@@ -199,19 +240,44 @@ func (h *Housekeeper) Run(depth Depth) Report {
 		h.mu.Unlock()
 	}()
 
+	if acquireLease && lease != nil {
+		release := lease()
+		defer release()
+	}
+
+	h.mu.RLock()
+	vault := h.vault
+	raw := h.raw
+	cfg := h.cfg
+	h.mu.RUnlock()
+
 	report.DryRun = cfg.DryRun
+	if err := ctx.Err(); err != nil {
+		report.Skipped = "cancelled"
+		report.Errors = append(report.Errors, err.Error())
+		report.Duration = time.Since(report.StartedAt).String()
+		return report
+	}
 	if vault == nil {
 		report.Skipped = "no project vault"
 		report.Duration = time.Since(report.StartedAt).String()
 		return report
 	}
 
-	notes := scanVault(vault.GetBrainDir())
+	notes, scanErr := scanVaultContext(ctx, vault.GetBrainDir())
+	if scanErr != nil {
+		report.Errors = append(report.Errors, fmt.Sprintf("scan vault: %v", scanErr))
+		report.Duration = time.Since(report.StartedAt).String()
+		return report
+	}
 	report.SessionsTotal = countSessions(notes)
 
-	h.runLight(&report, vault, notes, cfg)
-	if depth == Deep {
-		h.runDeep(&report, vault, raw, notes, cfg)
+	h.runLight(ctx, &report, vault, notes, cfg)
+	if depth == Deep && ctx.Err() == nil {
+		h.runDeep(ctx, &report, vault, raw, notes, cfg)
+	}
+	if err := ctx.Err(); err != nil {
+		report.Errors = append(report.Errors, err.Error())
 	}
 
 	report.Duration = time.Since(report.StartedAt).String()
@@ -219,7 +285,7 @@ func (h *Housekeeper) Run(depth Depth) Report {
 }
 
 // runLight refreshes bookkeeping without deleting anything (spec §51).
-func (h *Housekeeper) runLight(report *Report, vault *brain.ProjectObsidian, notes []noteRef, cfg Config) {
+func (h *Housekeeper) runLight(ctx context.Context, report *Report, vault *brain.ProjectObsidian, notes []noteRef, cfg Config) {
 	now := time.Now()
 	if !cfg.StaleDetectionBySourceHash {
 		return
@@ -227,6 +293,9 @@ func (h *Housekeeper) runLight(report *Report, vault *brain.ProjectObsidian, not
 	// Stale detection is the one light-pass action that changes a note, and it
 	// only ever changes `state:` — never content.
 	for _, n := range notes {
+		if ctx.Err() != nil {
+			return
+		}
 		if !n.Lifecycle.Managed || n.Lifecycle.SourceFile == "" {
 			continue
 		}
@@ -252,11 +321,14 @@ func (h *Housekeeper) runLight(report *Report, vault *brain.ProjectObsidian, not
 }
 
 // runDeep enforces retention (spec §21–§24, §51).
-func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw *rawstore.Store, notes []noteRef, cfg Config) {
+func (h *Housekeeper) runDeep(ctx context.Context, report *Report, vault *brain.ProjectObsidian, raw *rawstore.Store, notes []noteRef, cfg Config) {
 	now := time.Now()
 
 	// 1. Expired operational notes. Knowledge is rescued first.
 	for _, n := range notes {
+		if ctx.Err() != nil {
+			return
+		}
 		if !n.Lifecycle.Managed {
 			continue
 		}
@@ -281,6 +353,9 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 	report.SessionsRetained = len(sessions)
 	if len(sessions) > cfg.KeepLatestSessions {
 		for _, n := range sessions[cfg.KeepLatestSessions:] {
+			if ctx.Err() != nil {
+				return
+			}
 			if h.retire(report, vault, n, cfg, "beyond the session limit") {
 				report.SessionsRemoved++
 			}
@@ -290,6 +365,9 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 	// Sessions that expired but are still within the limit are also retired:
 	// the limit is a ceiling, not a reprieve from the TTL.
 	for i, n := range sessions {
+		if ctx.Err() != nil {
+			return
+		}
 		if i >= cfg.KeepLatestSessions {
 			break
 		}
@@ -303,18 +381,24 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 
 	// 3. Duplicate compact snapshots: two notes with the same state hash carry
 	// the same state, so the older one is pure noise.
-	report.DuplicatesMerged += h.dedupeByStateHash(report, sessions, cfg)
+	if ctx.Err() != nil {
+		return
+	}
+	report.DuplicatesMerged += h.dedupeByStateHash(ctx, report, sessions, cfg)
 
 	// 4. Raw object pruning, guarded by the references the vault still cites.
+	if ctx.Err() != nil {
+		return
+	}
 	if raw != nil {
-		count, bytes, err := raw.Usage()
+		count, bytes, err := raw.UsageContext(ctx)
 		if err == nil {
 			report.RawObjects = count
 			report.RawBytes = bytes
 		}
 		if cfg.PruneRawOrphans && !cfg.DryRun {
 			referenced := collectRawReferences(notes)
-			if res, err := raw.Prune(referenced, now); err == nil {
+			if res, err := raw.PruneContext(ctx, referenced, now); err == nil {
 				report.RawPruned = res.Expired + res.Orphans
 				report.RawBytesFreed = res.BytesFreed
 				report.RawObjects = res.Kept
@@ -328,6 +412,9 @@ func (h *Housekeeper) runDeep(report *Report, vault *brain.ProjectObsidian, raw 
 	// 5. Ghost vaults: hash-only vault directories no project claims that hold
 	// nothing but DWYT scaffolding. A deep pass is the natural place to sweep
 	// them, so the pending-association list shrinks without user intervention.
+	if ctx.Err() != nil {
+		return
+	}
 	if cfg.VaultGC != nil {
 		gc := cfg.VaultGC(cfg.DryRun)
 		report.VaultGhostsRemoved = gc.Removed
@@ -384,12 +471,15 @@ func (h *Housekeeper) retire(report *Report, vault *brain.ProjectObsidian, n not
 // dedupeByStateHash removes older snapshots that describe an identical state.
 // Unmanaged notes are out of reach even here: identical content does not make
 // a user-authored note DWYT's to delete.
-func (h *Housekeeper) dedupeByStateHash(report *Report, sessions []noteRef, cfg Config) int {
+func (h *Housekeeper) dedupeByStateHash(ctx context.Context, report *Report, sessions []noteRef, cfg Config) int {
 	seen := map[string]bool{}
 	removed := 0
 	// sessions is newest-first, so the first occurrence of a hash is the one to
 	// keep.
 	for _, n := range sessions {
+		if ctx.Err() != nil {
+			return removed
+		}
 		hash := n.Lifecycle.StateHash
 		if hash == "" {
 			continue
@@ -421,12 +511,16 @@ func (h *Housekeeper) dedupeByStateHash(report *Report, sessions []noteRef, cfg 
 // The dry-run flag lives on a copy of the config, so a concurrent real pass is
 // unaffected.
 func (h *Housekeeper) RunDry(depth Depth) Report {
+	return h.RunDryContext(context.Background(), depth)
+}
+
+func (h *Housekeeper) RunDryContext(ctx context.Context, depth Depth) Report {
 	h.mu.Lock()
 	original := h.cfg
 	h.cfg.DryRun = true
 	h.mu.Unlock()
 
-	report := h.Run(depth)
+	report := h.RunContext(ctx, depth)
 
 	h.mu.Lock()
 	h.cfg = original
@@ -434,41 +528,75 @@ func (h *Housekeeper) RunDry(depth Depth) Report {
 	return report
 }
 
-// Start begins the periodic deep pass. It returns immediately.
+// Start begins a light pass on startup and periodic deep passes. It returns
+// immediately and is idempotent. A Stop that wins before Start prevents all
+// work from launching.
 func (h *Housekeeper) Start() {
-	cfg := h.Config()
-	if !cfg.Enabled {
-		return
-	}
-	if cfg.RunOnStartup {
-		go h.Run(Deep)
-	}
-	if cfg.Interval <= 0 {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(cfg.Interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				h.Run(Deep)
-			case <-h.stopCh:
-				return
-			}
+	h.startOnce.Do(func() {
+		select {
+		case <-h.stopCh:
+			close(h.lifecycleDone)
+			return
+		default:
 		}
-	}()
+
+		cfg := h.Config()
+		if !cfg.Enabled {
+			close(h.lifecycleDone)
+			return
+		}
+		if cfg.RunOnStartup {
+			h.lifecycleWG.Add(1)
+			go func() {
+				defer h.lifecycleWG.Done()
+				h.RunContext(h.lifecycleCtx, Light)
+			}()
+		}
+		if cfg.Interval > 0 {
+			h.lifecycleWG.Add(1)
+			go func() {
+				defer h.lifecycleWG.Done()
+				ticker := time.NewTicker(cfg.Interval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						h.RunContext(h.lifecycleCtx, Deep)
+					case <-h.stopCh:
+						return
+					}
+				}
+			}()
+		}
+		go func() {
+			h.lifecycleWG.Wait()
+			close(h.lifecycleDone)
+		}()
+	})
 }
 
-// Stop terminates the periodic loop. It is idempotent.
+// Stop terminates the periodic loop and waits for an in-flight startup/ticker
+// pass. It is idempotent.
 func (h *Housekeeper) Stop() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	select {
-	case <-h.stopCh:
-		return
-	default:
+	_ = h.StopContext(context.Background())
+}
+
+// StopContext bounds the lifecycle wait. Calling it before Start is safe and
+// latches the stop so no background pass can be launched later.
+func (h *Housekeeper) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.stopOnce.Do(func() {
+		h.lifecycleCancel()
 		close(h.stopCh)
+	})
+	h.Start()
+	select {
+	case <-h.lifecycleDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -480,8 +608,26 @@ func (h *Housekeeper) OnSessionClose() Report {
 	return h.Run(Light)
 }
 
+// OnSessionCloseWithLeaseHeld runs the session-close pass for a caller that
+// already holds the lease supplied through SetRunLease. The caller must retain
+// that lease until this method returns.
+func (h *Housekeeper) OnSessionCloseWithLeaseHeld() Report {
+	if !h.Config().RunOnSessionClose {
+		return Report{Depth: Light, Skipped: "run_on_session_close disabled"}
+	}
+	return h.runContext(context.Background(), Light, false)
+}
+
 // HousekeeperStatus implements optimizer.HousekeeperStatusProvider (spec §55).
 func (h *Housekeeper) HousekeeperStatus() map[string]interface{} {
+	h.mu.RLock()
+	lease := h.runLease
+	h.mu.RUnlock()
+	if lease != nil {
+		release := lease()
+		defer release()
+	}
+
 	h.mu.RLock()
 	cfg := h.cfg
 	lastRun := h.lastRun
@@ -553,9 +699,26 @@ type noteRef struct {
 // knowledge before a deletion, and a vault at the session limit is a few
 // hundred small files.
 func scanVault(brainDir string) []noteRef {
+	notes, err := scanVaultContext(context.Background(), brainDir)
+	if err != nil {
+		log.Warn("housekeeper: scan vault for status failed", log.Fields{"vault": brainDir, "error": err})
+	}
+	return notes
+}
+
+func scanVaultContext(ctx context.Context, brainDir string) ([]noteRef, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var out []noteRef
-	filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Ext(path) != ".md" {
+	if err := filepath.Walk(brainDir, func(path string, info os.FileInfo, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
+		if err != nil {
+			return fmt.Errorf("inspect vault path %s: %w", path, err)
+		}
+		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
 		if filepath.Base(path) == "context.md" {
@@ -563,11 +726,14 @@ func scanVault(brainDir string) []noteRef {
 		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return fmt.Errorf("read vault note %s: %w", path, readErr)
 		}
 		content := string(data)
 		lc := brain.ParseLifecycle(content)
-		rel, _ := filepath.Rel(brainDir, path)
+		rel, relErr := filepath.Rel(brainDir, path)
+		if relErr != nil {
+			return fmt.Errorf("resolve vault-relative path %s: %w", path, relErr)
+		}
 		activity := lc.LastAccessed
 		if activity.IsZero() {
 			activity = lc.UpdatedAt
@@ -586,8 +752,13 @@ func scanVault(brainDir string) []noteRef {
 			Activity:  activity,
 		})
 		return nil
-	})
-	return out
+	}); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return out, ctxErr
+		}
+		return out, fmt.Errorf("walk vault %s: %w", brainDir, err)
+	}
+	return out, nil
 }
 
 // isSessionNote reports whether a note is a compact session snapshot.
@@ -670,7 +841,7 @@ func markState(path string, state brain.NoteState) error {
 	if !ok {
 		return fmt.Errorf("note has no frontmatter to update")
 	}
-	return os.WriteFile(path, []byte(updated), 0644)
+	return brain.WriteFileAtomic(path, []byte(updated), 0o644)
 }
 
 // snapshotFromNote reconstructs the compact snapshot a session note was rendered

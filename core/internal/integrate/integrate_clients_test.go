@@ -68,6 +68,7 @@ func TestProjectOnlySelectedClientGetsFiles(t *testing.T) {
 		filepath.Join(".cursor", "mcp.json"),
 		filepath.Join(".windsurf", "mcp.json"),
 		filepath.Join(".continue", "mcp.json"),
+		filepath.Join(".continue", "rules", "dwyt.md"),
 		filepath.Join(".github", "copilot-instructions.md"),
 	} {
 		if fileExists(t, filepath.Join(projectPath, off)) {
@@ -95,6 +96,7 @@ func TestProjectEmptySelectionInstallsNothing(t *testing.T) {
 		filepath.Join(".cursor", "mcp.json"),
 		filepath.Join(".windsurf", "mcp.json"),
 		filepath.Join(".continue", "mcp.json"),
+		filepath.Join(".continue", "rules", "dwyt.md"),
 		filepath.Join(".github", "copilot-instructions.md"),
 	} {
 		if fileExists(t, filepath.Join(projectPath, off)) {
@@ -143,5 +145,21 @@ func TestProjectGeneratesWindsurfRulesWhenEnabled(t *testing.T) {
 
 	if fileExists(t, filepath.Join(projectPath, ".windsurf", "mcp.json")) {
 		t.Fatal("windsurf mcp.json must be written only by mcpregistry")
+	}
+}
+
+func TestProjectGeneratesContinueRulesWhenEnabled(t *testing.T) {
+	projectPath := t.TempDir()
+	dwytBin := filepath.Join(t.TempDir(), "bin")
+
+	Project(projectPath, "continue", dwytBin)
+
+	rules := filepath.Join(projectPath, ".continue", "rules", "dwyt.md")
+	if !fileExists(t, rules) {
+		t.Fatalf("expected Continue rules file at %s", rules)
+	}
+	assertEnglishInstructionFile(t, rules)
+	if fileExists(t, "AGENTS.md") || fileExists(t, "CLAUDE.md") {
+		t.Fatal("Continue selection must not create another client's instruction file")
 	}
 }

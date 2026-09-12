@@ -41,10 +41,10 @@ func (ds *DashboardServer) apiHousekeeperRun(c *gin.Context) {
 	var report housekeeper.Report
 	run := func() error {
 		if dryRun {
-			report = ds.Housekeeper.RunDry(depth)
+			report = ds.Housekeeper.RunDryContext(c.Request.Context(), depth)
 			return nil
 		}
-		report = ds.Housekeeper.Run(depth)
+		report = ds.Housekeeper.RunContext(c.Request.Context(), depth)
 		return nil
 	}
 	if ds.Optimizer != nil {
@@ -132,6 +132,10 @@ func (ds *DashboardServer) apiCanonicalUpsert(c *gin.Context) {
 	source := brain.SourceRef{}
 	if body.SourceFile != "" {
 		source = brain.SourceOf(body.SourceFile)
+		if source.File == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source_file must reference a readable file"})
+			return
+		}
 	}
 	note, err := pb.UpsertCanonical(body.Key, body.Title, body.Body, source)
 	if err != nil {

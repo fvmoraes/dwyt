@@ -22,8 +22,20 @@ export const T = {
     tokensSavedLabel: 'Tokens saved', uptime: 'Active', repos: 'Repos',
     scope: 'Scope', port: 'Port', requests: 'Requests', compression: 'Compression',
     commands: 'Commands', savingsPct: '% savings', activeSince: 'Active',
-    // Card status — 3 states
+    // Card status — lifecycle states (unknown is never rendered as offline)
     notInstalled: 'Not Installed', inactive: 'Inactive', active: 'Active',
+    cardStarting: 'Starting', degraded: 'Degraded', failed: 'Failed', unknownState: 'Unknown',
+    // Multidimensional diagnostics (effective port + observed MCP activity)
+    effectivePort: 'Port', mcpActivity: 'MCP',
+    installState: 'Installation', configState: 'Configuration', runtimeState: 'Service', capabilityState: 'Capability',
+    processId: 'PID', lastActivity: 'Last activity', lastHealth: 'Last health check', lastHealthy: 'Last healthy',
+    lastTransition: 'Last change', lastError: 'Last error', attempts: 'Attempts', version: 'Version', logPath: 'Log path',
+    mcpActive: 'Active', mcpActiveRecently: 'Active recently', mcpConfiguredActivity: 'Configured',
+    mcpNotObservable: 'Activity not observable',
+    stateNotInstalled: 'Not installed', stateInstalled: 'Installed', stateVersionUnknown: 'Version unknown', stateIncompatible: 'Incompatible',
+    stateNotConfigured: 'Not configured', stateConfigured: 'Configured', statePartial: 'Partial', stateConfigurationError: 'Configuration error',
+    stateStopped: 'Stopped', stateHealthy: 'Healthy', stateUnhealthy: 'Unhealthy', stateRestarting: 'Restarting', stateDisabled: 'Disabled',
+    stateAvailable: 'Available', stateIndexRequired: 'Index required', stateReady: 'Ready', stateStale: 'Stale', stateError: 'Error',
     // Card actions
     start: '▶ Start', stop: '■ Stop',
     index: 'Index', indexing: '...',
@@ -176,6 +188,18 @@ export const T = {
     commands: 'Comandos', savingsPct: '% economia', activeSince: 'Ativo',
     // 3 estados
     notInstalled: 'Não instalado', inactive: 'Inativo', active: 'Ativo',
+    cardStarting: 'Iniciando', degraded: 'Degradado', failed: 'Falhou', unknownState: 'Desconhecido',
+    // Diagnósticos multidimensionais (porta efetiva + atividade MCP observada)
+    effectivePort: 'Porta', mcpActivity: 'MCP',
+    installState: 'Instalação', configState: 'Configuração', runtimeState: 'Serviço', capabilityState: 'Capacidade',
+    processId: 'PID', lastActivity: 'Última atividade', lastHealth: 'Última verificação', lastHealthy: 'Último saudável',
+    lastTransition: 'Última mudança', lastError: 'Último erro', attempts: 'Tentativas', version: 'Versão', logPath: 'Caminho do log',
+    mcpActive: 'Ativo', mcpActiveRecently: 'Ativo recentemente', mcpConfiguredActivity: 'Configurado',
+    mcpNotObservable: 'Atividade não observável',
+    stateNotInstalled: 'Não instalado', stateInstalled: 'Instalado', stateVersionUnknown: 'Versão desconhecida', stateIncompatible: 'Incompatível',
+    stateNotConfigured: 'Não configurado', stateConfigured: 'Configurado', statePartial: 'Parcial', stateConfigurationError: 'Erro de configuração',
+    stateStopped: 'Parado', stateHealthy: 'Saudável', stateUnhealthy: 'Não saudável', stateRestarting: 'Reiniciando', stateDisabled: 'Desativado',
+    stateAvailable: 'Disponível', stateIndexRequired: 'Índice necessário', stateReady: 'Pronto', stateStale: 'Desatualizado', stateError: 'Erro',
     start: '▶ Iniciar', stop: '■ Parar',
     index: 'Indexar', indexing: '...',
     openGraph: 'Abrir Grafo →', openStats: 'Abrir Stats →',

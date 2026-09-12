@@ -25,7 +25,7 @@ detect_platform() {
 }
 
 setup_release_paths() {
-  INSTALL_DIR="${HOME}/.local/bin"
+  INSTALL_DIR="${DWYT_INSTALL_DIR:-${INSTALL_DIR:-${HOME}/.local/bin}}"
   DEST="${INSTALL_DIR}/dwyt"
   RELEASE_BINARY="dwyt"
   RELEASE_ARCHIVE="dwyt_${GOOS}_${GOARCH}.tar.gz"

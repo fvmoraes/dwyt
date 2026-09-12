@@ -1,11 +1,14 @@
 package housekeeper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/fvmoraes/dwyt/internal/brain"
@@ -370,6 +373,38 @@ func TestTTLOverrideOfZeroDisablesExpiry(t *testing.T) {
 	}
 }
 
+func TestStartRunsLightThenPeriodicDeep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Interval = time.Hour
+		h := New(cfg, nil, nil)
+		h.Start()
+		synctest.Wait()
+
+		startup, ok := h.HousekeeperStatus()["last_report"].(*Report)
+		if !ok {
+			t.Fatalf("expected a startup report, got %#v", h.HousekeeperStatus()["last_report"])
+		}
+		if startup.Depth != Light {
+			t.Fatalf("startup depth = %q, want %q", startup.Depth, Light)
+		}
+
+		time.Sleep(cfg.Interval)
+		synctest.Wait()
+		periodic, ok := h.HousekeeperStatus()["last_report"].(*Report)
+		if !ok {
+			t.Fatalf("expected a periodic report, got %#v", h.HousekeeperStatus()["last_report"])
+		}
+		if periodic.Depth != Deep {
+			t.Fatalf("periodic depth = %q, want %q", periodic.Depth, Deep)
+		}
+
+		if err := h.StopContext(context.Background()); err != nil {
+			t.Fatalf("StopContext() error = %v", err)
+		}
+	})
+}
+
 func TestStopIsIdempotent(t *testing.T) {
 	h := New(DefaultConfig(), nil, nil)
 	h.Stop()
@@ -472,5 +507,126 @@ func TestSessionSurvivesWhenPromotionIsDisabled(t *testing.T) {
 	constraints, _ := pb.ReadCanonical("active-constraints")
 	if strings.Contains(constraints.Body, "something must be true") {
 		t.Fatal("extraction was disabled, so nothing should have been written")
+	}
+}
+
+// TestMarkStateIsAtomic pins the crash-safety contract (Fine-Tuning §32):
+// the state flip must never leave a truncated or half-written note behind, and
+// must preserve a user's existing restrictive permissions.
+func TestMarkStateIsAtomic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-note.md")
+	body := "---\ntype: session\nstate: active\n---\n\nbody line\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := markState(path, brain.NoteStale); err != nil {
+		t.Fatalf("markState failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "state: stale") || !strings.Contains(string(data), "body line") {
+		t.Fatalf("state flip lost content: %s", data)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Fatalf("mode = %#o, want %#o", got, want)
+		}
+	}
+}
+
+func TestRunContextParticipatesInVaultLease(t *testing.T) {
+	h := New(DefaultConfig(), nil, nil)
+	leaseEntered := make(chan struct{})
+	leaseRelease := make(chan struct{})
+	h.SetRunLease(func() func() {
+		close(leaseEntered)
+		<-leaseRelease
+		return func() {}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan Report, 1)
+	go func() { result <- h.RunContext(ctx, Deep) }()
+	select {
+	case <-leaseEntered:
+	case <-time.After(time.Second):
+		t.Fatal("housekeeper pass did not acquire the vault lease")
+	}
+	select {
+	case <-result:
+		t.Fatal("housekeeper pass returned before the lease was granted")
+	default:
+	}
+	cancel()
+	close(leaseRelease)
+	select {
+	case report := <-result:
+		if report.Skipped != "cancelled" {
+			t.Fatalf("cancelled report skipped = %q, want cancelled", report.Skipped)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled housekeeper pass did not return")
+	}
+}
+
+func TestStopContextWaitsForStartupPass(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RunOnStartup = true
+	h := New(cfg, nil, nil)
+	leaseEntered := make(chan struct{})
+	leaseRelease := make(chan struct{})
+	h.SetRunLease(func() func() {
+		close(leaseEntered)
+		<-leaseRelease
+		return func() {}
+	})
+	h.Start()
+	select {
+	case <-leaseEntered:
+	case <-time.After(time.Second):
+		t.Fatal("startup pass did not begin")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- h.StopContext(ctx) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopContext returned before startup pass drained: %v", err)
+	default:
+	}
+	close(leaseRelease)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("StopContext error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StopContext did not finish after the startup pass exited")
+	}
+}
+
+func TestOnSessionCloseWithLeaseHeldSkipsRunLease(t *testing.T) {
+	h := New(DefaultConfig(), nil, nil)
+	leaseCalls := 0
+	h.SetRunLease(func() func() {
+		leaseCalls++
+		return func() {}
+	})
+
+	report := h.OnSessionCloseWithLeaseHeld()
+	if report.Depth != Light {
+		t.Fatalf("report depth = %q, want %q", report.Depth, Light)
+	}
+	if leaseCalls != 0 {
+		t.Fatalf("a caller-held lease must not be acquired again; calls = %d", leaseCalls)
 	}
 }

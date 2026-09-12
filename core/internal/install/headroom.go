@@ -28,7 +28,9 @@ func Headroom(dwytBin, dwytHome string) error {
 		return fmt.Errorf("headroom: cannot create %s: %w", dwytHome, err)
 	}
 
-	cleanPartialHeadroom(wrapperPath, venvDir)
+	if err := cleanPartialHeadroom(wrapperPath, venvDir); err != nil {
+		return fmt.Errorf("headroom: clean partial installation: %w", err)
+	}
 
 	python, err := findCompatiblePythonCommand()
 	if err != nil {
@@ -62,9 +64,14 @@ func headroomWrapperName() string {
 // cleanPartialHeadroom removes leftovers from an aborted previous attempt.
 // Without it, retries failed with "venv has no pip" because the broken
 // state was inherited.
-func cleanPartialHeadroom(wrapperPath, venvDir string) {
-	os.Remove(wrapperPath)
-	os.RemoveAll(venvDir)
+func cleanPartialHeadroom(wrapperPath, venvDir string) error {
+	if err := os.Remove(wrapperPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove wrapper %s: %w", wrapperPath, err)
+	}
+	if err := os.RemoveAll(venvDir); err != nil {
+		return fmt.Errorf("remove venv %s: %w", venvDir, err)
+	}
+	return nil
 }
 
 func venvBinaries(venvDir string) (pipBin, pyBin, hrBin string) {

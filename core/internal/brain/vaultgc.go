@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -122,6 +123,13 @@ func isVaultSectionDir(name string) bool {
 // Run this AFTER MigrateVaultsToNamedLayout: whatever the migration managed
 // to rename is out of the way, so the sweep only sees the true leftovers.
 func GCSweepVaults(dwytHome string, opts VaultGCOptions) VaultGCReport {
+	return GCSweepVaultsContext(context.Background(), dwytHome, opts)
+}
+
+func GCSweepVaultsContext(ctx context.Context, dwytHome string, opts VaultGCOptions) VaultGCReport {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	report := VaultGCReport{}
 	projectsDir := filepath.Join(dwytHome, "projects")
 	entries, err := os.ReadDir(projectsDir)
@@ -134,6 +142,10 @@ func GCSweepVaults(dwytHome string, opts VaultGCOptions) VaultGCReport {
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			report.Errors = append(report.Errors, err.Error())
+			break
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -154,6 +166,17 @@ func GCSweepVaults(dwytHome string, opts VaultGCOptions) VaultGCReport {
 		if opts.DryRun {
 			report.Removed++
 			report.RemovedDirs = append(report.RemovedDirs, name)
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			report.Errors = append(report.Errors, err.Error())
+			break
+		}
+		// Revalidate immediately before deletion to narrow the TOCTOU window:
+		// content created after the first scan must make the vault survive.
+		if !vaultIsScaffoldOnly(dir) {
+			report.KeptWithContent++
+			report.KeptDirs = append(report.KeptDirs, name)
 			continue
 		}
 		if err := os.RemoveAll(dir); err != nil {

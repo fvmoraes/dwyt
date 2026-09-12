@@ -86,6 +86,73 @@ func TestAPIMCPConfigureReturnsStructuredPayload(t *testing.T) {
 	}
 }
 
+// TestAPIMCPConfigureMigratesCanonicalInstructionBlock proves the reconfigure
+// path reaches the instruction generator after registry synchronization. It
+// must preserve user text while replacing legacy DWYT-managed content.
+func TestAPIMCPConfigureMigratesCanonicalInstructionBlock(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	home := t.TempDir()
+	dwytHome := filepath.Join(home, ".dwyt")
+	dwytBin := filepath.Join(dwytHome, "bin")
+	projectPath := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("DWYT_HOME", dwytHome)
+	touchExecutableForMCP(t, filepath.Join(dwytBin, "dwyt"))
+	touchExecutableForMCP(t, filepath.Join(dwytBin, "codebase-memory-mcp"))
+
+	store, err := db.New(filepath.Join(dwytHome, "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetConfig("setup", `{"ias":["claude"],"tools":["obsidian","cbmcp"]}`); err != nil {
+		t.Fatal(err)
+	}
+	claudePath := filepath.Join(projectPath, "CLAUDE.md")
+	legacy := "<!-- dwyt:instructions:start -->\n#dwyt\n\nstale managed content\n<!-- dwyt:instructions:end -->\n"
+	if err := os.WriteFile(claudePath, []byte("# Team rules\n\nPreserve this text.\n\n"+legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ds := &DashboardServer{
+		DwytBin:        dwytBin,
+		DwytHome:       dwytHome,
+		DefaultProject: projectPath,
+		Store:          store,
+		ProcMan:        procman.New(dwytHome),
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("POST", "/api/mcp/configure", bytes.NewReader([]byte(`{"name":"obsidian","project_path":`+strconv.Quote(projectPath)+`}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	ds.apiMCPConfigure(c)
+	if rec.Code != 200 {
+		t.Fatalf("expected HTTP 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"# Team rules", "Preserve this text.",
+		"<!-- DWYT:START -->", "<!-- DWYT:END -->",
+		"**Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("reconfigure output is missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "<!-- dwyt:instructions:start -->") || strings.Contains(content, "<!-- dwyt:instructions:end -->") {
+		t.Fatalf("legacy markers were not upgraded during reconfigure:\n%s", content)
+	}
+	if strings.Count(content, "<!-- DWYT:START -->") != 1 || strings.Count(content, "<!-- DWYT:END -->") != 1 {
+		t.Fatalf("expected exactly one canonical instruction block after reconfigure:\n%s", content)
+	}
+}
+
 // TestAPIMCPConfigureKeepsCodebaseProxyCanonical guards the ordering between
 // registry configuration and project integration. The registry deliberately
 // routes Codebase through `dwyt mcp-proxy`; a later integration pass must not

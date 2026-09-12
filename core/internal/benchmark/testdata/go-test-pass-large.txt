@@ -1,0 +1,25 @@
+go: downloading github.com/example/module0 v1.0.0
+go: downloading github.com/example/module1 v1.0.1
+go: downloading github.com/example/module2 v1.0.2
+go: downloading github.com/example/module3 v1.0.3
+go: downloading github.com/example/module4 v1.0.4
+go: downloading github.com/example/module5 v1.0.5
+go: downloading github.com/example/module6 v1.0.6
+go: downloading github.com/example/module7 v1.0.7
+go: downloading github.com/example/module8 v1.0.8
+go: downloading github.com/example/module9 v1.0.9
+go: downloading github.com/example/module10 v1.0.10
+go: downloading github.com/example/module11 v1.0.11
+go: downloading github.com/example/module12 v1.0.12
+go: downloading github.com/example/module13 v1.0.13
+go: downloading github.com/example/module14 v1.0.14
+=== RUN   TestSearchFindsCanonicalNotes
+--- PASS: TestSearchFindsCanonicalNotes (0.00s)
+=== RUN   TestSearchExcludesStaleNotes
+--- PASS: TestSearchExcludesStaleNotes (0.00s)
+=== RUN   TestTelemetrySummary
+--- PASS: TestTelemetrySummary (0.00s)
+ok  	github.com/fvmoraes/dwyt/internal/brain	0.015s
+ok  	github.com/fvmoraes/dwyt/internal/telemetry	0.021s
+ok  	github.com/fvmoraes/dwyt/internal/server	0.046s
+PASS

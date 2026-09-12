@@ -1,9 +1,12 @@
 package root
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/detect"
 	"github.com/fvmoraes/dwyt/internal/status"
@@ -87,5 +90,31 @@ func TestEffectiveDWYTPathsKeepsDWYTHomeOverride(t *testing.T) {
 	home, bin, data := effectiveDWYTPaths(detected)
 	if home != DwytHome || bin != DwytBin || data != DwytData {
 		t.Fatalf("override paths were lost: got home=%q bin=%q data=%q, want home=%q bin=%q data=%q", home, bin, data, DwytHome, DwytBin, DwytData)
+	}
+}
+
+func TestRequestGracefulDaemonShutdownRequiresAcceptedResponse(t *testing.T) {
+	var method string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	if !requestGracefulDaemonShutdownURL(server.URL, time.Second) {
+		t.Fatal("202 response should acknowledge graceful shutdown")
+	}
+	if method != http.MethodPost {
+		t.Fatalf("shutdown method = %s, want POST", method)
+	}
+}
+
+func TestRequestGracefulDaemonShutdownFallsBackOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	if requestGracefulDaemonShutdownURL(server.URL, time.Second) {
+		t.Fatal("non-202 response must use process termination fallback")
 	}
 }
