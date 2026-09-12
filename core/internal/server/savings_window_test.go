@@ -3,6 +3,7 @@ package server
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/fvmoraes/dwyt/internal/db"
 	"github.com/fvmoraes/dwyt/internal/procman"
@@ -37,6 +38,54 @@ func TestSavingsWindowCutoff(t *testing.T) {
 		if _, ok := savingsWindowCutoff(w); ok {
 			t.Fatalf("window %q should mean no window", w)
 		}
+	}
+}
+
+// Global-scope details must never seed the per-project ledger: a first poll
+// would otherwise record the whole global counter as one delta and windowed /
+// session sums would resurface global data as project savings.
+func TestRecordSavingsSnapshotSkipsGlobalScope(t *testing.T) {
+	dwytHome := t.TempDir()
+	projectPath := t.TempDir()
+	store, err := db.New(filepath.Join(dwytHome, "dwyt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ds := &DashboardServer{
+		DwytHome: dwytHome,
+		DwytBin:  filepath.Join(t.TempDir(), "bin"),
+		Store:    store,
+		ProcMan:  procman.New(dwytHome),
+	}
+	pid := db.HashPath(projectPath)
+	globalDetails := map[string]*ToolDetail{
+		"rtk":      {TokensSaved: 93000000, TotalCommands: 500, Scope: "global"},
+		"headroom": {TokensSaved: 25000000, Requests: 10, Scope: "global"},
+	}
+	projectDetails := map[string]*ToolDetail{
+		"obsidian": {TokensSaved: 1809, Scope: "project"},
+	}
+	// Baseline poll, then growth: the ledger only ever stores positive deltas.
+	ds.recordSavingsSnapshot(projectPath, globalDetails)
+	ds.recordSavingsSnapshot(projectPath, projectDetails)
+	ds.recordSavingsSnapshot(projectPath, globalDetails)
+	projectDetails["obsidian"].TokensSaved = 2500
+	ds.recordSavingsSnapshot(projectPath, projectDetails)
+
+	sums, err := store.SumMetricsByTool(pid, time.Now().Add(-time.Hour).Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sums["rtk"]; ok {
+		t.Fatalf("global-scope rtk recorded into project ledger: %v", sums["rtk"])
+	}
+	if _, ok := sums["headroom"]; ok {
+		t.Fatalf("global-scope headroom recorded into project ledger: %v", sums["headroom"])
+	}
+	if got := sums["obsidian"]["saved"]; got != 691 {
+		t.Fatalf("project-scope obsidian saved = %d, want 691 (growth only)", got)
 	}
 }
 
@@ -88,5 +137,10 @@ func TestToolDetailsWindowReflectsRecordedDeltas(t *testing.T) {
 	// pct is recomputed from the windowed totals: 200/220 ≈ 90.9%
 	if got := details["rtk"].PctSaved; got < 90 || got > 92 {
 		t.Fatalf("windowed rtk pct = %.2f, want ~90.9 (derived from window)", got)
+	}
+	// Windowed counters are per-project ledger deltas; the scope must say so
+	// so the UI never mistakes them for a global fallback.
+	if got := details["rtk"].Scope; got != "project" {
+		t.Fatalf("windowed rtk scope = %q, want project", got)
 	}
 }

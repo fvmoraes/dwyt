@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { BadgeText, ToolState } from '../types'
 import { CardHeader, Row, Hr } from './CardParts'
+import { fmtKnown } from '../utils'
 import {
   getTelemetrySummary,
   runHousekeeper,
@@ -12,7 +13,6 @@ import {
 interface Props {
   t: Record<string, string>
   badge: (s: ToolState) => BadgeText
-  fmtN: (n: number | undefined) => string
   window: string
   projectPath?: string
 }
@@ -27,7 +27,10 @@ interface Props {
 //     DWYT's own favour (it makes "before DWYT" look worse).
 //   - Observed and estimated cost are separate rows. Merging them would produce
 //     a number the user cannot act on.
-export default function CardOptimizer({ t, badge, fmtN, window: windowName, projectPath }: Props) {
+//
+// The card collapses like the dashboard Diagnostics section; the header keeps
+// the identity, the status badge and the avoided-tokens savings visible.
+export default function CardOptimizer({ t, badge, window: windowName, projectPath }: Props) {
   const [payload, setPayload] = useState<TelemetryPayload | null>(null)
   const [report, setReport] = useState<HousekeeperReport | null>(null)
   const [busy, setBusy] = useState(false)
@@ -81,12 +84,13 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName, proj
       : '—'
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.optimizerTitle} color="var(--accent)" state={state} badgeText={b} />
-      <Hr />
+    <details className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <summary className="card-summary">
+        <CardHeader label={t.optimizerTitle} color="var(--accent)" state={state} badgeText={b} />
+        <Row label={t.optimizerAvoidedTokens} value={avoidedTokens(summary)} />
+      </summary>
 
       <Row label={t.optimizerContextReduction} value={pct(summary?.context_reduction_pct)} />
-      <Row label={t.optimizerAvoidedTokens} value={avoidedTokens(summary)} />
       <Row label={t.optimizerCacheHit} value={pct(summary?.cache_hit_pct)} />
       <Row
         label={t.optimizerCacheControl}
@@ -107,13 +111,13 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName, proj
       <Row label={t.optimizerCompletion} value={pct(summary?.completion_pct)} />
 
       <Hr />
-      <Row label={t.optimizerCanonicalNotes} value={fmtN(brain?.canonical_notes)} />
+      <Row label={t.optimizerCanonicalNotes} value={fmtKnown(brain?.canonical_notes)} />
       <Row label={t.optimizerSessions} value={sessionsLabel} />
-      <Row label={t.optimizerStaleNotes} value={fmtN(brain?.stale_notes)} />
-      <Row label={t.optimizerExpiringSoon} value={fmtN(brain?.expiring_within_24h)} />
+      <Row label={t.optimizerStaleNotes} value={fmtKnown(brain?.stale_notes)} />
+      <Row label={t.optimizerExpiringSoon} value={fmtKnown(brain?.expiring_within_24h)} />
       <Row
         label={t.optimizerRawObjects}
-        value={raw?.enabled ? `${fmtN(raw.objects)} (${fmtBytes(raw.bytes)})` : '—'}
+        value={raw?.enabled ? `${fmtKnown(raw.objects)} (${fmtBytes(raw.bytes)})` : '—'}
       />
       <Row label={t.optimizerLastHousekeeping} value={keeper?.last_run ? fmtWhen(keeper.last_run) : t.optimizerNever} />
 
@@ -160,7 +164,7 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName, proj
         </div>
       )}
       {error && <div style={{ fontSize: 10, color: 'var(--error, #dc2626)' }}>{error}</div>}
-    </div>
+    </details>
   )
 }
 
@@ -169,18 +173,12 @@ export default function CardOptimizer({ t, badge, fmtN, window: windowName, proj
 function avoidedTokens(summary: TelemetrySummary | undefined): string {
   const provenance = summary?.provenance?.avoided_tokens
   if (!summary || provenance === undefined || provenance === 'unsupported') return '—'
-  return fmtKnownTokens(summary.avoided_tokens)
+  return fmtKnown(summary.avoided_tokens)
 }
 
 function estimatedCost(summary: TelemetrySummary | undefined): string {
   if (summary?.provenance?.estimated_cost_usd !== 'estimated') return '—'
   return `~$${summary.estimated_cost_usd.toFixed(4)}`
-}
-
-function fmtKnownTokens(value: number): string {
-  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M'
-  if (value >= 1_000) return (value / 1_000).toFixed(0) + 'K'
-  return String(value)
 }
 
 // pct renders a nullable percentage. A null value means "not measured", which

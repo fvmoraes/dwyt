@@ -49,6 +49,8 @@ func sessionize(ts []int64, gapSecs int64) []sessionSpan {
 
 type sessionModelView struct {
 	Model            string  `json:"model"`
+	Variant          string  `json:"variant,omitempty"`
+	Effort           string  `json:"effort,omitempty"`
 	Requests         int     `json:"requests"`
 	ObservedRequests int     `json:"observed_requests"`
 	TokensTotal      int     `json:"tokens_total"`
@@ -237,6 +239,8 @@ func (ds *DashboardServer) sessionLLM(pid string, span sessionSpan) sessionLLMVi
 	for _, u := range usages {
 		mv := sessionModelView{
 			Model:            u.Model,
+			Variant:          u.Variant,
+			Effort:           u.Effort,
 			Requests:         u.Requests,
 			ObservedRequests: u.ObservedRequests,
 			TokensTotal:      u.TotalTokens(),

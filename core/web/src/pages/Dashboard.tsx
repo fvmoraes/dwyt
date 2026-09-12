@@ -12,7 +12,7 @@ import CardObsidian from '../components/CardObsidian'
 import CardOptimizer from '../components/CardOptimizer'
 import CardSession from '../components/CardSession'
 import VaultMigrationCard from '../components/VaultMigrationCard'
-import { logColor } from '../utils'
+import { logColor, fmtKnown } from '../utils'
 import { useLang } from '../LangContext'
 import type { ToolDetail, Details, ToolState, ComponentStatus, MCPRegistry, ProjectContext, BadgeText } from '../types'
 
@@ -32,15 +32,6 @@ function fmtUptime(secs: number): string {
 
 function fmtN(n: number | undefined) {
   if (!n) return '--'
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
-  return String(n)
-}
-
-// Diagnostics use null for unknown and may legitimately produce zero. Keep
-// that distinction visible instead of reusing the legacy savings formatter.
-function fmtKnownN(n: number | null | undefined) {
-  if (n === null || n === undefined) return '\u2014'
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
   return String(n)
@@ -66,8 +57,12 @@ function badge(s: ToolState, t: Record<string, string>): BadgeText {
 // Component counters are legacy gross savings indicators. They remain useful
 // for the existing dashboard card but are never presented as net savings; the
 // diagnostics view below derives net savings from telemetry and explicit taxes.
+//
+// Project scope rule: a detail marked "global" is a lifetime aggregate that is
+// not the selected project's number, so it never feeds these totals — scoped
+// metrics either exist (possibly 0) or render "—".
 function calculateLegacyGrossTokenSavings(details: Details) {
-  const values = Object.values(details)
+  const values = Object.values(details).filter(d => d && d.scope !== 'global')
   const tokensSaved = values.reduce((a, d) => a + (d?.tokens_saved || 0), 0)
   let withoutDwyt = 0
   for (const d of values) {
@@ -360,10 +355,18 @@ export default function Dashboard() {
 
   const totals = calculateLegacyGrossTokenSavings(details)
   const totalSaved = totals.tokensSaved
-  const rtkSaved = details['rtk']?.tokens_saved || 0
-  const headroomSaved = details['headroom']?.tokens_saved || 0
-  const obsidianSaved = details['obsidian']?.tokens_saved || 0
-  const codebaseSaved = details['codebase-memory-mcp']?.tokens_saved || 0
+  // Header strip keeps the scope promise: a global-scope detail (e.g. RTK on a
+  // project without .rtk, headroom lifetime without a window) renders "—"
+  // instead of leaking a global aggregate; a computed zero renders as 0.
+  const scopedSaved = (name: string) => {
+    const det = details[name]
+    if (!det || det.scope === 'global') return null
+    return det.tokens_saved
+  }
+  const rtkSaved = scopedSaved('rtk')
+  const headroomSaved = scopedSaved('headroom')
+  const obsidianSaved = scopedSaved('obsidian')
+  const codebaseSaved = scopedSaved('codebase-memory-mcp')
   const obsidianCount = typeof obsidianStats?.total_files === 'number' ? obsidianStats.total_files as number : 0
 
   const withoutDwyt = totals.withoutDwyt
@@ -554,8 +557,8 @@ export default function Dashboard() {
               ].map(tool => (
                 <div key={tool.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ fontSize: 11, color: tool.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{tool.label}</span>
-                  <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: tool.saved > 0 ? tool.color : 'var(--muted)' }}>
-                    {tool.saved > 0 ? fmtN(tool.saved) : '\u2014'}
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: tool.saved !== null && tool.saved > 0 ? tool.color : 'var(--muted)' }}>
+                    {tool.saved === null ? '\u2014' : fmtKnown(tool.saved)}
                   </span>
                 </div>
               ))}
@@ -578,11 +581,11 @@ export default function Dashboard() {
         </summary>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, marginTop: 6 }}>
           {[
-            { label: 'Net', value: fmtKnownN(netSavings?.net_estimated_tokens), color: 'var(--yellow)' },
-            { label: 'Gross avoided', value: fmtKnownN(netSavings?.gross_avoided_tokens), color: 'var(--green)' },
-            { label: 'Schema tax', value: fmtKnownN(netSavings?.startup_schema_tax_tokens), color: 'var(--peach)' },
-            { label: 'Instruction tax', value: fmtKnownN(netSavings?.managed_instruction_tax_tokens), color: 'var(--peach)' },
-            { label: 'Compression metadata', value: fmtKnownN(netSavings?.compression_metadata_tokens), color: 'var(--peach)' },
+            { label: 'Net', value: fmtKnown(netSavings?.net_estimated_tokens), color: 'var(--yellow)' },
+            { label: 'Gross avoided', value: fmtKnown(netSavings?.gross_avoided_tokens), color: 'var(--green)' },
+            { label: 'Schema tax', value: fmtKnown(netSavings?.startup_schema_tax_tokens), color: 'var(--peach)' },
+            { label: 'Instruction tax', value: fmtKnown(netSavings?.managed_instruction_tax_tokens), color: 'var(--peach)' },
+            { label: 'Compression metadata', value: fmtKnown(netSavings?.compression_metadata_tokens), color: 'var(--peach)' },
           ].map(item => (
             <div key={item.label}>
               <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>{item.label}</div>
@@ -646,7 +649,6 @@ export default function Dashboard() {
           configureFeedback={configureFeedback}
           t={t} component={codebaseComponent}
           getDetail={getDetail} badge={s => badge(s, t)}
-          fmtN={fmtN}
           setIndexPath={selectProject} onIndex={handleIndex}
           onOpenGraph={handleOpenGraph}
           onConfigure={() => handleConfigureMCP('codebase')}
@@ -656,13 +658,13 @@ export default function Dashboard() {
           indexPath={indexPath} repoName={repoName}
           t={t} component={rtkComponent}
           getDetail={getDetail} badge={s => badge(s, t)}
-          fmtUptimeFromDet={fmtUptimeFromDet} fmtN={fmtN}
+          fmtUptimeFromDet={fmtUptimeFromDet}
         />
         <CardHeadroom
           det={getDetail('headroom')}
           component={headroomComponent}
           badge={s => badge(s, t)}
-          repoName={repoName} indexPath={indexPath} t={t} fmtN={fmtN}
+          repoName={repoName} indexPath={indexPath} t={t}
           onStart={async () => { await api.headroomStart(); setTimeout(pollAll, 2000) }}
           onStop={async () => { await api.headroomStop(); setTimeout(pollAll, 1000) }}
           onOpenStats={async () => {
@@ -681,7 +683,7 @@ export default function Dashboard() {
           mcpRegistry={mcpRegistry} searchQuery={searchQuery}
           saveType={saveType} saveContent={saveContent} searchResult={searchResult}
           configureFeedback={configureFeedback}
-          t={t} fmtN={fmtN}
+          t={t}
           setSaveType={setSaveType} setSaveContent={setSaveContent} setSearchQuery={setSearchQuery}
           onSave={async () => {
             if (!saveContent) return
@@ -703,8 +705,8 @@ export default function Dashboard() {
           onConfigure={() => handleConfigureMCP('obsidian')}
           onDismissFeedback={() => setConfigureFeedback(null)}
         />
-        <CardOptimizer t={t} badge={s => badge(s, t)} fmtN={fmtN} window={savingsWindow} projectPath={indexPath || undefined} />
-        <CardSession t={t} badge={s => badge(s, t)} fmtN={fmtN} projectPath={indexPath || undefined} />
+        <CardOptimizer t={t} badge={s => badge(s, t)} window={savingsWindow} projectPath={indexPath || undefined} />
+        <CardSession t={t} badge={s => badge(s, t)} projectPath={indexPath || undefined} />
       </div>
     </div>
   )

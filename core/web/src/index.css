@@ -111,6 +111,22 @@ body * {
   height: 100%;
 }
 
+/* ── Collapsible cards (dashboard) ──
+   Same native <details>/<summary> mechanism as the Diagnostics section:
+   cards start closed, the header stays visible and toggles the body. */
+details.card > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  margin: -4px -4px 0;
+  padding: 4px;
+  border-radius: 4px;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary:hover { background: rgba(203, 166, 247, 0.06); }
+.card-chevron::before { content: '▸'; color: var(--muted); font-size: 10px; }
+details.card[open] .card-chevron::before { content: '▾'; }
+
 .dashboard-compact button {
   padding: 2px 6px !important;
   border-radius: 4px !important;
@@ -222,6 +238,23 @@ input[type="text"]:focus { outline: none; border-color: var(--blue); }
 .accordion-body { overflow: hidden; transition: max-height 0.25s ease; }
 .accordion-body.collapsed { max-height: 0; }
 .accordion-body.expanded  { max-height: 2000px; }
+
+/* ── Setup horizontal layout ──
+   Desktop uses a wider container and multi-column grids for the Tools and
+   AI Clients sections; narrow screens fall back to a single column. */
+.setup-page { max-width: 1100px; }
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 4px 18px;
+  align-items: start;
+}
+.setup-grid-clients {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 4px 18px;
+  align-items: start;
+}
 
 /* ── Tags ── */
 .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 12px; }

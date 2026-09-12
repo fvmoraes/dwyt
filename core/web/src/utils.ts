@@ -4,6 +4,16 @@ export function logColor(msg: string) {
   return 'var(--green)'
 }
 
+// fmtKnown renders a counter that distinguishes "not measured" from a real
+// zero: null/undefined -> "—", a computed 0 -> "0". Global-scope fallbacks are
+// never fed through this helper; callers gate them before formatting.
+export function fmtKnown(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '—'
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
+  return String(n)
+}
+
 // mcpActivityLabel maps the honest, server-reported mcp_activity value to a
 // display string. DWYT only observes traffic where it sits in the path; an
 // absent or "unknown" value is rendered as "not observable", never as a

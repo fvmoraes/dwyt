@@ -123,9 +123,6 @@ export const T = {
     // RTK CLI info
     rtkCli: 'CLI Tool', rtkCliDesc: 'Prefix commands with rtk',
     variable: 'variable',
-    scopeGlobal: 'global',
-    scopeGlobalRtkNote: 'global RTK total (this project has no .rtk yet)',
-    scopeGlobalHeadroomNote: 'global proxy total (shared across projects)',
     // Current-session card (per-sitting savings + observed LLM throughput).
     sessionTitle: 'Current Session',
     sessionSaved: 'Tokens saved (session)',
@@ -283,9 +280,6 @@ export const T = {
     removing: 'Removendo...',
     rtkCli: 'Ferramenta CLI', rtkCliDesc: 'Prefixe comandos com rtk',
     variable: 'variável',
-    scopeGlobal: 'global',
-    scopeGlobalRtkNote: 'total global do RTK (este projeto ainda não tem .rtk)',
-    scopeGlobalHeadroomNote: 'total global do proxy (compartilhado entre projetos)',
     // Card da sessão atual (economia por sentada + throughput LLM observado).
     sessionTitle: 'Sessão atual',
     sessionSaved: 'Tokens economizados (sessão)',

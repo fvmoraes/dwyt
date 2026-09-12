@@ -12,7 +12,11 @@ export function CardHeader({ label, color, state, badgeText }: {
           <span style={{ fontSize: 11 }}>{badgeText.icon}</span>
           <span style={{ fontSize: 10, fontWeight: 700, color: badgeText.color }}>{badgeText.text}</span>
         </div>
-        <span className={`status-dot ${getDotClass(state)}`} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span className={`status-dot ${getDotClass(state)}`} />
+          {/* Native <details> collapses the card; index.css swaps this glyph. */}
+          <span className="card-chevron" />
+        </div>
       </div>
     </div>
   )

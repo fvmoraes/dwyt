@@ -1,6 +1,7 @@
 import { type ChangeEvent } from 'react'
 import type { ComponentStatus, ToolDetail, BadgeText, ToolState, MCPRegistry } from '../types'
 import { CardHeader, ComponentStatusRows, Row, Hr, RepoRow } from './CardParts'
+import { fmtKnown } from '../utils'
 import Button from './Button'
 import MCPFeedbackBanner from './MCPFeedbackBanner'
 
@@ -23,7 +24,6 @@ interface Props {
   searchResult: string
   configureFeedback?: { kind: 'success' | 'error'; message: string; name: string } | null
   t: Record<string, string>
-  fmtN: (n: number | undefined) => string
   setSaveType: (v: string) => void
   setSaveContent: (v: string) => void
   setSearchQuery: (v: string) => void
@@ -41,7 +41,6 @@ export default function CardObsidian({
   savingBrain, openingBrain, openingDir, summarizing, configuringMCP,
   mcpRegistry, searchQuery, saveType, saveContent, searchResult,
   configureFeedback, t,
-  fmtN,
   setSaveType, setSaveContent, setSearchQuery,
   onSave, onSearch, onSummarize, onOpenVault, onOpenDir, onConfigure,
   onDismissFeedback,
@@ -56,11 +55,12 @@ export default function CardObsidian({
   const configureDisabled = configuringMCP !== ''
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <CardHeader label={t.obsidianActive} color="var(--mauve)" state={state} badgeText={badgeText} />
-      <Hr />
+    <details className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <summary className="card-summary">
+        <CardHeader label={t.obsidianActive} color="var(--mauve)" state={state} badgeText={badgeText} />
+        <Row label={t.tokensSavedLabel} value={fmtKnown(det?.tokens_saved)} title={det?.savings_basis} />
+      </summary>
       <Row label={t.memories} value={obsidianCount > 0 ? String(obsidianCount) : t.noMemoriesYet} />
-      <Row label={t.tokensSavedLabel} value={fmtN(det?.tokens_saved)} title={det?.savings_basis} />
       <Row label={t.uptime} value={det?.uptime_label || '—'} />
       <ComponentStatusRows component={component} t={t} />
       <RepoRow projectName={repoName} projectPath={indexPath} label={t.repos} />
@@ -93,6 +93,6 @@ export default function CardObsidian({
         <Button variant="primary" size="xs" label={openingBrain ? '...' : (t.openBrain || 'Open Vault')} onClick={onOpenVault} />
         <Button variant="primary" size="xs" label={openingDir ? '...' : (t.openVaultDir || 'Open Dir')} onClick={onOpenDir} />
       </div>
-    </div>
+    </details>
   )
 }
