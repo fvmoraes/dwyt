@@ -3,6 +3,7 @@
 package root
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -110,39 +111,77 @@ func TestStopDaemonProcessStopsTrackedProcessTree(t *testing.T) {
 // otherwise the service survives as an orphaned Headroom process on Unix.
 func TestTerminateFailedDaemonStopsManagedServiceTree(t *testing.T) {
 	useTestDWYTHome(t)
-	pidFile := filepath.Join(t.TempDir(), "managed.pid")
 	daemon := exec.Command(os.Args[0], "-test.run=^TestDaemonCleanupHelper$", "--")
 	daemon.Env = append(os.Environ(),
 		"DWYT_DAEMON_CLEANUP_HELPER=1",
-		"DWYT_MANAGED_PID_FILE="+pidFile,
 		"DWYT_MANAGED_HOME="+DwytHome,
 	)
+	var stderr strings.Builder
+	daemon.Stderr = &stderr
+	stdout, err := daemon.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	setDaemonAttr(daemon)
 	if err := daemon.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = procutil.TerminateTree(daemon.Process.Pid) })
 
-	var childPID int
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(pidFile)
-		if err == nil {
-			childPID, err = strconv.Atoi(strings.TrimSpace(string(data)))
-			if err == nil && childPID > 0 {
-				break
-			}
-		}
-		time.Sleep(25 * time.Millisecond)
+	type helperReady struct {
+		pid int
+		err error
 	}
-	if childPID <= 0 {
+	ready := make(chan helperReady, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				ready <- helperReady{err: fmt.Errorf("read helper readiness: %w", err)}
+				return
+			}
+			ready <- helperReady{err: fmt.Errorf("helper exited before announcing readiness")}
+			return
+		}
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] != "DWYT_TEST_READY" {
+			ready <- helperReady{err: fmt.Errorf("unexpected helper readiness line %q", line)}
+			return
+		}
+		pid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			ready <- helperReady{err: fmt.Errorf("parse helper PID %q: %w", fields[1], err)}
+			return
+		}
+		if pid <= 0 {
+			ready <- helperReady{err: fmt.Errorf("invalid helper PID %q", fields[1])}
+			return
+		}
+		ready <- helperReady{pid: pid}
+	}()
+
+	var childPID int
+	select {
+	case result := <-ready:
+		if result.err != nil {
+			terminateFailedDaemon(daemon)
+			t.Fatalf("managed helper did not become ready: %v; stderr: %s", result.err, strings.TrimSpace(stderr.String()))
+		}
+		childPID = result.pid
+	case <-time.After(5 * time.Second):
 		terminateFailedDaemon(daemon)
-		t.Fatalf("managed helper pid was not written to %s", pidFile)
+		t.Fatalf("managed helper did not announce readiness within 5s; stderr: %s", strings.TrimSpace(stderr.String()))
+	}
+
+	if got := procutil.ReadPID(filepath.Join(procutil.PIDDir(DwytHome), "managed.pid")); got != childPID {
+		terminateFailedDaemon(daemon)
+		t.Fatalf("managed PID record = %d, want helper PID %d", got, childPID)
 	}
 	t.Cleanup(func() { _ = procutil.TerminateTree(childPID) })
 
 	terminateFailedDaemon(daemon)
-	deadline = time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for procutil.Alive(childPID) && time.Now().Before(deadline) {
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -155,11 +194,6 @@ func TestDaemonCleanupHelper(t *testing.T) {
 	if os.Getenv("DWYT_DAEMON_CLEANUP_HELPER") != "1" {
 		return
 	}
-	pidFile := os.Getenv("DWYT_MANAGED_PID_FILE")
-	if pidFile == "" {
-		t.Fatal("DWYT_MANAGED_PID_FILE was not set")
-	}
-
 	managedHome := os.Getenv("DWYT_MANAGED_HOME")
 	if managedHome == "" {
 		t.Fatal("DWYT_MANAGED_HOME was not set")
@@ -170,8 +204,8 @@ func TestDaemonCleanupHelper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start managed child: %v", err)
 	}
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", status.PID)), 0644); err != nil {
-		t.Fatalf("write managed pid: %v", err)
+	if _, err := fmt.Printf("DWYT_TEST_READY %d\n", status.PID); err != nil {
+		t.Fatalf("announce managed PID: %v", err)
 	}
 	select {}
 }

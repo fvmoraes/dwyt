@@ -76,6 +76,63 @@ func TestInspectProcessUsesStableRealIdentity(t *testing.T) {
 	}
 }
 
+func TestWritePIDRetriesStableExecTransition(t *testing.T) {
+	home := t.TempDir()
+	const pid = 4242
+	postExecIdentity := testProcessIdentity(pid, "/opt/dwyt/post-exec", "start-1")
+	calls := 0
+
+	// Model /bin/sh replacing itself with exec: the PID and start token remain
+	// stable, while the first inspection observes the executable transition.
+	err := writePIDWithInspector(home, "service", pid, func(got int) (processIdentity, error) {
+		calls++
+		if got != pid {
+			return processIdentity{}, fmt.Errorf("unexpected pid %d", got)
+		}
+		if calls == 1 {
+			return processIdentity{}, fmt.Errorf("%w for pid %d", errProcessExecutedDuringInspect, got)
+		}
+		return postExecIdentity, nil
+	})
+	if err != nil {
+		t.Fatalf("write post-exec PID record: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("inspect calls = %d, want 2", calls)
+	}
+
+	record, format, _, err := readPIDRecordFile(pidRecordPath(home, "service"), true)
+	if err != nil {
+		t.Fatalf("read post-exec PID record: %v", err)
+	}
+	if format != pidRecordFormatCurrent || record != (pidRecord{
+		Version:            pidRecordVersion,
+		PID:                pid,
+		ExecutableIdentity: postExecIdentity.ExecutableIdentity,
+		StartTimeToken:     postExecIdentity.StartTimeToken,
+	}) {
+		t.Fatalf("post-exec PID record = %#v, format=%d", record, format)
+	}
+}
+
+func TestWritePIDDoesNotRetryProcessReplacementDuringInspection(t *testing.T) {
+	home := t.TempDir()
+	const pid = 4242
+	calls := 0
+
+	err := writePIDWithInspector(home, "service", pid, func(got int) (processIdentity, error) {
+		calls++
+		return processIdentity{}, fmt.Errorf("%w for pid %d", errProcessChangedDuringInspect, got)
+	})
+	if !errors.Is(err, errProcessChangedDuringInspect) {
+		t.Fatalf("write error = %v, want process-change error", err)
+	}
+	if calls != 1 {
+		t.Fatalf("inspect calls = %d, want 1 for process replacement", calls)
+	}
+	requireRecordRemoved(t, pidRecordPath(home, "service"))
+}
+
 func TestPIDRecordRoundTripAndAtomicReplace(t *testing.T) {
 	home := t.TempDir()
 	dir := PIDDir(home)

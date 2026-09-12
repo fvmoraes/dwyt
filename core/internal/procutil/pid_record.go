@@ -115,7 +115,14 @@ func writePIDWithInspector(dwytHome, name string, pid int, inspect processInspec
 	}
 	defer func() { _ = unlock() }()
 
+	// A shell launcher can exec its final binary after Start returns, retaining
+	// the same PID and start-time token. Only that verified transition is
+	// retryable; process replacement and every other inspector error remain
+	// fail-closed.
 	identity, err := inspect(pid)
+	for attempt := 1; errors.Is(err, errProcessExecutedDuringInspect) && attempt < maxPIDRecordExecInspectionAttempts; attempt++ {
+		identity, err = inspect(pid)
+	}
 	if err != nil {
 		return fmt.Errorf("inspect process %d for pid record %q: %w", pid, name, err)
 	}

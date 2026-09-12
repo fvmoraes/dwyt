@@ -38,8 +38,14 @@ func inspectProcess(pid int) (processIdentity, error) {
 	if err != nil {
 		return processIdentity{}, err
 	}
-	if startBefore != startAfter || executableBefore != executableAfter {
+	if startBefore != startAfter {
 		return processIdentity{}, fmt.Errorf("%w for pid %d", errProcessChangedDuringInspect, pid)
+	}
+	if executableBefore != executableAfter {
+		// exec preserves start time, so a new coherent sample can safely record
+		// the final executable identity. A changed start time may be PID reuse
+		// and must remain fail-closed.
+		return processIdentity{}, fmt.Errorf("%w for pid %d", errProcessExecutedDuringInspect, pid)
 	}
 
 	return processIdentity{
