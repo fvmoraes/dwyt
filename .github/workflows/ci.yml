@@ -101,6 +101,7 @@ jobs:
         run: npm run build
 
       - name: Check embedded frontend is current
+        if: runner.os == 'Linux'
         run: git diff --exit-code -- core/internal/server/dashboard/dist
 
       - name: Vet
