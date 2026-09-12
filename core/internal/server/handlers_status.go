@@ -218,7 +218,8 @@ func (ds *DashboardServer) apiLogs(c *gin.Context) {
 	}
 
 	if service == "" || service == "codebase" {
-		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "cbmcp", "codebase", "http://127.0.0.1:9749/health", true)
+		logs["codebase-memory-mcp"] = pollLog("codebase-memory-mcp", "cbmcp", "codebase",
+			fmt.Sprintf("http://127.0.0.1:%d%s", status.CodebasePort(), codebaseHealthPath), true)
 	}
 	if service == "" || service == "headroom" {
 		logs["headroom"] = pollLog("headroom", "headroom", "headroom", fmt.Sprintf("http://127.0.0.1:%d/health", ds.headroomPort()), false)

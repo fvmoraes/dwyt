@@ -24,7 +24,6 @@ than copying them.
 
 - [Tokens saved and provenance](metrics/tokens-saved.md)
 - [Benchmarks and measurement policy](metrics/benchmarks.md)
-- [Acceptance scorecard](../plan/Melhorias_v5.0.x/baseline/scorecard.md)
 
 ## Operations and integrations
 

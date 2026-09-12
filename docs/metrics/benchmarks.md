@@ -44,7 +44,5 @@ Ubuntu CI documentation job.
 
 ## Acceptance evidence
 
-See the [scorecard](../../plan/Melhorias_v5.0.x/baseline/scorecard.md) and the
-captured [Phase 9 benchmark output](../../plan/Melhorias_v5.0.x/baseline/bench-pos-fase9.txt).
 Keep each number's provenance; do not turn counterfactual benchmark reductions into
 observed product savings.

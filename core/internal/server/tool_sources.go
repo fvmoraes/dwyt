@@ -158,8 +158,8 @@ func (ds *DashboardServer) applyToolSourceProcesses(previousSources map[string]t
 		next     toolProcessSpec
 	}{
 		{
-			previous: ds.toolProcessSpec("codebase", toolsource.ToolCodebase, previousSources, "/health", 9749, codebaseArgs...),
-			next:     ds.toolProcessSpec("codebase", toolsource.ToolCodebase, config.ToolSources, "/health", 9749, codebaseArgs...),
+			previous: ds.toolProcessSpec("codebase", toolsource.ToolCodebase, previousSources, codebaseHealthPath, 9749, codebaseArgs...),
+			next:     ds.toolProcessSpec("codebase", toolsource.ToolCodebase, config.ToolSources, codebaseHealthPath, 9749, codebaseArgs...),
 		},
 		{
 			previous: ds.toolProcessSpec("headroom", toolsource.ToolHeadroom, previousSources, "/health", port, "proxy", "--port", "{port}"),

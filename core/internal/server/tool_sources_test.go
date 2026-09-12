@@ -208,7 +208,7 @@ func startToolSourceTestServer(t *testing.T, headroomPath string) (*DashboardSer
 	runtimeState := state.Init(home)
 	runtimeState.SetToolSources(previousSources)
 	pm := procman.New(home)
-	pm.Register("codebase", toolsource.ManagedPath(binDir, toolsource.ToolCodebase), "/health", 9749, codebaseProcessArgs()...)
+	pm.Register("codebase", toolsource.ManagedPath(binDir, toolsource.ToolCodebase), codebaseHealthPath, 9749, codebaseProcessArgs()...)
 	pm.Register("headroom", headroomPath, "/health", port, "proxy", "--port", "{port}")
 	ds := &DashboardServer{
 		DwytBin:      binDir,
@@ -281,6 +281,10 @@ func TestToolSourceProcessHelper(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	// The codebase service liveness endpoint is the UI root, not /health.
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	if err := http.Serve(listener, mux); err != nil {

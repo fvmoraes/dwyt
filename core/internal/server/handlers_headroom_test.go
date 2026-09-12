@@ -220,6 +220,11 @@ func TestHeadroomStatsProxyHelper(t *testing.T) {
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
 	})
+	// The managed codebase service is probed on the UI root (CBM has no
+	// /health route), so the shared helper must answer there too.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	if err := http.Serve(listener, mux); err != nil {
 		t.Fatal(err)
 	}
