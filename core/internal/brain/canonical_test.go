@@ -3,6 +3,7 @@ package brain
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -327,12 +328,14 @@ func TestAtomicWriteFilePreservesExistingModeAndContent(t *testing.T) {
 	if err := atomicWriteFile(path, []byte("new complete content\n"), 0o644); err != nil {
 		t.Fatalf("atomicWriteFile() error = %v", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
-		t.Fatalf("mode = %#o, want %#o", got, want)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Fatalf("mode = %#o, want %#o", got, want)
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

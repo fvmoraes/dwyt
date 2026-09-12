@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -81,9 +82,24 @@ func replacePIDFile(source, target string) error {
 	if err != nil {
 		return err
 	}
-	return windows.MoveFileEx(
-		sourcePtr,
-		targetPtr,
-		windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH,
-	)
+
+	// A concurrent reader may have a short-lived handle that does not share
+	// delete access. Retrying the replace preserves atomic publication once the
+	// handle closes instead of treating normal polling as a permanent failure.
+	var moveErr error
+	const attempts = 20
+	for attempt := 0; attempt < attempts; attempt++ {
+		moveErr = windows.MoveFileEx(
+			sourcePtr,
+			targetPtr,
+			windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH,
+		)
+		if moveErr == nil || !errors.Is(moveErr, windows.ERROR_SHARING_VIOLATION) {
+			return moveErr
+		}
+		if attempt+1 < attempts {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	return moveErr
 }

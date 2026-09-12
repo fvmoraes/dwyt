@@ -57,12 +57,13 @@ func longRunningCmd() (string, []string) {
 	return "/bin/sleep", []string{"10"}
 }
 
-// echoCmd returns a short-lived process that writes to stdout.
+// echoCmd writes to stdout and remains alive until ProcessManager stops it, so
+// the PID record can be authenticated before the fixture exits.
 func echoCmd() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return windowsCmd(), []string{"/c", "echo hello world"}
+		return windowsCmd(), []string{"/c", "echo hello world & ping -n 11 127.0.0.1 >nul"}
 	}
-	return "/bin/sh", []string{"-c", "echo hello world"}
+	return "/bin/sh", []string{"-c", "echo hello world; sleep 10"}
 }
 
 // failingCmd returns a process that exits immediately with a non-zero code.

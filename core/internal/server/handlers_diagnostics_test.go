@@ -22,6 +22,7 @@ func diagTestStore(t *testing.T) *telemetry.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = st.Close() })
 	ts, err := telemetry.New(st.DB())
 	if err != nil {
 		t.Fatal(err)

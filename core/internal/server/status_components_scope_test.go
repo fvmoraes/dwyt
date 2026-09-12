@@ -30,6 +30,7 @@ func projectScopedStatusServer(t *testing.T) (*DashboardServer, string, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	for _, project := range []string{indexedProject, unindexedProject} {
 		if err := store.TouchProject(project); err != nil {
 			t.Fatal(err)

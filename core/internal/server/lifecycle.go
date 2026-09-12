@@ -198,10 +198,18 @@ func (ds *DashboardServer) Shutdown(ctx context.Context) error {
 	ds.shutdownStarted = true
 	ds.shutdownRequested = true
 	ds.lifecycleStopping = true
+	store := ds.Store
 	if !ds.lifecycleStarted {
+		ds.lifecycleMu.Unlock()
+		var shutdownErr error
+		if store != nil {
+			shutdownErr = closeDashboardStore(ctx, store.Close)
+		}
+		ds.lifecycleMu.Lock()
+		ds.shutdownErr = shutdownErr
 		close(ds.shutdownDone)
 		ds.lifecycleMu.Unlock()
-		return nil
+		return shutdownErr
 	}
 
 	cancel := ds.lifecycleCancel
@@ -258,6 +266,11 @@ func (ds *DashboardServer) Shutdown(ctx context.Context) error {
 	if err := waitDone(ctx, lifecycleDone, "lifecycle tasks"); err != nil {
 		shutdownErrs = append(shutdownErrs, err)
 	}
+	if store != nil {
+		if err := closeDashboardStore(ctx, store.Close); err != nil {
+			shutdownErrs = append(shutdownErrs, err)
+		}
+	}
 
 	shutdownErr := errors.Join(shutdownErrs...)
 	ds.lifecycleMu.Lock()
@@ -265,6 +278,37 @@ func (ds *DashboardServer) Shutdown(ctx context.Context) error {
 	close(ds.shutdownDone)
 	ds.lifecycleMu.Unlock()
 	return shutdownErr
+}
+
+// closeDashboardStore keeps Shutdown bounded when database/sql waits for an
+// in-flight query. The closer continues in the background if the caller's
+// deadline expires; no new shutdown work can reach the store after shutdown is
+// latched, and a late close failure is logged for diagnosis.
+func closeDashboardStore(ctx context.Context, closeStore func() error) error {
+	done := make(chan error, 1)
+	deadlineExpired := make(chan struct{})
+	go func() {
+		err := closeStore()
+		select {
+		case <-deadlineExpired:
+			if err != nil {
+				log.Warn("dashboard store close completed after shutdown deadline", log.Fields{"error": err.Error()})
+			}
+		default:
+		}
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("close dashboard store: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		close(deadlineExpired)
+		return fmt.Errorf("close dashboard store: %w", ctx.Err())
+	}
 }
 
 func (ds *DashboardServer) waitShutdownResult(ctx context.Context, done <-chan struct{}) error {

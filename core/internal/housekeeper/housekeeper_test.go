@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -529,12 +530,14 @@ func TestMarkStateIsAtomic(t *testing.T) {
 	if !strings.Contains(string(data), "state: stale") || !strings.Contains(string(data), "body line") {
 		t.Fatalf("state flip lost content: %s", data)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
-		t.Fatalf("mode = %#o, want %#o", got, want)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+			t.Fatalf("mode = %#o, want %#o", got, want)
+		}
 	}
 }
 
